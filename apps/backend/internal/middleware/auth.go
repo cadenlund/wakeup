@@ -86,8 +86,15 @@ func LoadUser(sm *scs.SessionManager, users UserLoader, writeError errorWriter) 
 			if err != nil {
 				if apierror.IsCode(err, apierror.CodeNotFound) {
 					// Session points at a soft-deleted user — drop the
-					// session so RequireAuth returns 401 cleanly.
-					_ = sm.Destroy(r.Context())
+					// session so RequireAuth returns 401 cleanly. If the
+					// destroy itself fails the stale user_id stays put
+					// and this branch keeps tripping on every request,
+					// so we surface the failure the same way as the
+					// malformed-ID path (CodeRabbit caught this on PR #27).
+					if destroyErr := sm.Destroy(r.Context()); destroyErr != nil {
+						writeError(w, r, apierror.Internal("destroy session").WithCause(destroyErr))
+						return
+					}
 					next.ServeHTTP(w, r)
 					return
 				}
