@@ -525,7 +525,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Creates a direct (` + "`" + `type=direct` + "`" + `, exactly 1 entry in ` + "`" + `member_ids` + "`" + `) or group (` + "`" + `type=group` + "`" + `, 1-24 entries in ` + "`" + `member_ids` + "`" + ` + ` + "`" + `name` + "`" + ` required). Direct creation deduplicates: if a direct between the same pair already exists, returns 200 with the existing row.",
+                "description": "Creates a direct (` + "`" + `type=direct` + "`" + `, exactly 1 entry in ` + "`" + `member_ids` + "`" + `) or group (` + "`" + `type=group` + "`" + `, 1-24 entries in ` + "`" + `member_ids` + "`" + ` + ` + "`" + `name` + "`" + ` required). Direct creation deduplicates: if a direct between the same pair already exists, the existing row is returned with 201.",
                 "consumes": [
                     "application/json"
                 ],
@@ -549,7 +549,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "201": {
-                        "description": "Created (or 200 if direct already existed — API uses 201 in both cases for simplicity)",
+                        "description": "Created (or returned existing direct on dedupe — same status either way)",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_http.ConversationResponse"
                         },
