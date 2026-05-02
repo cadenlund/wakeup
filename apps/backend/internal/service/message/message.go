@@ -349,9 +349,14 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, m d
 // CHECK is char_length-based (which counts code points, same as Go
 // `len([]rune)`); doing the same check here gives a friendlier error
 // without a DB round-trip.
+//
+// Length is measured against the ORIGINAL body, not the trimmed view —
+// the DB stores what the caller sent, and the schema CHECK runs against
+// that same untrimmed value. Trimming is only used to detect the
+// whitespace-only case so we surface REQUIRED instead of letting the
+// row insert succeed.
 func validateBody(body string) error {
-	body = strings.TrimSpace(body)
-	if body == "" {
+	if strings.TrimSpace(body) == "" {
 		return apierror.Validation([]apierror.FieldError{{
 			Field: "body", Code: "REQUIRED",
 			Message: "message body is required",

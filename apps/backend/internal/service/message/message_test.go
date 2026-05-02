@@ -180,6 +180,28 @@ func TestSend_OverlongBody(t *testing.T) {
 	}
 }
 
+// Regression: when the trimmed view fits but the raw body exceeds
+// MaxBodyLen, validation must reject before the DB CHECK does. Earlier
+// the rune count was taken AFTER TrimSpace, so a payload like
+// strings.Repeat("x", 10000) + " " (10001 raw, 10000 trimmed) would
+// pass validation and only blow up at the schema CHECK.
+func TestSend_OverlongBodyAfterRawCount(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	cid := makeDirect(ctx, t, st, a, b)
+
+	_, err := st.svc.Send(ctx, message.SendParams{
+		ConversationID: cid, Sender: a.ID,
+		Body: strings.Repeat("x", message.MaxBodyLen) + " ",
+	})
+	if asAPIError(t, err).Code != apierror.CodeValidation {
+		t.Errorf("Code = %q, want VALIDATION_FAILED", asAPIError(t, err).Code)
+	}
+}
+
 func TestSend_RejectsCrossConversationReply(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
