@@ -183,6 +183,10 @@ func TestRedis_CloseRejectsFurtherUse(t *testing.T) {
 	if err := b.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+	// Idempotent: a second Close must also succeed (matches InProc parity).
+	if err := b.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
 
 	ctx := context.Background()
 	if _, err := b.Subscribe(ctx, "ch"); !errors.Is(err, pubsub.ErrClosed) {
