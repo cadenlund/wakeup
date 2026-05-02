@@ -242,12 +242,56 @@ func TestIsCode(t *testing.T) {
 	if apierror.IsCode(notFound, apierror.CodeInternal) {
 		t.Error("wrong code should return false")
 	}
-	// Wrapped: errors.As walks the chain so IsCode finds the outer Code.
 	if !apierror.IsCode(wrapped, apierror.CodeInternal) {
 		t.Error("wrapped: should match outer Code")
 	}
+	// Inner *Error must also match — IsCode walks the chain so a service
+	// stacking Internal(...).WithCause(NotFound(...)) is searchable for both.
+	if !apierror.IsCode(wrapped, apierror.CodeNotFound) {
+		t.Error("wrapped: should match inner Code via chain walk")
+	}
 	if apierror.IsCode(errors.New("plain"), apierror.CodeNotFound) {
 		t.Error("non-apierror should return false")
+	}
+	// Stop on chain end: a code that doesn't appear anywhere returns false.
+	if apierror.IsCode(wrapped, apierror.CodeRateLimited) {
+		t.Error("absent code should return false")
+	}
+}
+
+func TestFromValidationErrors_PreservesNestedFieldPath(t *testing.T) {
+	t.Parallel()
+	v := validator.New()
+	type Address struct {
+		Street string `validate:"required"`
+	}
+	type Outer struct {
+		User struct {
+			Email string `validate:"required,email"`
+		}
+		Addr Address
+	}
+	bad := Outer{}
+	bad.User.Email = "not-an-email"
+
+	verr := v.Struct(bad)
+	var verrs validator.ValidationErrors
+	if !errors.As(verr, &verrs) {
+		t.Fatalf("expected ValidationErrors, got %T", verr)
+	}
+	apiErr := apierror.FromValidationErrors(verrs)
+
+	got := map[string]string{}
+	for _, f := range apiErr.Fields {
+		got[f.Field] = f.Code
+	}
+	// Namespace strips the top-level struct ("Outer.") so we get the same
+	// shape the wire envelope expects: "user.email", "addr.street".
+	if c, ok := got["user.email"]; !ok || c != "INVALID_FORMAT" {
+		t.Errorf("missing user.email or wrong code: %+v", got)
+	}
+	if c, ok := got["addr.street"]; !ok || c != "REQUIRED" {
+		t.Errorf("missing addr.street or wrong code: %+v", got)
 	}
 }
 

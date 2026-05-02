@@ -268,12 +268,30 @@ func FromValidationErrors(verrs validator.ValidationErrors) *Error {
 	fields := make([]FieldError, 0, len(verrs))
 	for _, fe := range verrs {
 		fields = append(fields, FieldError{
-			Field:   strings.ToLower(fe.Field()),
+			Field:   fieldPath(fe),
 			Code:    fieldErrorCodeForTag(fe.Tag()),
 			Message: validationMessage(fe),
 		})
 	}
 	return Validation(fields)
+}
+
+// fieldPath turns a validator.FieldError into the dot-path the FieldError
+// type documents — e.g. `user.email`, not just `email`. Namespace returns
+// the full path including the top-level struct name (e.g.
+// `RegisterRequest.Username`); we strip that prefix so the wire-side path
+// looks like the JSON shape, then lowercase to match §4.6 conventions.
+//
+// When milestone 3.6 lands the handler validator we'll register a
+// TagNameFunc so the JSON tag names take precedence over Go field names;
+// this helper keeps working unchanged in that case because Namespace already
+// honors the registered tag name.
+func fieldPath(fe validator.FieldError) string {
+	ns := fe.Namespace()
+	if idx := strings.IndexByte(ns, '.'); idx >= 0 {
+		ns = ns[idx+1:]
+	}
+	return strings.ToLower(ns)
 }
 
 func fieldErrorCodeForTag(tag string) string {
@@ -328,9 +346,23 @@ func validationMessage(fe validator.FieldError) string {
 
 // --- helpers --------------------------------------------------------------
 
-// IsCode reports whether err (or any error in its chain) is an *Error with
-// the given Code. Useful for assertions in tests / branching in services.
+// IsCode reports whether err — or any *Error wrapped anywhere in its chain —
+// has the given Code. Useful for assertions in tests / branching in services.
+//
+// errors.As alone only finds the OUTERMOST *Error, so if a service stacks
+// Internal("...").WithCause(NotFound("x")) we'd miss the inner CodeNotFound.
+// This helper walks the chain manually and checks each *Error link in turn.
 func IsCode(err error, code Code) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Code == code
+	for err != nil {
+		var e *Error
+		if errors.As(err, &e) {
+			if e.Code == code {
+				return true
+			}
+			err = e.Unwrap()
+			continue
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
 }
