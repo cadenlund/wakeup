@@ -1,0 +1,372 @@
+// Package message is the service layer for messages, attachments link,
+// and read receipts. Composes the message + conversation repos plus a
+// pubsub broker so each Send / Edit / Delete fans out to whatever
+// websocket subscribers are listening on the conversation channel
+// (§4.5 — `conv:<id>:messages`).
+//
+// Send is transactional: Create + AddAttachment(s) + TouchLastMessageAt
+// commit together so a partial failure can't leave a message without
+// its attachment link or with a stale conversation timestamp. The
+// pubsub publish runs OUTSIDE the transaction so a broker outage can't
+// roll back a successful insert.
+package message
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
+	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
+	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
+	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
+)
+
+// MaxBodyLen mirrors §4.6 — schema CHECK enforces it too. Service-layer
+// guard avoids hitting the DB on a known-bad input.
+const MaxBodyLen = 10000
+
+// Service is the message service.
+type Service struct {
+	pool   *pgxpool.Pool // for the Send transaction
+	msgs   *msgrepo.Queries
+	convs  *convrepo.Queries
+	broker pubsub.Broker
+	logger *slog.Logger
+}
+
+// Config builds the service. Broker may be nil — in that case Send /
+// Edit / Delete still succeed; pubsub publish becomes a no-op (useful
+// in tests that don't care about WS fan-out).
+type Config struct {
+	Pool   *pgxpool.Pool
+	Msgs   *msgrepo.Queries
+	Convs  *convrepo.Queries
+	Broker pubsub.Broker
+	Logger *slog.Logger
+}
+
+// New constructs the service.
+func New(cfg Config) (*Service, error) {
+	if cfg.Pool == nil {
+		return nil, errors.New("message: Config.Pool is required")
+	}
+	if cfg.Msgs == nil {
+		return nil, errors.New("message: Config.Msgs is required")
+	}
+	if cfg.Convs == nil {
+		return nil, errors.New("message: Config.Convs is required")
+	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Service{
+		pool: cfg.Pool, msgs: cfg.Msgs, convs: cfg.Convs,
+		broker: cfg.Broker, logger: logger,
+	}, nil
+}
+
+// SendParams is the input to Send.
+type SendParams struct {
+	ConversationID   uuid.UUID
+	Sender           uuid.UUID
+	Body             string
+	AttachmentIDs    []uuid.UUID
+	ReplyToMessageID *uuid.UUID
+}
+
+// SendResult is what callers need after a successful Send.
+type SendResult struct {
+	Message     domain.Message
+	Attachments []uuid.UUID
+}
+
+// Send creates a new message in a conversation.
+//
+// Atomicity: Create + AddAttachment(s) + TouchLastMessageAt run inside
+// one transaction. If any step fails, the whole thing rolls back —
+// no half-created message, no stale last_message_at.
+func (s *Service) Send(ctx context.Context, p SendParams) (SendResult, error) {
+	if err := validateBody(p.Body); err != nil {
+		return SendResult{}, err
+	}
+	if _, err := s.convs.GetMember(ctx, p.ConversationID, p.Sender); err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return SendResult{}, apierror.NotFound("conversation")
+		}
+		return SendResult{}, apierror.Internal("get member").WithCause(err)
+	}
+	if p.ReplyToMessageID != nil {
+		// Validate the reply target exists and belongs to the same
+		// conversation. Crossing conversations would be a data leak.
+		ref, err := s.msgs.GetByID(ctx, *p.ReplyToMessageID)
+		if err != nil {
+			if errors.Is(err, msgrepo.ErrNotFound) {
+				return SendResult{}, apierror.Validation([]apierror.FieldError{{
+					Field: "reply_to_message_id", Code: "INVALID_VALUE",
+					Message: "reply target not found",
+				}})
+			}
+			return SendResult{}, apierror.Internal("get reply target").WithCause(err)
+		}
+		if ref.ConversationID != p.ConversationID {
+			return SendResult{}, apierror.Validation([]apierror.FieldError{{
+				Field: "reply_to_message_id", Code: "INVALID_VALUE",
+				Message: "reply target is in a different conversation",
+			}})
+		}
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return SendResult{}, apierror.Internal("begin tx").WithCause(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	msgs := s.msgs.WithTx(tx)
+	convs := s.convs.WithTx(tx)
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		return SendResult{}, apierror.Internal("uuid").WithCause(err)
+	}
+	created, err := msgs.Create(ctx, msgrepo.CreateParams{
+		ID: id, ConversationID: p.ConversationID, SenderID: p.Sender,
+		Body: p.Body, ReplyToMessageID: p.ReplyToMessageID,
+	})
+	if err != nil {
+		return SendResult{}, apierror.Internal("create message").WithCause(err)
+	}
+	for _, attID := range p.AttachmentIDs {
+		if err := msgs.AddAttachment(ctx, created.ID, attID); err != nil {
+			return SendResult{}, apierror.Internal("add attachment").WithCause(err)
+		}
+	}
+	if err := convs.TouchLastMessageAt(ctx, p.ConversationID, created.CreatedAt); err != nil {
+		return SendResult{}, apierror.Internal("touch last_message_at").WithCause(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SendResult{}, apierror.Internal("commit").WithCause(err)
+	}
+
+	s.publishMessageEvent(ctx, "message.created", created)
+	return SendResult{Message: created, Attachments: append([]uuid.UUID(nil), p.AttachmentIDs...)}, nil
+}
+
+// EditParams is the input to Edit.
+type EditParams struct {
+	Actor     uuid.UUID
+	MessageID uuid.UUID
+	Body      string
+}
+
+// Edit updates the body of an existing message. Owner-only; Forbidden
+// otherwise. Refuses on already-deleted rows.
+func (s *Service) Edit(ctx context.Context, p EditParams) (domain.Message, error) {
+	if err := validateBody(p.Body); err != nil {
+		return domain.Message{}, err
+	}
+	current, err := s.msgs.GetByID(ctx, p.MessageID)
+	if err != nil {
+		if errors.Is(err, msgrepo.ErrNotFound) {
+			return domain.Message{}, apierror.NotFound("message")
+		}
+		return domain.Message{}, apierror.Internal("get message").WithCause(err)
+	}
+	if current.SenderID != p.Actor {
+		return domain.Message{}, apierror.Forbidden("only the sender can edit this message")
+	}
+	updated, err := s.msgs.UpdateBody(ctx, p.MessageID, p.Body)
+	if err != nil {
+		if errors.Is(err, msgrepo.ErrNotFound) {
+			return domain.Message{}, apierror.NotFound("message")
+		}
+		return domain.Message{}, apierror.Internal("update body").WithCause(err)
+	}
+	s.publishMessageEvent(ctx, "message.edited", updated)
+	return updated, nil
+}
+
+// Delete soft-deletes a message. Permitted to:
+//   - the sender, OR
+//   - an admin of the conversation
+//
+// Idempotent — re-deleting a soft-deleted row is a no-op.
+func (s *Service) Delete(ctx context.Context, actor, messageID uuid.UUID) error {
+	current, err := s.msgs.GetByIDIncludingDeleted(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, msgrepo.ErrNotFound) {
+			return apierror.NotFound("message")
+		}
+		return apierror.Internal("get message").WithCause(err)
+	}
+	if current.IsDeleted() {
+		// Already deleted — idempotent success.
+		return nil
+	}
+	if current.SenderID != actor {
+		// Maybe a conversation admin: look up actor's role.
+		member, err := s.convs.GetMember(ctx, current.ConversationID, actor)
+		if err != nil {
+			if errors.Is(err, convrepo.ErrNotFound) {
+				return apierror.Forbidden("only the sender or a group admin can delete this message")
+			}
+			return apierror.Internal("get member").WithCause(err)
+		}
+		if !member.IsAdmin() {
+			return apierror.Forbidden("only the sender or a group admin can delete this message")
+		}
+	}
+	if err := s.msgs.SoftDelete(ctx, messageID); err != nil {
+		return apierror.Internal("soft delete").WithCause(err)
+	}
+	s.publishMessageEvent(ctx, "message.deleted", current)
+	return nil
+}
+
+// ListParams is the input to List.
+type ListParams struct {
+	Actor          uuid.UUID
+	ConversationID uuid.UUID
+	Cursor         *pagination.Cursor
+	Limit          int
+	Query          string
+}
+
+// ListResult is the paginated payload returned by List.
+type ListResult struct {
+	Messages   []domain.Message
+	NextCursor *string
+	HasMore    bool
+}
+
+// List returns messages from a conversation the caller is a member of.
+// Soft-deleted rows are included so the §4.6 placeholder can render —
+// the handler-side DTO converter blanks the body.
+func (s *Service) List(ctx context.Context, p ListParams) (ListResult, error) {
+	if _, err := s.convs.GetMember(ctx, p.ConversationID, p.Actor); err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return ListResult{}, apierror.NotFound("conversation")
+		}
+		return ListResult{}, apierror.Internal("get member").WithCause(err)
+	}
+	overFetched, err := s.msgs.ListByConversation(ctx, msgrepo.ListByConversationParams{
+		ConversationID: p.ConversationID, Cursor: p.Cursor, Limit: p.Limit, Query: p.Query,
+	})
+	if err != nil {
+		return ListResult{}, apierror.Internal("list messages").WithCause(err)
+	}
+	data, next, hasMore := pagination.Page(overFetched, p.Limit, func(m domain.Message) pagination.Cursor {
+		return pagination.Cursor{Timestamp: m.CreatedAt, ID: m.ID}
+	})
+	return ListResult{Messages: data, NextCursor: next, HasMore: hasMore}, nil
+}
+
+// MarkRead stamps a (message_id, user_id) read row. Caller must be a
+// member of the message's conversation.
+func (s *Service) MarkRead(ctx context.Context, actor, messageID uuid.UUID) error {
+	m, err := s.msgs.GetByIDIncludingDeleted(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, msgrepo.ErrNotFound) {
+			return apierror.NotFound("message")
+		}
+		return apierror.Internal("get message").WithCause(err)
+	}
+	if _, err := s.convs.GetMember(ctx, m.ConversationID, actor); err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return apierror.NotFound("message")
+		}
+		return apierror.Internal("get member").WithCause(err)
+	}
+	if err := s.msgs.MarkRead(ctx, messageID, actor); err != nil {
+		return apierror.Internal("mark read").WithCause(err)
+	}
+	return nil
+}
+
+// ListReads returns who has read the message. Caller must be a member
+// of the message's conversation.
+func (s *Service) ListReads(ctx context.Context, actor, messageID uuid.UUID) ([]domain.MessageRead, error) {
+	m, err := s.msgs.GetByIDIncludingDeleted(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, msgrepo.ErrNotFound) {
+			return nil, apierror.NotFound("message")
+		}
+		return nil, apierror.Internal("get message").WithCause(err)
+	}
+	if _, err := s.convs.GetMember(ctx, m.ConversationID, actor); err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return nil, apierror.NotFound("message")
+		}
+		return nil, apierror.Internal("get member").WithCause(err)
+	}
+	reads, err := s.msgs.ListReadsForMessage(ctx, messageID)
+	if err != nil {
+		return nil, apierror.Internal("list reads").WithCause(err)
+	}
+	return reads, nil
+}
+
+// publishMessageEvent fires-and-forgets a pubsub event on the
+// `conv:<id>:messages` channel. The broker is optional — when nil
+// (e.g. tests that don't care about WS fan-out), this is a no-op.
+// Errors are logged at debug level: a broker outage can't undo an
+// already-committed insert.
+func (s *Service) publishMessageEvent(ctx context.Context, eventType string, m domain.Message) {
+	if s.broker == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type":            eventType,
+		"message_id":      m.ID,
+		"conversation_id": m.ConversationID,
+		"sender_id":       m.SenderID,
+		"created_at":      m.CreatedAt,
+	})
+	if err != nil {
+		s.logger.Warn("message: marshal event", slog.String("error", err.Error()))
+		return
+	}
+	channel := fmt.Sprintf("conv:%s:messages", m.ConversationID)
+	if err := s.broker.Publish(ctx, channel, payload); err != nil {
+		s.logger.Warn("message: publish event",
+			slog.String("channel", channel),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
+// validateBody enforces the §4.6 1-10000 rune-count rule. The schema
+// CHECK is char_length-based (which counts code points, same as Go
+// `len([]rune)`); doing the same check here gives a friendlier error
+// without a DB round-trip.
+func validateBody(body string) error {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return apierror.Validation([]apierror.FieldError{{
+			Field: "body", Code: "REQUIRED",
+			Message: "message body is required",
+		}})
+	}
+	// Postgres char_length counts code points; we mirror with rune count.
+	runes := 0
+	for range body {
+		runes++
+	}
+	if runes > MaxBodyLen {
+		return apierror.Validation([]apierror.FieldError{{
+			Field: "body", Code: "TOO_LONG",
+			Message: fmt.Sprintf("message body must be at most %d characters", MaxBodyLen),
+		}})
+	}
+	return nil
+}
