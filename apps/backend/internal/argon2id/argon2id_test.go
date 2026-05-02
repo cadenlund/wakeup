@@ -100,6 +100,23 @@ func TestVerify_RejectsEmptyHash(t *testing.T) {
 // Hash output should be unique for the same input (each call generates a
 // fresh salt). This guards against an accidental refactor that turns Hash
 // into a deterministic function.
+// Params() must return a defensive copy. Mutating what the accessor returns
+// must not change the parameters subsequent Hash calls use.
+func TestParams_AccessorReturnsCopy(t *testing.T) {
+	t.Parallel()
+	got := argon2id.Params()
+	if got.Memory != 64*1024 || got.Iterations != 3 || got.Parallelism != 2 ||
+		got.SaltLength != 16 || got.KeyLength != 32 {
+		t.Fatalf("Params() returned unexpected values: %+v", got)
+	}
+	// Mutating the returned struct must NOT change the package state.
+	got.Memory = 1
+	got2 := argon2id.Params()
+	if got2.Memory != 64*1024 {
+		t.Fatalf("Params() leaked the underlying pointer: got2.Memory = %d", got2.Memory)
+	}
+}
+
 func TestHash_UsesFreshSaltPerCall(t *testing.T) {
 	t.Parallel()
 	a, err := argon2id.Hash("same")

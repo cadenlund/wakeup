@@ -18,12 +18,14 @@ import (
 // "" is a sign of mis-wired plumbing.
 var ErrEmptyPassword = errors.New("argon2id: password is empty")
 
-// Params is the locked argon2id parameter set used by every Hash call.
+// params holds the locked argon2id parameter set used by every Hash call.
 // Tuned for ~50ms per hash on commodity hardware (sufficient for an
-// online-login workload). Re-tuning requires deciding how to handle
-// previously-hashed passwords — verification still works against any
-// argon2id parameter set, so old hashes remain valid.
-var Params = &axe.Params{
+// online-login workload). Unexported so callers cannot weaken the cost at
+// runtime — the "locked" promise in §8.1 has to actually be locked.
+// Re-tuning is a code change, paired with a decision on rehash policy
+// (verification still works against any argon2id parameter set, so old
+// hashes remain valid even after a tuning bump).
+var params = &axe.Params{
 	Memory:      64 * 1024, // 64 MiB
 	Iterations:  3,
 	Parallelism: 2,
@@ -31,13 +33,20 @@ var Params = &axe.Params{
 	KeyLength:   32,
 }
 
-// Hash returns an encoded argon2id hash for password using the locked Params.
+// Params returns a defensive copy of the locked argon2id parameter set so
+// callers can read the values (e.g. for logging "configured params" at
+// boot) without being able to mutate the original.
+func Params() axe.Params {
+	return *params
+}
+
+// Hash returns an encoded argon2id hash for password using the locked params.
 // Refuses empty input with ErrEmptyPassword.
 func Hash(password string) (string, error) {
 	if password == "" {
 		return "", ErrEmptyPassword
 	}
-	h, err := axe.CreateHash(password, Params)
+	h, err := axe.CreateHash(password, params)
 	if err != nil {
 		return "", fmt.Errorf("argon2id: hash: %w", err)
 	}
