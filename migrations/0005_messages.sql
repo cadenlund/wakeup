@@ -3,14 +3,15 @@ CREATE TABLE messages (
     id                  uuid PRIMARY KEY,
     conversation_id     uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id           uuid NOT NULL REFERENCES users(id),
-    body                text NOT NULL,
+    body                text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 10000),    -- mirrors §4.6 field limits
     body_tsv            tsvector GENERATED ALWAYS AS (to_tsvector('english', body)) STORED,
     reply_to_message_id uuid REFERENCES messages(id),
     created_at          timestamptz NOT NULL DEFAULT now(),
     edited_at           timestamptz,
     deleted_at          timestamptz
 );
-CREATE INDEX messages_conv_created_idx ON messages (conversation_id, created_at DESC);
+-- (created_at DESC, id DESC) covers the keyset-pagination tie-breaker per §6.4.
+CREATE INDEX messages_conv_created_idx ON messages (conversation_id, created_at DESC, id DESC);
 CREATE INDEX messages_body_tsv_idx ON messages USING gin (body_tsv);
 
 -- Now that `messages` exists, attach the FK that 0004_conversations.sql

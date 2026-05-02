@@ -5,7 +5,7 @@ CREATE TABLE attachments (
     storage_key  text NOT NULL,
     filename     text NOT NULL,
     content_type text NOT NULL,
-    size_bytes   bigint NOT NULL CHECK (size_bytes >= 0),
+    size_bytes   bigint NOT NULL CHECK (size_bytes >= 1),
     created_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX attachments_uploader_idx ON attachments (uploader_id);

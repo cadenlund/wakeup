@@ -5,9 +5,9 @@
 
 -- +goose Up
 CREATE TABLE idempotency_keys (
-    key             text NOT NULL CHECK (char_length(key) <= 255),                    -- client-supplied UUID v7 (or any unique string ≤ 255 chars)
-    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,             -- key is scoped per user
-    request_hash    bytea NOT NULL,                                                   -- sha256(method + path + body)
+    key             text NOT NULL CHECK (char_length(key) BETWEEN 1 AND 255),         -- client-supplied UUID v7 (or any unique string of 1..255 chars)
+    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,              -- key is scoped per user
+    request_hash    bytea NOT NULL CHECK (octet_length(request_hash) = 32),            -- sha256(method + path + body); SHA-256 = 32 bytes
     response_status int NOT NULL,
     response_body   bytea NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now(),

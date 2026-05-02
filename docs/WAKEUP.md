@@ -883,14 +883,14 @@ CREATE TABLE messages (
     id                   uuid PRIMARY KEY,
     conversation_id      uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id            uuid NOT NULL REFERENCES users(id),
-    body                 text NOT NULL,
+    body                 text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 10000),  -- mirrors §4.6
     body_tsv             tsvector GENERATED ALWAYS AS (to_tsvector('english', body)) STORED,
     reply_to_message_id  uuid REFERENCES messages(id),
     created_at           timestamptz NOT NULL DEFAULT now(),
     edited_at            timestamptz,
     deleted_at           timestamptz
 );
-CREATE INDEX messages_conv_created_idx ON messages (conversation_id, created_at DESC);
+CREATE INDEX messages_conv_created_idx ON messages (conversation_id, created_at DESC, id DESC);
 CREATE INDEX messages_body_tsv_idx ON messages USING gin (body_tsv);
 
 -- Now that `messages` exists, attach the FK that 0004 couldn't (forward ref).
@@ -921,7 +921,7 @@ CREATE TABLE attachments (
     storage_key   text NOT NULL,
     filename      text NOT NULL,
     content_type  text NOT NULL,
-    size_bytes    bigint NOT NULL CHECK (size_bytes >= 0),
+    size_bytes    bigint NOT NULL CHECK (size_bytes >= 1),                            -- mirrors §4.6 (1..50 MiB)
     created_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX attachments_uploader_idx ON attachments (uploader_id);
@@ -994,9 +994,9 @@ CREATE INDEX audit_log_actor_idx ON audit_log (actor_id);
 -- Caches the response body for write requests carrying an Idempotency-Key header.
 -- See §4.9 for middleware semantics.
 CREATE TABLE idempotency_keys (
-    key             text NOT NULL CHECK (char_length(key) <= 255),                   -- client-supplied UUID v7 (or any unique string ≤ 255 chars)
-    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,            -- key is scoped per user
-    request_hash    bytea NOT NULL,                                                  -- sha256(method + path + body)
+    key             text NOT NULL CHECK (char_length(key) BETWEEN 1 AND 255),        -- client-supplied UUID v7 (or any unique string of 1..255 chars)
+    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,             -- key is scoped per user
+    request_hash    bytea NOT NULL CHECK (octet_length(request_hash) = 32),           -- sha256(method + path + body); SHA-256 = 32 bytes
     response_status int NOT NULL,
     response_body   bytea NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now(),
