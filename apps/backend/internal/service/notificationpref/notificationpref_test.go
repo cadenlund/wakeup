@@ -1,0 +1,222 @@
+package notificationpref_test
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
+	repo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
+	"github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
+	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
+)
+
+// makeUser inserts a user via raw SQL — same trick as the repo tests, to
+// satisfy the FK without dragging in the user repository's fixtures.
+func makeUser(ctx context.Context, t *testing.T, pool *pgxpool.Pool) uuid.UUID {
+	t.Helper()
+	id := uuid.Must(uuid.NewV7())
+	full := strings.ReplaceAll(id.String(), "-", "")
+	_, err := pool.Exec(ctx, `
+		INSERT INTO users (id, username, display_name, email, password_hash)
+		VALUES ($1, $2, 'T', $3, 'h')
+	`, id, "u"+full, full+"@x.test")
+	if err != nil {
+		t.Fatalf("makeUser: %v", err)
+	}
+	return id
+}
+
+type stack struct {
+	svc  *notificationpref.Service
+	pool *pgxpool.Pool
+}
+
+func newStack(t *testing.T) *stack {
+	t.Helper()
+	pool := testutil.NewTestDB(t)
+	svc, err := notificationpref.New(notificationpref.Config{
+		Prefs: repo.New(pool),
+	})
+	if err != nil {
+		t.Fatalf("notificationpref.New: %v", err)
+	}
+	return &stack{svc: svc, pool: pool}
+}
+
+func asAPIError(t *testing.T, err error) *apierror.Error {
+	t.Helper()
+	var ae *apierror.Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *apierror.Error, got %T: %v", err, err)
+	}
+	return ae
+}
+
+// --- GetForUser ----------------------------------------------------------
+
+func TestGetForUser_DefaultsAllTrueOnFirstCall(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	got, err := st.svc.GetForUser(ctx, uid)
+	if err != nil {
+		t.Fatalf("GetForUser: %v", err)
+	}
+	if got.UserID != uid {
+		t.Errorf("UserID mismatch")
+	}
+	if !got.DirectMessages || !got.GroupMessages || !got.FriendRequests || !got.Calls {
+		t.Errorf("expected all defaults true, got %+v", got)
+	}
+}
+
+func TestGetForUser_IsIdempotent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	// Mutate after first call; second call must NOT clobber back to defaults.
+	if _, err := st.svc.GetForUser(ctx, uid); err != nil {
+		t.Fatalf("first GetForUser: %v", err)
+	}
+	off := false
+	if _, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID: uid, Calls: &off,
+	}); err != nil {
+		t.Fatalf("UpdateForUser: %v", err)
+	}
+	again, err := st.svc.GetForUser(ctx, uid)
+	if err != nil {
+		t.Fatalf("second GetForUser: %v", err)
+	}
+	if again.Calls {
+		t.Errorf("GetForUser clobbered patched Calls=false back to true")
+	}
+}
+
+// --- UpdateForUser -------------------------------------------------------
+
+func TestUpdateForUser_AutoCreatesRowOnFirstCall(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	// Brand-new user — no row in notification_preferences yet. The service
+	// must create it via GetOrCreate before patching.
+	off := false
+	got, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID:         uid,
+		FriendRequests: &off,
+	})
+	if err != nil {
+		t.Fatalf("UpdateForUser: %v", err)
+	}
+	if got.FriendRequests {
+		t.Errorf("FriendRequests should be false, got true")
+	}
+	// Untouched fields keep the schema-default true.
+	if !got.DirectMessages || !got.GroupMessages || !got.Calls {
+		t.Errorf("untouched fields changed: %+v", got)
+	}
+}
+
+func TestUpdateForUser_PartialPreservesUntouched(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	off := false
+	if _, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID: uid, DirectMessages: &off,
+	}); err != nil {
+		t.Fatalf("first UpdateForUser: %v", err)
+	}
+	// Toggle a different field — the previous DirectMessages=false must survive.
+	got, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID: uid, GroupMessages: &off,
+	})
+	if err != nil {
+		t.Fatalf("second UpdateForUser: %v", err)
+	}
+	if got.DirectMessages {
+		t.Errorf("DirectMessages clobbered back to true")
+	}
+	if got.GroupMessages {
+		t.Errorf("GroupMessages should be false")
+	}
+}
+
+func TestUpdateForUser_AllFields(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	off := false
+	got, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID:         uid,
+		DirectMessages: &off,
+		GroupMessages:  &off,
+		FriendRequests: &off,
+		Calls:          &off,
+	})
+	if err != nil {
+		t.Fatalf("UpdateForUser: %v", err)
+	}
+	if got.DirectMessages || got.GroupMessages || got.FriendRequests || got.Calls {
+		t.Errorf("expected all false, got %+v", got)
+	}
+}
+
+func TestUpdateForUser_NoFieldsIsNoOp(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	// Empty patch — service should still ensure-and-return the row at defaults.
+	got, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{UserID: uid})
+	if err != nil {
+		t.Fatalf("UpdateForUser empty: %v", err)
+	}
+	if !got.DirectMessages || !got.GroupMessages || !got.FriendRequests || !got.Calls {
+		t.Errorf("empty patch shouldn't mutate; got %+v", got)
+	}
+}
+
+// --- New() validation ---------------------------------------------------
+
+func TestNew_RejectsNilPrefs(t *testing.T) {
+	t.Parallel()
+	if _, err := notificationpref.New(notificationpref.Config{}); err == nil {
+		t.Error("expected error for nil Prefs")
+	}
+}
+
+// --- error mapping -------------------------------------------------------
+
+// canceledCtx error path: a canceled context surfaces from pgx as a
+// non-ErrNotFound error, and the service should wrap it as Internal.
+func TestGetForUser_WrapsErrorsAsInternal(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := st.svc.GetForUser(ctx, uuid.New())
+	if err == nil {
+		t.Fatal("expected error from canceled context")
+	}
+	if asAPIError(t, err).Code != apierror.CodeInternal {
+		t.Errorf("Code = %q, want INTERNAL", asAPIError(t, err).Code)
+	}
+}
