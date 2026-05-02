@@ -1035,6 +1035,191 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/conversations/{id}/messages": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns a page of messages in the conversation keyset-paginated by ` + "`" + `created_at DESC, id DESC` + "`" + ` per §6.4. Soft-deleted rows are included so the §4.6 placeholder can render — ` + "`" + `body` + "`" + ` is blanked and ` + "`" + `is_deleted=true` + "`" + ` so the client can render \"this message was deleted\" without leaking the original text.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "List messages in a conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "example": 20,
+                        "description": "Page size (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0=\"",
+                        "description": "Opaque pagination cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"hello\"",
+                        "description": "Full-text search query (Postgres ` + "`" + `plainto_tsquery('english', q)` + "`" + `)",
+                        "name": "q",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Page of messages",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.MessageListResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id, limit, or cursor",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller is not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Creates a new message in the conversation. The caller must be a member. ` + "`" + `attachment_ids` + "`" + ` link previously-uploaded attachments; ` + "`" + `reply_to_message_id` + "`" + ` must live in the same conversation (cross-conversation replies are rejected at 422). On success, fans out a ` + "`" + `message.created` + "`" + ` event on ` + "`" + `conv:\u003cid\u003e:messages` + "`" + ` per §4.5.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "Send a message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Message payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.SendMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created message",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.MessageResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON / id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller is not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed (empty/overlong body, cross-conv reply, missing reply target)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/conversations/{id}/read": {
             "post": {
                 "security": [
@@ -1754,6 +1939,250 @@ const docTemplate = `{
                         "description": "ok",
                         "schema": {
                             "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/messages/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Soft-deletes a message. Allowed for the original sender or for an admin of the conversation. The row stays in history with ` + "`" + `is_deleted=true` + "`" + ` and ` + "`" + `body` + "`" + ` blanked at the wire (§4.6 placeholder rendering). Idempotent: re-deleting an already-deleted message returns 204.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "Delete a message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Message id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Caller is neither the sender nor a conversation admin",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Message not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Updates the body of an existing message. Caller must be the original sender; otherwise 403. Refuses on already-deleted rows (404). On success, stamps ` + "`" + `edited_at` + "`" + ` and fans out a ` + "`" + `message.edited` + "`" + ` event.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "Edit a message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Message id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Edit payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.EditMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated message",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.MessageResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON / id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Caller is not the message's sender",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Message not found or already deleted",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/messages/{id}/reads": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns who has marked the message as read, newest read first. Caller must be a member of the message's conversation; otherwise 404.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "messages"
+                ],
+                "summary": "List read receipts for a message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Message id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Read receipts",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.MessageReadsResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Message not found or caller not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
                         }
                     }
                 }
@@ -2494,6 +2923,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.EditMessageRequest": {
+            "type": "object",
+            "required": [
+                "body"
+            ],
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "example": "updated body"
+                }
+            }
+        },
         "internal_handler_http.ErrorBody": {
             "type": "object",
             "properties": {
@@ -2700,6 +3143,90 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.MessageListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.MessageResponse"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "next_cursor": {
+                    "type": "string",
+                    "example": "eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="
+                }
+            }
+        },
+        "internal_handler_http.MessageReadRow": {
+            "type": "object",
+            "properties": {
+                "read_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:43:11.221Z"
+                },
+                "user_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
+        "internal_handler_http.MessageReadsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.MessageReadRow"
+                    }
+                }
+            }
+        },
+        "internal_handler_http.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "example": "hello world"
+                },
+                "conversation_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "deleted_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:44:00.000Z"
+                },
+                "edited_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:43:11.221Z"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "is_deleted": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "reply_to_message_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "sender_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
         "internal_handler_http.NotificationPreferencesResponse": {
             "type": "object",
             "properties": {
@@ -2808,6 +3335,34 @@ const docTemplate = `{
                     "maxLength": 32,
                     "minLength": 3,
                     "example": "baron"
+                }
+            }
+        },
+        "internal_handler_http.SendMessageRequest": {
+            "type": "object",
+            "required": [
+                "body"
+            ],
+            "properties": {
+                "attachment_ids": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                    ]
+                },
+                "body": {
+                    "type": "string",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "example": "hello world"
+                },
+                "reply_to_message_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
                 }
             }
         },

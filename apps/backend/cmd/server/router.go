@@ -23,6 +23,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
+	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 
@@ -48,10 +49,12 @@ type routerDeps struct {
 	NotifPrefSvc        *notifprefsvc.Service
 	FriendSvc           *friendsvc.Service
 	ConvSvc             *convsvc.Service
+	MsgSvc              *msgsvc.Service
 	UserHandler         *httpapi.UserHandler
 	AuthHandler         *httpapi.AuthHandler
 	FriendHandler       *httpapi.FriendHandler
 	ConversationHandler *httpapi.ConversationHandler
+	MessageHandler      *httpapi.MessageHandler
 
 	// Rate-limit tier overrides. Zero values fall back to the
 	// production §8.3 defaults (10/min auth, 60/min writes, 300/min
@@ -97,8 +100,8 @@ func resolveTier(override, fallback rateLimitTier) rateLimitTier {
 func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
-		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil ||
-		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil {
+		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil ||
+		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
 
@@ -181,6 +184,9 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Post("/v1/conversations/{id}/members", d.ConversationHandler.AddMembers)
 				r.Delete("/v1/conversations/{id}/members/{user_id}", d.ConversationHandler.RemoveMember)
 				r.Post("/v1/conversations/{id}/read", d.ConversationHandler.MarkRead)
+				r.Post("/v1/conversations/{id}/messages", d.MessageHandler.Send)
+				r.Patch("/v1/messages/{id}", d.MessageHandler.Edit)
+				r.Delete("/v1/messages/{id}", d.MessageHandler.Delete)
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RateLimit(mw.RateLimitConfig{
@@ -196,6 +202,8 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Get("/v1/friends/requests", d.FriendHandler.ListRequests)
 				r.Get("/v1/conversations", d.ConversationHandler.List)
 				r.Get("/v1/conversations/{id}", d.ConversationHandler.Get)
+				r.Get("/v1/conversations/{id}/messages", d.MessageHandler.List)
+				r.Get("/v1/messages/{id}/reads", d.MessageHandler.ListReads)
 			})
 		})
 	})

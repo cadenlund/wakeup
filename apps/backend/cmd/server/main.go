@@ -29,15 +29,18 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/log"
 	"github.com/cadenlund/wakeup/apps/backend/internal/mailer"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
+	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
+	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
@@ -109,6 +112,12 @@ func run() error {
 	prefsRepo := notifprefrepo.New(pool)
 	friendsRepo := friendrepo.New(pool)
 	convsRepo := convrepo.New(pool)
+	msgsRepo := msgrepo.New(pool)
+
+	// Pubsub broker (§4.5). Production wires Redis pubsub so events fan
+	// out across replicas; the broker's Close runs on the way down.
+	broker := pubsub.NewRedis(redisClient)
+	defer func() { _ = broker.Close() }()
 
 	// §8.2 locks Cookie.Secure=true in production. Local/test envs run
 	// over plain HTTP (`just dev`), so the browser would refuse to send
@@ -141,6 +150,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("conversation service: %w", err)
 	}
+	messageSvc, err := msgsvc.New(msgsvc.Config{
+		Pool: pool, Msgs: msgsRepo, Convs: convsRepo, Broker: broker, Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("message service: %w", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -159,6 +174,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("conversation handler: %w", err)
 	}
+	messageHandler, err := httpapi.NewMessageHandler(messageSvc, authSvc, v)
+	if err != nil {
+		return fmt.Errorf("message handler: %w", err)
+	}
 
 	router, err := buildRouter(routerDeps{
 		Cfg:                 cfg,
@@ -172,10 +191,12 @@ func run() error {
 		NotifPrefSvc:        notifPrefSvc,
 		FriendSvc:           friendSvc,
 		ConvSvc:             convSvc,
+		MsgSvc:              messageSvc,
 		UserHandler:         userHandler,
 		AuthHandler:         authHandler,
 		FriendHandler:       friendHandler,
 		ConversationHandler: convHandler,
+		MessageHandler:      messageHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("router: %w", err)
