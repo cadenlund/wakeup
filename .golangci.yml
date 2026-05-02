@@ -1,26 +1,27 @@
+version: "2"
+
 run:
   timeout: 5m
-  tests: true
 
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
-    - staticcheck
-    - unused
+    - staticcheck   # subsumes gosimple + unused in v2
     - bodyclose
     - errorlint
     - gocritic
-    - gofmt
-    - goimports
     - misspell
     - revive
     - sqlclosecheck
     - rowserrcheck
+  settings:
+    errorlint:
+      asserts: true
+      comparison: true
 
-linters-settings:
-  errorlint:
-    asserts: true
-    comparison: true
+formatters:
+  enable:
+    - gofmt
+    - goimports

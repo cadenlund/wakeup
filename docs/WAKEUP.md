@@ -2145,36 +2145,39 @@ If the §12.8 matrix passes, you can confidently start the Expo app knowing the 
 
 ## 13. CI/CD & tooling
 
-### 13.1 `.golangci.yml` (copy verbatim style from court-scraper, extended)
+### 13.1 `.golangci.yml` (golangci-lint v2 schema)
 
 ```yaml
+version: "2"
+
 run:
   timeout: 5m
-  tests: true
 
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
-    - staticcheck
-    - unused
+    - staticcheck   # subsumes gosimple + unused in v2
     - bodyclose
     - errorlint
     - gocritic
-    - gofmt
-    - goimports
     - misspell
     - revive
     - sqlclosecheck
     - rowserrcheck
+  settings:
+    errorlint:
+      asserts: true
+      comparison: true
 
-linters-settings:
-  errorlint:
-    asserts: true
-    comparison: true
+formatters:
+  enable:
+    - gofmt
+    - goimports
 ```
+
+**v2 notes:** `gosimple` and `unused` are now subsumed into `staticcheck`, so they aren't listed separately. Formatters (`gofmt`, `goimports`) live under their own top-level `formatters:` block instead of `linters.enable`. Tests are linted by default — no `run.tests: true` flag needed.
 
 ### 13.2 `.conform.yaml` (mirror court-scraper)
 
