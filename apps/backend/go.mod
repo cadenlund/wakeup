@@ -3,6 +3,7 @@ module github.com/cadenlund/wakeup/apps/backend
 go 1.25.0
 
 require (
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/knadh/koanf/parsers/dotenv v1.1.1
