@@ -7,6 +7,7 @@
 package user
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -165,7 +166,7 @@ func (s *Service) UploadAvatar(ctx context.Context, userID uuid.UUID, body io.Re
 	}
 	key := fmt.Sprintf("avatars/%s/%s%s", userID, objID, ext)
 
-	if err := s.storage.Put(ctx, key, mime, byteReader(data), int64(len(data))); err != nil {
+	if err := s.storage.Put(ctx, key, mime, bytes.NewReader(data), int64(len(data))); err != nil {
 		if errors.Is(err, objectstore.ErrPayloadTooLarge) {
 			return domain.User{}, apierror.PayloadTooLarge(
 				fmt.Sprintf("avatar exceeds %d bytes", MaxAvatarBytes),
@@ -203,22 +204,4 @@ func (s *Service) SoftDeleteAccount(ctx context.Context, userID uuid.UUID) error
 		return apierror.Internal("soft delete").WithCause(err)
 	}
 	return nil
-}
-
-// byteReader wraps a []byte in an io.Reader. Could be a bytes.NewReader
-// directly; this thin alias avoids importing bytes here just for one type.
-func byteReader(b []byte) io.Reader { return &simpleReader{b: b} }
-
-type simpleReader struct {
-	b   []byte
-	pos int
-}
-
-func (r *simpleReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.b) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.b[r.pos:])
-	r.pos += n
-	return n, nil
 }
