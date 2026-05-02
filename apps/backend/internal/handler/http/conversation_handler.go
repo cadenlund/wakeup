@@ -115,13 +115,13 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create handles both direct and group creation.
 //
 // @Summary      Create a conversation
-// @Description  Creates a direct (`type=direct`, exactly 1 entry in `member_ids`) or group (`type=group`, 1-24 entries in `member_ids` + `name` required). Direct creation deduplicates: if a direct between the same pair already exists, returns 200 with the existing row.
+// @Description  Creates a direct (`type=direct`, exactly 1 entry in `member_ids`) or group (`type=group`, 1-24 entries in `member_ids` + `name` required). Direct creation deduplicates: if a direct between the same pair already exists, the existing row is returned with 201.
 // @Tags         conversations
 // @Accept       json
 // @Produce      json
 // @Security     CookieAuth
 // @Param        request  body     CreateConversationRequest  true  "Creation payload"
-// @Success      201      {object} ConversationResponse        "Created (or 200 if direct already existed — API uses 201 in both cases for simplicity)"
+// @Success      201      {object} ConversationResponse        "Created (or returned existing direct on dedupe — same status either way)"
 // @Header       201      {string} X-Request-ID                "Echoed request id"
 // @Failure      400      {object} ErrorResponse               "Malformed JSON / empty body"
 // @Failure      401      {object} ErrorResponse               "Not authenticated"
@@ -442,28 +442,49 @@ func (h *ConversationHandler) renderOne(ctx context.Context, conv domain.Convers
 	return toConversationResponse(conv, members, usersByID), nil
 }
 
-// renderConversationList batch-loads every member's user record across
-// all conversations in the page, then renders each row. Caller passes
-// the actor so the per-row Get re-uses the membership check.
-func (h *ConversationHandler) renderConversationList(ctx context.Context, actor uuid.UUID, convs []domain.Conversation) ([]ConversationResponse, error) {
+// renderConversationList batch-loads members + their user records for
+// every conversation in the page in TWO total round-trips
+// (ListMembersForConversations + ListByIDs), regardless of page size.
+//
+// Caller is responsible for ensuring the actor is a member of every
+// conversation in `convs` — `Service.List` enforces that already, so
+// this path skips the per-row membership check.
+func (h *ConversationHandler) renderConversationList(ctx context.Context, _ uuid.UUID, convs []domain.Conversation) ([]ConversationResponse, error) {
 	if len(convs) == 0 {
 		return []ConversationResponse{}, nil
 	}
-	out := make([]ConversationResponse, 0, len(convs))
-	// We don't have a "list members for many convs" repo method yet;
-	// loop one Get per conversation (each row is bounded ≤ MaxLimit so
-	// this is at most 100 round-trips). A future optimization can
-	// fetch members in bulk and group client-side.
+	convIDs := make([]uuid.UUID, 0, len(convs))
 	for _, c := range convs {
-		got, err := h.convs.Get(ctx, actor, c.ID)
-		if err != nil {
-			return nil, err
+		convIDs = append(convIDs, c.ID)
+	}
+	membersByConv, err := h.convs.ListMembersForConversations(ctx, convIDs)
+	if err != nil {
+		return nil, err
+	}
+	// Collect every distinct user_id across all members, then ListByIDs
+	// once for the whole page.
+	userIDSet := make(map[uuid.UUID]struct{})
+	for _, ms := range membersByConv {
+		for _, m := range ms {
+			userIDSet[m.UserID] = struct{}{}
 		}
-		rendered, err := h.renderOne(ctx, got.Conversation, got.Members)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, rendered)
+	}
+	userIDs := make([]uuid.UUID, 0, len(userIDSet))
+	for id := range userIDSet {
+		userIDs = append(userIDs, id)
+	}
+	users, err := h.users.ListByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	usersByID := make(map[uuid.UUID]domain.User, len(users))
+	for _, u := range users {
+		usersByID[u.ID] = u
+	}
+
+	out := make([]ConversationResponse, 0, len(convs))
+	for _, c := range convs {
+		out = append(out, toConversationResponse(c, membersByConv[c.ID], usersByID))
 	}
 	return out, nil
 }

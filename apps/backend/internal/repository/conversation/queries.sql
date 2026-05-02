@@ -93,6 +93,15 @@ FROM conversation_members
 WHERE conversation_id = $1
 ORDER BY joined_at ASC, user_id ASC;
 
+-- name: ListMembersForConversations :many
+-- Batched ListMembers across N conversations. Used by handlers
+-- rendering a paginated conversation list so we make ONE
+-- conversation_members query per page instead of N.
+SELECT conversation_id, user_id, role, joined_at, last_read_message_id
+FROM conversation_members
+WHERE conversation_id = ANY($1::uuid[])
+ORDER BY conversation_id, joined_at ASC, user_id ASC;
+
 -- name: CountMembers :one
 SELECT count(*) FROM conversation_members WHERE conversation_id = $1;
 

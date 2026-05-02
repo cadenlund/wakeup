@@ -318,6 +318,24 @@ type ListResult struct {
 	HasMore       bool
 }
 
+// ListMembersForConversations batch-loads members for a slice of
+// conversation IDs. The handler uses this to render a paginated list
+// without firing N+1 queries — one round-trip per page instead of one
+// per row (CodeRabbit caught the naive renderConversationList loop on
+// PR #36).
+//
+// No membership check here — callers MUST have already verified the
+// requesting user is a member of every id (e.g. by passing only the
+// IDs returned from List). Surfacing rows for non-member conversations
+// would break the §4.6 enumeration invariant.
+func (s *Service) ListMembersForConversations(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]domain.ConversationMember, error) {
+	out, err := s.convs.ListMembersForConversations(ctx, ids)
+	if err != nil {
+		return nil, apierror.Internal("list members for conversations").WithCause(err)
+	}
+	return out, nil
+}
+
 // List returns the user's conversations keyset-paginated by
 // (last_message_at DESC, id DESC).
 func (s *Service) List(ctx context.Context, p ListParams) (ListResult, error) {

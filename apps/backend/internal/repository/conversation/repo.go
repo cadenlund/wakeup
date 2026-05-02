@@ -119,6 +119,12 @@ FROM conversation_members
 WHERE conversation_id = $1
 ORDER BY joined_at ASC, user_id ASC`
 
+const listMembersForConversationsSQL = `-- name: ListMembersForConversations :many
+SELECT conversation_id, user_id, role, joined_at, last_read_message_id
+FROM conversation_members
+WHERE conversation_id = ANY($1::uuid[])
+ORDER BY conversation_id, joined_at ASC, user_id ASC`
+
 const countMembersSQL = `-- name: CountMembers :one
 SELECT count(*) FROM conversation_members WHERE conversation_id = $1`
 
@@ -387,6 +393,38 @@ func (q *Queries) ListMembers(ctx context.Context, conversationID uuid.UUID) ([]
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
 		return nil, fmt.Errorf("conversation: list members rows: %w", rowsErr)
+	}
+	return out, nil
+}
+
+// ListMembersForConversations batch-loads the members of every
+// conversation in `ids`. Used by handlers rendering paginated
+// conversation lists so we make one conversation_members query per
+// page instead of N.
+//
+// Returns a map keyed by conversation_id; missing IDs are simply
+// absent from the map (caller can treat as "no members" or check
+// existence separately via GetConversation).
+func (q *Queries) ListMembersForConversations(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]domain.ConversationMember, error) {
+	if len(ids) == 0 {
+		return map[uuid.UUID][]domain.ConversationMember{}, nil
+	}
+	rows, err := q.db.Query(ctx, listMembersForConversationsSQL, ids)
+	if err != nil {
+		return nil, fmt.Errorf("conversation: list members for conversations: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[uuid.UUID][]domain.ConversationMember, len(ids))
+	for rows.Next() {
+		m, scanErr := scanMember(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("conversation: list members for conversations scan: %w", scanErr)
+		}
+		out[m.ConversationID] = append(out[m.ConversationID], m)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, fmt.Errorf("conversation: list members for conversations rows: %w", rowsErr)
 	}
 	return out, nil
 }

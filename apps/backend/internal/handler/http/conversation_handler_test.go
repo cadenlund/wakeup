@@ -48,6 +48,29 @@ func mustDecode(t *testing.T, body io.Reader) map[string]any {
 	return got
 }
 
+// requireCreateConversation POSTs /v1/conversations and returns the
+// created conversation's id as a string. Asserts 201, decodes the
+// JSON, and verifies a non-empty id — replaces the inline post +
+// io.ReadAll + json.Unmarshal patterns CodeRabbit caught on PR #36.
+func requireCreateConversation(t *testing.T, h *testutil.Harness, c *http.Client, body any) string {
+	t.Helper()
+	r := post(t, c, h.Server.URL+"/v1/conversations", body)
+	rb, _ := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("setup create conversation status=%d body=%s", r.StatusCode, rb)
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rb, &created); err != nil {
+		t.Fatalf("setup create conversation: decode: %v\nbody=%s", err, rb)
+	}
+	id, ok := created["id"].(string)
+	if !ok || id == "" {
+		t.Fatalf("setup create conversation: missing id: %s", rb)
+	}
+	return id
+}
+
 // --- POST /v1/conversations -------------------------------------------
 
 func TestCreateConversation_Direct(t *testing.T) {
@@ -189,14 +212,9 @@ func TestGetConversation_NonMemberSees404(t *testing.T) {
 	_, ub := h.AuthClient(t)
 	stranger, _ := h.AuthClient(t)
 
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp, err := stranger.Get(h.Server.URL + "/v1/conversations/" + id)
 	if err != nil {
@@ -253,14 +271,9 @@ func TestUpdateConversation_AdminRenames(t *testing.T) {
 	a, _ := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
 
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "group", "name": "Old", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp := patchJSON(t, a, h.Server.URL+"/v1/conversations/"+id, map[string]any{"name": "New"})
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -280,14 +293,9 @@ func TestUpdateConversation_NonAdminForbidden(t *testing.T) {
 	a, _ := h.AuthClient(t)
 	bClient, ub := h.AuthClient(t)
 
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "group", "name": "Old", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp := patchJSON(t, bClient, h.Server.URL+"/v1/conversations/"+id, map[string]any{"name": "New"})
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -301,14 +309,9 @@ func TestUpdateConversation_NonMemberSees404(t *testing.T) {
 	_, ub := h.AuthClient(t)
 	stranger, _ := h.AuthClient(t)
 
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "group", "name": "Old", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp := patchJSON(t, stranger, h.Server.URL+"/v1/conversations/"+id, map[string]any{"name": "X"})
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -323,14 +326,9 @@ func TestLeaveConversation_Success(t *testing.T) {
 	a, _ := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
 
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp := deleteReqHTTP(t, a, h.Server.URL+"/v1/conversations/"+id)
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -356,14 +354,9 @@ func TestAddMembers_AdminAdds(t *testing.T) {
 	_, ub := h.AuthClient(t)
 	_, uc := h.AuthClient(t)
 
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "group", "name": "Crew", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp := post(t, a, h.Server.URL+"/v1/conversations/"+id+"/members", map[string]any{
 		"user_ids": []uuid.UUID{uc.ID},
@@ -387,14 +380,9 @@ func TestAddMembers_NonAdminForbidden(t *testing.T) {
 	bClient, ub := h.AuthClient(t)
 	_, uc := h.AuthClient(t)
 
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "group", "name": "Crew", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp := post(t, bClient, h.Server.URL+"/v1/conversations/"+id+"/members", map[string]any{
 		"user_ids": []uuid.UUID{uc.ID},
@@ -409,14 +397,9 @@ func TestRemoveMember_AdminKicks(t *testing.T) {
 	a, _ := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
 
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "group", "name": "Crew", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp := deleteReqHTTP(t, a, h.Server.URL+"/v1/conversations/"+id+"/members/"+ub.ID.String())
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -441,14 +424,9 @@ func TestMarkRead_NonMemberSees404(t *testing.T) {
 	a, _ := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
 	stranger, _ := h.AuthClient(t)
-	r := post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
-	body, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var created map[string]any
-	_ = json.Unmarshal(body, &created)
-	id, _ := created["id"].(string)
 
 	resp := post(t, stranger, h.Server.URL+"/v1/conversations/"+id+"/read", map[string]any{
 		"up_to_message_id": uuid.Must(uuid.NewV7()),

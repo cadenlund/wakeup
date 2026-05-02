@@ -140,6 +140,8 @@ func TestRouter_OpenAPISpec(t *testing.T) {
 		"/v1/auth/login",
 		"/v1/users/me",
 		"/v1/users/me/notifications",
+		"/v1/friends",
+		"/v1/conversations",
 		"ErrorResponse",
 	} {
 		if !strings.Contains(string(bs), want) {
