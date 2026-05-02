@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
@@ -51,6 +52,11 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		t.Fatalf("conversation handler: %v", err)
 	}
 
+	// Each test gets a unique rate-limit scope so parallel smoke tests
+	// (all bound to 127.0.0.1, all sharing the testcontainer redis)
+	// don't collide on the auth-tier per-IP bucket. Limits stay
+	// production-shaped — only the keyspace differs.
+	suffix := "-" + testutil.NextSuffix()
 	router, err := buildRouter(routerDeps{
 		Cfg:                 cfg,
 		Logger:              slog.Default(),
@@ -67,6 +73,9 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		AuthHandler:         authHandler,
 		FriendHandler:       friendHandler,
 		ConversationHandler: convHandler,
+		RateLimitAuth:       rateLimitTier{Scope: "auth" + suffix, Limit: 10000, Window: time.Minute},
+		RateLimitWrites:     rateLimitTier{Scope: "writes" + suffix, Limit: 10000, Window: time.Minute},
+		RateLimitReads:      rateLimitTier{Scope: "reads" + suffix, Limit: 10000, Window: time.Minute},
 	})
 	if err != nil {
 		t.Fatalf("buildRouter: %v", err)
