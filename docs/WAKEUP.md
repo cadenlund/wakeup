@@ -2400,7 +2400,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version-file: apps/backend/go.mod         # auto-derive Go version from the module directive
           cache: true
           cache-dependency-path: apps/backend/go.sum   # caches GOMODCACHE + ~/.cache/go-build keyed on this file
 
@@ -2419,7 +2419,7 @@ jobs:
         if: steps.cache-go-bin.outputs.cache-hit != 'true'
         run: |
           go install github.com/swaggo/swag/cmd/swag@v1.16.4
-          go install github.com/pressly/goose/v3/cmd/goose@latest
+          go install github.com/pressly/goose/v3/cmd/goose@v3.27.1
 
       - name: Lint
         uses: golangci/golangci-lint-action@v7
