@@ -35,11 +35,17 @@ type MessageListResponse struct {
 // SendMessageRequest is the body for POST /v1/conversations/{id}/messages.
 //
 // `body` is required (1-10000 chars after trim guard); `attachment_ids`
-// must reference attachments uploaded by the caller; `reply_to_message_id`
-// must live in the same conversation.
+// must reference attachments uploaded by the caller (FK rejects bad IDs
+// at insert); `reply_to_message_id` must live in the same conversation.
+//
+// Validator tag note: `attachment_ids` deliberately omits a `dive,required`
+// element check. The `required` token there made swag's struct-tag
+// analyzer mark the whole slice field as required in the OpenAPI schema
+// (CodeRabbit caught this on PR #40); the schema's `message_attachments`
+// FK already rejects bogus UUIDs at insert time.
 type SendMessageRequest struct {
 	Body             string      `json:"body"                              validate:"required,min=1,max=10000" example:"hello world"`
-	AttachmentIDs    []uuid.UUID `json:"attachment_ids,omitempty"          validate:"omitempty,max=10,dive,required" example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
+	AttachmentIDs    []uuid.UUID `json:"attachment_ids,omitempty"          validate:"omitempty,max=10"         example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
 	ReplyToMessageID *uuid.UUID  `json:"reply_to_message_id,omitempty"     validate:"omitempty"                example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
 }
 

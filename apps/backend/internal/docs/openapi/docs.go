@@ -3341,7 +3341,6 @@ const docTemplate = `{
         "internal_handler_http.SendMessageRequest": {
             "type": "object",
             "required": [
-                "attachment_ids",
                 "body"
             ],
             "properties": {
