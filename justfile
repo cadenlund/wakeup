@@ -47,9 +47,14 @@ migrate-status:
 migrate-create name:
     goose -dir migrations -s create {{name}} sql
 
-# Swagger
+# Swagger — output lives INSIDE apps/backend so cmd/server can import the
+# generated package (Go modules can't import packages outside their root).
+# A second copy at docs/openapi/ stays generated for tools and the mobile
+# client codegen step below.
 gen-docs:
-    cd apps/backend && swag init -g cmd/server/main.go -o ../../docs/openapi --parseDependency
+    cd apps/backend && swag init -g cmd/server/main.go -o internal/docs/openapi --parseDependency
+    cp apps/backend/internal/docs/openapi/swagger.json docs/openapi/swagger.json
+    cp apps/backend/internal/docs/openapi/swagger.yaml docs/openapi/swagger.yaml
 
 # Generate mobile client from OpenAPI
 gen-client:
