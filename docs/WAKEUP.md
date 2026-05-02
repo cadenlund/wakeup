@@ -2325,16 +2325,29 @@ jobs:
         ports: [6379:6379]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache: true
-      - name: Install tools
+          cache: true                # caches GOMODCACHE + ~/.cache/go-build keyed on go.sum
+
+      - uses: extractions/setup-just@v2
+
+      # Cache Go-installed binaries (swag, goose) across runs.
+      # Bump the cache key by editing this workflow when adding/removing a tool.
+      - name: Cache Go-installed tools
+        id: cache-go-bin
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin
+          key: go-bin-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+
+      - name: Install tools (cache miss)
+        if: steps.cache-go-bin.outputs.cache-hit != 'true'
         run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-          go install github.com/swaggo/swag/cmd/swag@latest
+          go install github.com/swaggo/swag/cmd/swag@v1.16.4
           go install github.com/pressly/goose/v3/cmd/goose@latest
-          curl -sSfL https://raw.githubusercontent.com/casey/just/master/www/install.sh | bash -s -- --to /usr/local/bin
+
       - name: Run migrations
         run: |
           # goose errors out on an empty migrations dir; skip while there are none.
@@ -2345,15 +2358,29 @@ jobs:
           fi
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+
       - name: Lint
-        run: just lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.11.4
+          working-directory: apps/backend
+
       - name: Test
         run: just test-cover
+
       - name: Generate docs
         run: just gen-docs
+
       - name: Conform
         uses: siderolabs/conform@v0.1.0-alpha.30
 ```
+
+**Caching design notes:**
+- `actions/setup-go` already caches GOMODCACHE + Go build cache keyed on `go.sum`, so dependency downloads + compilation cache restore for free.
+- `extractions/setup-just` installs prebuilt `just` binary from a release tarball — much faster than `curl | bash` script install.
+- `actions/cache` keyed on the workflow-file hash holds onto `~/go/bin` between runs, so `swag`/`goose` only build from source when this file changes.
+- `golangci/golangci-lint-action` has its own internal binary cache and runs the linter in one step, replacing the manual `go install golangci-lint` + `just lint` pair.
+- Tool versions are pinned to keep cache keys stable (`@latest` would resolve differently each day and bust the cache).
 
 ### 13.6 `.coderabbit.yaml`
 
