@@ -492,7 +492,7 @@ These conventions exist so the frontend never has to ask. Apply uniformly.
 | `message.body` | 1 | 10000 | any |
 | `conversation.name` (group) | 1 | 80 | any printable unicode; `null` for direct |
 | group member count | 2 | 25 | enforced at service layer |
-| `attachment.filename` | 1 | 255 | filesystem-safe |
+| `attachment.filename` | 1 | 255 | sanitized server-side per §9.2: strip `/`, `\`, NUL, and control chars; reject empty after sanitization. Stored in DB only — never used in S3 keys (§9.1). |
 | `attachment` size (bytes) | 1 | 52428800 | 50 MiB cap |
 | `avatar` upload size (bytes) | 1 | 5242880 | 5 MiB cap |
 | `Idempotency-Key` header | 1 | 255 | UUID v7 recommended; any unique string accepted |
@@ -1079,8 +1079,8 @@ messages
   GET    /v1/messages/{id}/reads              who has read this message
 
 attachments
-  POST   /v1/attachments                      multipart, max 50MB, content-type whitelist
-  GET    /v1/attachments/{id}                 returns presigned URL (5min TTL)
+  POST   /v1/attachments                      multipart, max 50MB, server-side MIME detection + whitelist (§9.2)
+  GET    /v1/attachments/{id}                 returns AttachmentResponse with presigned URL (5min TTL); membership-gated (§9.3, §9.7)
 
 presence
   GET    /v1/presence/friends                 bulk: status of all my friends (used on app open)
@@ -1514,19 +1514,93 @@ CodeBlockedDuringImpersonation Code = "BLOCKED_DURING_IMPERSONATION"
 
 ```go
 type ObjectStore interface {
+    // Put writes body to the bucket at key. The contentType passed here MUST be the
+    // server-detected MIME (see §9.2), not the client-claimed one. Implementations
+    // set it as the object's Content-Type header for use by the presigner.
     Put(ctx context.Context, key, contentType string, body io.Reader, size int64) error
-    PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
+
+    // PresignGet returns a short-lived URL that GETs the object. The optional
+    // contentDisposition (e.g. `attachment; filename="report.pdf"`) is bound into
+    // the signed URL via S3's `response-content-disposition` query param so the
+    // browser sees the original user-supplied filename and never tries to render
+    // an attachment inline. Pass an empty string for avatars (default to inline).
+    PresignGet(ctx context.Context, key string, ttl time.Duration, contentDisposition string) (string, error)
+
     Delete(ctx context.Context, key string) error
 }
 ```
 
 One implementation: `s3Store` using `aws-sdk-go-v2`. Locally points at MinIO (`http://localhost:9000`). In prod points at AWS S3 / Tigris / R2. Same code path.
 
-**Key conventions:**
-- `avatars/{user_id}/{uuid}.{ext}` — max 5 MB, image/* only
-- `attachments/{conversation_id}/{message_id}/{filename}` — max 50 MB, content-type whitelist (`image/*`, `application/pdf`, `text/plain`, common docs)
+### 9.1 Storage key conventions (UUID-only — never user-supplied)
 
-Backend never proxies file bytes. All download URLs are presigned (5-minute TTL).
+- **Avatars:** `avatars/{user_id}/{uuid}.{ext}` — max 5 MB, `image/*` only. `{ext}` is derived from the **server-detected** MIME, never from the client-uploaded filename. See §9.5 for the public-vs-presigned decision (open).
+- **Attachments:** `attachments/{conversation_id}/{message_id}/{attachment_id}` — max 50 MB. **No filename in the key.** The original filename is stored in `attachments.filename` and surfaced to the client only via the DTO + the signed URL's `response-content-disposition`.
+
+Why UUID-only keys: user-supplied filenames carry a path-traversal / injection / unicode-mischief surface that we don't need to take on. The DB row holds the human-readable filename and content type; the S3 key is opaque.
+
+### 9.2 Upload model (locked: server-proxied)
+
+V1 uses **server-proxied uploads.** Client posts `multipart/form-data` to `POST /v1/users/me/avatar` or `POST /v1/attachments`. Backend reads the body, validates, writes to S3, and returns the DTO. We do NOT issue presigned PUTs in v1 (deferred — see "Open decisions" §9.5).
+
+The handler MUST:
+
+1. Wrap the request body in `http.MaxBytesReader(w, r.Body, max+1<<10)` *before* calling `r.ParseMultipartForm`. This caps the bytes the server will buffer so an attacker cannot stream 50 GB and trash the host. `max` is 5 MiB for avatars, 50 MiB for attachments. The `+1KB` slack lets multipart framing fit.
+2. After `ParseMultipartForm`, peek at the file: read the first 512 bytes via `io.ReadAll(io.LimitReader(file, 512))`, hand to `http.DetectContentType` (or the `mimetype` library), and reject with `422 VALIDATION_FAILED { content_type: ... }` if the detected MIME isn't on the route's allowlist. `Seek(0, io.SeekStart)` the file before passing to `objectstore.Put`.
+3. Pass the **detected** MIME (not the multipart-supplied one) to `objectstore.Put` and to `attachments.content_type` in the DB.
+4. Sanitize `filename` for storage in DB: strip path separators (`/`, `\`), control chars, NUL bytes; truncate to 255 chars; reject empty after sanitization.
+
+**Backend proxies upload bytes; backend never proxies download bytes.** Downloads are always via short-lived presigned GETs.
+
+### 9.3 Download authorization (mandatory)
+
+`GET /v1/attachments/{id}` is auth-gated *and* permission-gated. Before issuing a presigned URL the service MUST verify the caller is a member of at least one conversation that contains a message linked to this `attachment_id` via `message_attachments`. If no such link exists (orphaned upload) the uploader is the only one allowed to GET. On any failure return `404 RESOURCE_NOT_FOUND` (do not leak existence) — never `403`.
+
+Avatars are addressed separately (§9.5) — for v1 they are public profile images, so `UserResponse.avatar_url` is a stable URL not gated by per-request authz.
+
+Presigned URL TTL: **5 minutes**. Issue the URL with the original filename baked into `response-content-disposition` (see §9.0 interface) so the browser sees the human-readable name on download. Never embed the original filename in the *key* itself (see §9.1).
+
+### 9.4 Bucket configuration baseline (prod)
+
+The backend writes to a single bucket (e.g. `wakeup-prod-media`) with:
+
+- **Block all public ACLs** at the bucket level (`PublicAccessBlockConfiguration` all-true).
+- Default object ACL: **private**. Public access is opt-in per-prefix via bucket policy (only `avatars/*` if §9.5 picks the public-CDN path).
+- **Server-side encryption (SSE-S3)** enabled by default at the bucket level.
+- **TLS-only** bucket policy: deny `s3:*` when `aws:SecureTransport: false`.
+- **CORS:** allow `GET` only, from the production origins; do not allow `PUT`/`POST` directly (we don't presign uploads in v1).
+- IAM role for the backend grants only `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` on `arn:aws:s3:::wakeup-prod-media/*` — no bucket-level `s3:*`, no listing.
+
+For local dev (MinIO) these are not enforced; the same code path works against MinIO with admin creds.
+
+### 9.5 Open decisions (need operator input before Phase 7)
+
+| # | Decision | Default if you say nothing |
+|---|---|---|
+| 9.5.a | **Avatar URL strategy.** Stable public URL via CDN/S3-public-prefix vs short-lived presigned GET refreshed by the client. Public is faster + cacheable, but every avatar URL is then permanently fetchable by anyone. Presigned needs frontend to refresh on URL expiry. | Stable public URL on `avatars/*` prefix, behind the CDN in prod. Avatars are public profile images by design (visible to non-friends in search results). |
+| 9.5.b | **Avatar re-encoding.** Decode → resize to max 512×512 → re-encode (PNG/WebP) on upload. Strips EXIF (geo location, etc.), prevents polyglot files (PNG that's also valid JS), kills decompression bombs. Adds a Go image dep. | Yes — re-encode. The privacy and XSS-prevention wins outweigh the dep. |
+| 9.5.c | **Attachment scanning.** No virus / malware scan in v1 (consistent with "out of scope" ethos). Document explicitly so it's a known posture. | Document v1 does not scan; do not promise it as a corporate file-transfer tool. |
+
+### 9.6 Orphan cleanup
+
+`internal/job/` adds an `attachment-orphan-sweeper` running every 1 hour: deletes `attachments` rows + the corresponding S3 objects where `created_at < now() - 24h` AND no `message_attachments` row references the attachment. Prevents leak from clients that upload-then-abandon.
+
+### 9.7 Response shape for `GET /v1/attachments/{id}`
+
+Returns a structured DTO, not just a URL:
+
+```json
+{
+  "id": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c",
+  "url": "https://wakeup-prod-media.s3.us-east-1.amazonaws.com/attachments/...?X-Amz-Signature=...",
+  "expires_at": "2026-05-02T09:36:21.810Z",
+  "filename": "Q1-report.pdf",
+  "content_type": "application/pdf",
+  "size_bytes": 1048576
+}
+```
+
+This lets the frontend show a download UI before fetching, and re-request a fresh URL when the previous one expires (compare `expires_at` to current time).
 
 ---
 
@@ -2672,7 +2746,7 @@ For each package: write the package, write exhaustive tests (every error path), 
   - Commit: `feat(backend): add pubsub broker with redis and in-process implementations`
 - [ ] **2.6** `internal/ratelimit/` — Redis token bucket. Tests: burst allowed, sustained limit, recovery, separate keys.
   - Commit: `feat(backend): add redis-backed token bucket rate limiter`
-- [ ] **2.7** `internal/objectstore/` — S3 wrapper per §9. Tests against testcontainers MinIO: put, presign, delete.
+- [ ] **2.7** `internal/objectstore/` — S3 wrapper per §9 (interface in §9.0; key conventions §9.1; bucket baseline §9.4). Implements `Put` (using `aws-sdk-go-v2`'s `manager.Uploader` so streaming uploads work), `PresignGet` (binds `response-content-disposition` into the signed URL when caller passes it; for avatars pass empty string), `Delete`. Tests against testcontainers MinIO: put + presign-and-fetch round-trip with the original filename appearing in `Content-Disposition`, delete returns no-error on missing key (idempotent), put rejects writes that exceed the configured size cap.
   - Commit: `feat(backend): add s3-compatible objectstore wrapper`
 - [ ] **2.8** `internal/mailer/` — Resend wrapper. Tests use a fake HTTP server (no live Resend in CI).
   - Commit: `feat(backend): add resend mailer wrapper for password resets`
@@ -2739,13 +2813,15 @@ For each package: write the package, write exhaustive tests (every error path), 
 
 ### Phase 7 — Attachments
 
-- [ ] **7.1** `internal/repository/attachment/` — Create, GetByID. Tests.
+- [ ] **7.1** `internal/repository/attachment/` — Create, GetByID, ListOrphansOlderThan(ctx, cutoff time.Time) (for the orphan sweeper, §9.6), DeleteByIDs(ctx, ids []uuid.UUID), and **CallerCanRead(ctx, attachmentID, userID uuid.UUID) (bool, error)** which returns true iff there exists a `message_attachments` row whose message lives in a conversation the user is a member of, OR if the attachment has zero `message_attachments` rows AND `uploader_id == userID` (orphan-during-compose case). Tests cover every branch.
   - Commit: `feat(backend): add attachment repository`
-- [ ] **7.2** `internal/service/attachment/` — Upload (validates content-type and size, writes to objectstore, persists row), Presign.
-  - Commit: `feat(backend): add attachment service with size and type validation`
-- [ ] **7.3** `internal/handler/http/attachment_handler.go` — multipart upload + presign endpoints with swaggo.
+- [ ] **7.2** `internal/service/attachment/` — `Upload` (server-side MIME detection on first 512 bytes, sanitize filename, generate UUID-keyed storage path per §9.1, write to objectstore using the **detected** MIME, persist row with detected MIME), `GetForCaller` (calls `CallerCanRead`; on false returns `apierror.NotFound` per §9.3 — never `Forbidden`), `Presign` (issues presigned GET with `response-content-disposition: attachment; filename="<sanitized>"`).
+  - Commit: `feat(backend): add attachment service with mime detection and membership gate`
+- [ ] **7.3** `internal/handler/http/attachment_handler.go` — `POST /v1/attachments` and `GET /v1/attachments/{id}` per §6.2. The POST handler MUST wrap the request body in `http.MaxBytesReader(w, r.Body, 50*1024*1024+1024)` *before* calling `r.ParseMultipartForm(10<<20)`. DTOs: `AttachmentResponse` matches the §9.7 shape (`id`, `url`, `expires_at`, `filename`, `content_type`, `size_bytes`). Full swaggo + examples per §6.3.
   - Commit: `feat(backend): add attachment http handlers with swagger annotations`
-- [ ] **7.4** Smoke via Swagger UI.
+- [ ] **7.4** Add `internal/service/attachment/orphan_sweeper.go` implementing the §4.12 `Job` interface — `Name()="attachment-orphan-sweeper"`, `Interval()=1h`. Run() finds attachments older than 24h with no `message_attachments` row, deletes the S3 object then the DB row. Register on the runner in `cmd/server/main.go`. Tests cover: not deleted before 24h, deleted after, S3-failed-then-DB-not-deleted leaves the row for retry next tick.
+  - Commit: `feat(backend): add attachment orphan sweeper`
+- [ ] **7.5** Smoke via Swagger UI: upload a PDF labeled `image/png` → expect 422 (MIME-detection caught the lie); upload >50 MB → expect 413; upload normal PDF → expect 200; GET as uploader before linking → 200 with presigned URL; GET as non-member → 404; link to a message and GET as message-thread member → 200.
   - Commit: `docs(backend): smoke-tested attachment endpoints via swagger`
 
 ### Phase 8 — WebSocket realtime
