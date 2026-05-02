@@ -443,6 +443,75 @@ func TestRemoveMember_NonMemberSeesNotFoundEvenForDirect(t *testing.T) {
 	}
 }
 
+func TestUpdate_RejectsEmptyName(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID,
+		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Old"),
+	})
+	_, err := st.svc.Update(ctx, conversation.UpdateParams{
+		Actor: a.ID, ConvID: created.Conversation.ID, Name: ptr(""),
+	})
+	if asAPIError(t, err).Code != apierror.CodeValidation {
+		t.Errorf("Code = %q, want VALIDATION_FAILED", asAPIError(t, err).Code)
+	}
+}
+
+func TestCreate_GroupNameUsesRuneCount(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	// 80 emoji — each emoji is several bytes, so byte-length would
+	// trip TOO_LONG. Rune count must be exactly 80, accepted.
+	emojis := strings.Repeat("🐱", 80)
+	if _, err := st.svc.Create(ctx, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID,
+		MemberIDs: []uuid.UUID{b.ID}, Name: &emojis,
+	}); err != nil {
+		t.Errorf("80 emoji should pass rune-count validation, got %v", err)
+	}
+	// 81 emoji — must reject as TOO_LONG.
+	tooLong := strings.Repeat("🐱", 81)
+	c := makeUser(ctx, t, st)
+	_, err := st.svc.Create(ctx, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID,
+		MemberIDs: []uuid.UUID{c.ID}, Name: &tooLong,
+	})
+	if asAPIError(t, err).Code != apierror.CodeValidation {
+		t.Errorf("Code = %q, want VALIDATION_FAILED on 81-rune name", asAPIError(t, err).Code)
+	}
+}
+
+func TestAddMembers_SkipsExistingMembers(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	c := makeUser(ctx, t, st)
+	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID,
+		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Group"),
+	})
+
+	// Pass {b (already in), c (new)}. Only c should be added.
+	got, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
+		Actor: a.ID, ConvID: created.Conversation.ID, UserIDs: []uuid.UUID{b.ID, c.ID},
+	})
+	if err != nil {
+		t.Fatalf("AddMembers: %v", err)
+	}
+	if len(got.Added) != 1 || got.Added[0].UserID != c.ID {
+		t.Errorf("Added = %+v, want exactly [c]", got.Added)
+	}
+}
+
 func TestUpdate_DirectIsImmutable(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

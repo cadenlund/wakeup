@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -179,17 +180,8 @@ func (s *Service) createDirect(ctx context.Context, p CreateParams) (CreateResul
 }
 
 func (s *Service) createGroup(ctx context.Context, p CreateParams) (CreateResult, error) {
-	if p.Name == nil || *p.Name == "" {
-		return CreateResult{}, apierror.Validation([]apierror.FieldError{{
-			Field: "name", Code: "REQUIRED",
-			Message: "group conversations require a name",
-		}})
-	}
-	if len(*p.Name) > MaxNameLen {
-		return CreateResult{}, apierror.Validation([]apierror.FieldError{{
-			Field: "name", Code: "TOO_LONG",
-			Message: fmt.Sprintf("name must be at most %d characters", MaxNameLen),
-		}})
+	if err := validateGroupName(p.Name, false); err != nil {
+		return CreateResult{}, err
 	}
 
 	// Dedupe member IDs and exclude the creator (auto-included).
@@ -376,11 +368,8 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (domain.Conversati
 	if !member.IsAdmin() {
 		return domain.Conversation{}, apierror.Forbidden("only group admins can update the conversation")
 	}
-	if p.Name != nil && len(*p.Name) > MaxNameLen {
-		return domain.Conversation{}, apierror.Validation([]apierror.FieldError{{
-			Field: "name", Code: "TOO_LONG",
-			Message: fmt.Sprintf("name must be at most %d characters", MaxNameLen),
-		}})
+	if err := validateGroupName(p.Name, true); err != nil {
+		return domain.Conversation{}, err
 	}
 	updated, err := s.convs.UpdateConversation(ctx, convrepo.UpdateParams{
 		ID: p.ConvID, Name: p.Name, AvatarURL: p.AvatarURL,
@@ -455,12 +444,27 @@ func (s *Service) AddMembers(ctx context.Context, p AddMembersParams) (AddMember
 		return AddMembersResult{}, apierror.Forbidden("only group admins can add members")
 	}
 
-	// Dedup + drop any IDs already in the group.
+	// Dedup the request, drop the actor (already in), and drop anyone
+	// who's already a member. Doing this up front avoids extra DB
+	// work in the loop below and keeps the cap-25 check honest
+	// (CodeRabbit caught the loop-only filter on PR #35).
+	existingMembers, err := s.convs.ListMembers(ctx, p.ConvID)
+	if err != nil {
+		return AddMembersResult{}, apierror.Internal("list members").WithCause(err)
+	}
+	existing := make(map[uuid.UUID]struct{}, len(existingMembers))
+	for _, m := range existingMembers {
+		existing[m.UserID] = struct{}{}
+	}
+
 	unique := make(map[uuid.UUID]struct{}, len(p.UserIDs))
 	for _, id := range p.UserIDs {
+		if _, already := existing[id]; already {
+			continue
+		}
 		unique[id] = struct{}{}
 	}
-	delete(unique, p.Actor) // already in the group
+	delete(unique, p.Actor) // belt and braces — actor is in `existing` too
 	candidates := make([]uuid.UUID, 0, len(unique))
 	for id := range unique {
 		candidates = append(candidates, id)
@@ -563,6 +567,38 @@ func (s *Service) MarkRead(ctx context.Context, actor, convID, messageID uuid.UU
 	}
 	if err := s.convs.UpdateLastReadMessage(ctx, convID, actor, messageID); err != nil {
 		return apierror.Internal("update last read").WithCause(err)
+	}
+	return nil
+}
+
+// validateGroupName checks the §4.6 rules: name must be 1-MaxNameLen
+// runes (not bytes — `len` would reject valid non-ASCII names early).
+//
+//   - allowNil=false (Create): nil name is rejected as REQUIRED.
+//   - allowNil=true  (Update): nil name means "don't touch", but a
+//     non-nil pointer to "" is still REQUIRED — Update can't blank
+//     a group's name.
+func validateGroupName(name *string, allowNil bool) error {
+	if name == nil {
+		if allowNil {
+			return nil
+		}
+		return apierror.Validation([]apierror.FieldError{{
+			Field: "name", Code: "REQUIRED",
+			Message: "group conversations require a name",
+		}})
+	}
+	if *name == "" {
+		return apierror.Validation([]apierror.FieldError{{
+			Field: "name", Code: "REQUIRED",
+			Message: "group conversations require a non-empty name",
+		}})
+	}
+	if utf8.RuneCountInString(*name) > MaxNameLen {
+		return apierror.Validation([]apierror.FieldError{{
+			Field: "name", Code: "TOO_LONG",
+			Message: fmt.Sprintf("name must be at most %d characters", MaxNameLen),
+		}})
 	}
 	return nil
 }
