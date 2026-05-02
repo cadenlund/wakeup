@@ -50,7 +50,7 @@ jobs:
         run: just test-cover
 
       - name: Generate docs
-        run: just gen-docs
+        run: just gen-docs-check
 
       - name: Conform
         uses: siderolabs/conform@v0.1.0-alpha.30
