@@ -1,14 +1,15 @@
 package testutil
 
 import (
+	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -192,10 +193,17 @@ func (h *Harness) AuthClient(t *testing.T, opts ...AuthClientOpt) (*http.Client,
 	}
 
 	client := h.HTTPClient(t)
-	body := `{"username":"` + o.username + `","email":"` + o.email +
-		`","display_name":"` + o.displayName + `","password":"` + o.password + `"}`
+	payload, err := json.Marshal(map[string]string{
+		"username":     o.username,
+		"email":        o.email,
+		"display_name": o.displayName,
+		"password":     o.password,
+	})
+	if err != nil {
+		t.Fatalf("AuthClient: marshal register payload: %v", err)
+	}
 	resp, err := client.Post(h.Server.URL+"/v1/auth/register",
-		"application/json", strings.NewReader(body))
+		"application/json", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("AuthClient: register: %v", err)
 	}

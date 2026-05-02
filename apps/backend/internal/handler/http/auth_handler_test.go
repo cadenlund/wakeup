@@ -10,19 +10,15 @@ import (
 	"testing"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
+	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
-// errEnvelope mirrors the §4.4 wire shape for error responses so tests can
-// decode and assert on Code, Fields, etc. without re-rolling the struct in
-// every subtest.
-type errEnvelope struct {
-	Error apierror.Error `json:"error"`
-}
-
-func decodeErr(t *testing.T, body io.Reader) errEnvelope {
+// decodeErr decodes one error-envelope JSON body into the wire shape (the
+// same ErrorResponse struct used by handlers + swaggo).
+func decodeErr(t *testing.T, body io.Reader) httpapi.ErrorResponse {
 	t.Helper()
-	var env errEnvelope
+	var env httpapi.ErrorResponse
 	if err := json.NewDecoder(body).Decode(&env); err != nil {
 		t.Fatalf("decode error envelope: %v", err)
 	}
@@ -312,7 +308,11 @@ func TestLogin_WrongPassword(t *testing.T) {
 
 	body := validRegisterBody(t)
 	c := h.HTTPClient(t)
-	_ = post(t, c, h.Server.URL+"/v1/auth/register", body).Body.Close()
+	setupResp := post(t, c, h.Server.URL+"/v1/auth/register", body)
+	_ = setupResp.Body.Close()
+	if setupResp.StatusCode != http.StatusCreated {
+		t.Fatalf("setup register status=%d (must be 201, otherwise the 401 below could fire from a missing-user lookup)", setupResp.StatusCode)
+	}
 
 	c2 := h.HTTPClient(t)
 	resp := post(t, c2, h.Server.URL+"/v1/auth/login", map[string]any{

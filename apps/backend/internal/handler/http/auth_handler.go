@@ -56,12 +56,12 @@ func (h *AuthHandler) Mount(r chi.Router) {
 // @Param        request          body     RegisterRequest    true   "Registration payload"
 // @Success      201              {object} RegisterResponse   "Created"
 // @Header       201              {string} X-Request-ID       "Echoed request id"
-// @Failure      400              {object} apierror.Error     "Malformed JSON / empty body"
-// @Failure      409              {object} apierror.Error     "Username or email already taken"
-// @Failure      413              {object} apierror.Error     "Request body too large"
-// @Failure      422              {object} apierror.Error     "Validation failed"
-// @Failure      429              {object} apierror.Error     "Rate limited"
-// @Failure      500              {object} apierror.Error     "Internal error"
+// @Failure      400              {object} ErrorResponse     "Malformed JSON / empty body"
+// @Failure      409              {object} ErrorResponse     "Username or email already taken"
+// @Failure      413              {object} ErrorResponse     "Request body too large"
+// @Failure      422              {object} ErrorResponse     "Validation failed"
+// @Failure      429              {object} ErrorResponse     "Rate limited"
+// @Failure      500              {object} ErrorResponse     "Internal error"
 // @Router       /v1/auth/register [post]
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
@@ -92,12 +92,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 // @Param        request  body     LoginRequest    true  "Login payload"
 // @Success      200      {object} LoginResponse   "Authenticated"
 // @Header       200      {string} X-Request-ID    "Echoed request id"
-// @Failure      400      {object} apierror.Error  "Malformed JSON / empty body"
-// @Failure      401      {object} apierror.Error  "Invalid credentials"
-// @Failure      413      {object} apierror.Error  "Request body too large"
-// @Failure      422      {object} apierror.Error  "Validation failed"
-// @Failure      429      {object} apierror.Error  "Rate limited"
-// @Failure      500      {object} apierror.Error  "Internal error"
+// @Failure      400      {object} ErrorResponse  "Malformed JSON / empty body"
+// @Failure      401      {object} ErrorResponse  "Invalid credentials"
+// @Failure      413      {object} ErrorResponse  "Request body too large"
+// @Failure      422      {object} ErrorResponse  "Validation failed"
+// @Failure      429      {object} ErrorResponse  "Rate limited"
+// @Failure      500      {object} ErrorResponse  "Internal error"
 // @Router       /v1/auth/login [post]
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
@@ -126,8 +126,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // @Security     CookieAuth
 // @Success      204  "No Content"
 // @Header       204  {string} X-Request-ID  "Echoed request id"
-// @Failure      429  {object} apierror.Error "Rate limited"
-// @Failure      500  {object} apierror.Error "Internal error"
+// @Failure      429  {object} ErrorResponse "Rate limited"
+// @Failure      500  {object} ErrorResponse "Internal error"
 // @Router       /v1/auth/logout [post]
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Logout(r.Context()); err != nil {
@@ -146,9 +146,9 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 // @Security     CookieAuth
 // @Success      204  "No Content"
 // @Header       204  {string} X-Request-ID  "Echoed request id"
-// @Failure      401  {object} apierror.Error "Not authenticated"
-// @Failure      429  {object} apierror.Error "Rate limited"
-// @Failure      500  {object} apierror.Error "Internal error"
+// @Failure      401  {object} ErrorResponse "Not authenticated"
+// @Failure      429  {object} ErrorResponse "Rate limited"
+// @Failure      500  {object} ErrorResponse "Internal error"
 // @Router       /v1/auth/logout-all [post]
 func (h *AuthHandler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 	uid, err := h.svc.CurrentUser(r.Context())
@@ -180,9 +180,9 @@ func (h *AuthHandler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 // @Security     CookieAuth
 // @Success      200  {object} MeResponse     "Authenticated user"
 // @Header       200  {string} X-Request-ID   "Echoed request id"
-// @Failure      401  {object} apierror.Error "Not authenticated"
-// @Failure      429  {object} apierror.Error "Rate limited"
-// @Failure      500  {object} apierror.Error "Internal error"
+// @Failure      401  {object} ErrorResponse "Not authenticated"
+// @Failure      429  {object} ErrorResponse "Rate limited"
+// @Failure      500  {object} ErrorResponse "Internal error"
 // @Router       /v1/auth/me [get]
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	u, err := h.svc.Me(r.Context())
@@ -204,11 +204,11 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 // @Param        request  body     PasswordResetRequestRequest  true  "Email to send the reset link to"
 // @Success      204                "No Content"
 // @Header       204      {string}  X-Request-ID                       "Echoed request id"
-// @Failure      400      {object}  apierror.Error                     "Malformed JSON / empty body"
-// @Failure      413      {object}  apierror.Error                     "Request body too large"
-// @Failure      422      {object}  apierror.Error                     "Validation failed"
-// @Failure      429      {object}  apierror.Error                     "Rate limited"
-// @Failure      500      {object}  apierror.Error                     "Internal error"
+// @Failure      400      {object}  ErrorResponse                     "Malformed JSON / empty body"
+// @Failure      413      {object}  ErrorResponse                     "Request body too large"
+// @Failure      422      {object}  ErrorResponse                     "Validation failed"
+// @Failure      429      {object}  ErrorResponse                     "Rate limited"
+// @Failure      500      {object}  ErrorResponse                     "Internal error"
 // @Router       /v1/auth/password-reset/request [post]
 func (h *AuthHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	var req PasswordResetRequestRequest
@@ -232,12 +232,12 @@ func (h *AuthHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reques
 // @Param        request  body     PasswordResetConfirmRequest  true  "Token + new password"
 // @Success      204                "No Content"
 // @Header       204      {string}  X-Request-ID                       "Echoed request id"
-// @Failure      400      {object}  apierror.Error                     "Malformed JSON / empty body"
-// @Failure      401      {object}  apierror.Error                     "Invalid or expired reset token"
-// @Failure      413      {object}  apierror.Error                     "Request body too large"
-// @Failure      422      {object}  apierror.Error                     "Validation failed"
-// @Failure      429      {object}  apierror.Error                     "Rate limited"
-// @Failure      500      {object}  apierror.Error                     "Internal error"
+// @Failure      400      {object}  ErrorResponse                     "Malformed JSON / empty body"
+// @Failure      401      {object}  ErrorResponse                     "Invalid or expired reset token"
+// @Failure      413      {object}  ErrorResponse                     "Request body too large"
+// @Failure      422      {object}  ErrorResponse                     "Validation failed"
+// @Failure      429      {object}  ErrorResponse                     "Rate limited"
+// @Failure      500      {object}  ErrorResponse                     "Internal error"
 // @Router       /v1/auth/password-reset/confirm [post]
 func (h *AuthHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	var req PasswordResetConfirmRequest

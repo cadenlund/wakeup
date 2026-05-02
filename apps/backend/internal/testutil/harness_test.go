@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -46,30 +45,22 @@ func TestNew_BasicShape(t *testing.T) {
 	}
 }
 
-// New must be safe to call from many tests in parallel — each gets isolated
-// state so writes in one harness can't bleed into another.
-func TestNew_ParallelIsolation(t *testing.T) {
+// Multiple harnesses must be isolated from each other — writes in one
+// can't bleed into another (separate pgtestdb clones + per-test redis
+// keyspaces). Built sequentially with the parent's *testing.T so cleanups
+// fire only at the end of this test (not as each subtest exits) — the
+// previous goroutine-based version was unsafe because testutil.New can
+// call t.Fatalf and FailNow across goroutines is undefined (CodeRabbit
+// caught this on PR #25).
+func TestNew_Isolation(t *testing.T) {
 	t.Parallel()
 
 	const N = 4
 	harnesses := make([]*testutil.Harness, N)
-	var wg sync.WaitGroup
-	wg.Add(N)
 	for i := 0; i < N; i++ {
-		go func(i int) {
-			defer wg.Done()
-			// Subtests aren't necessary; we just need each goroutine to
-			// produce a Harness without races. testing.T is safe across
-			// goroutines for Helper/Cleanup but not for FailNow — keep
-			// failures local.
-			harnesses[i] = testutil.New(t)
-		}(i)
+		harnesses[i] = testutil.New(t)
 	}
-	wg.Wait()
 
-	// Each harness must point at a different test server and a different
-	// underlying database (proven by inserting in one and not seeing it in
-	// the others).
 	urls := map[string]struct{}{}
 	for _, h := range harnesses {
 		urls[h.Server.URL] = struct{}{}

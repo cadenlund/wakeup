@@ -23,10 +23,15 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 )
 
-// envelope is the §4.4 outer JSON shape for error responses:
+// ErrorResponse is the §4.4 outer JSON shape for error responses:
 //
 //	{ "error": { "code": "...", "message": "...", "fields": [...], ... } }
-type envelope struct {
+//
+// Exported so swaggo `@Failure` annotations render the correct envelope
+// shape in the generated OpenAPI spec (CodeRabbit caught the missing
+// wrapper on PR #25). Every handler should reference this type — never
+// `apierror.Error` directly — in `@Failure` lines.
+type ErrorResponse struct {
 	Error *apierror.Error `json:"error"`
 }
 
@@ -61,7 +66,7 @@ func WriteNoContent(w http.ResponseWriter) {
 // Never leaks a raw Go error string to the client.
 func WriteError(w http.ResponseWriter, _ *http.Request, err error) {
 	if err == nil {
-		WriteJSON(w, http.StatusInternalServerError, envelope{
+		WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error: apierror.Internal("WriteError called with nil"),
 		})
 		return
@@ -71,7 +76,7 @@ func WriteError(w http.ResponseWriter, _ *http.Request, err error) {
 	if apiErr.Code == apierror.CodeRateLimited && apiErr.RetryAfterSeconds > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(apiErr.RetryAfterSeconds))
 	}
-	WriteJSON(w, apiErr.HTTPStatus(), envelope{Error: apiErr})
+	WriteJSON(w, apiErr.HTTPStatus(), ErrorResponse{Error: apiErr})
 }
 
 // toAPIError performs the single-source-of-truth conversion used by both
