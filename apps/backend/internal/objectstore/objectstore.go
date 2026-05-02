@@ -30,6 +30,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
@@ -79,14 +80,27 @@ func New(cfg Config) (*Store, error) {
 		o.BaseEndpoint = aws.String(cfg.Endpoint)
 		o.UsePathStyle = cfg.ForcePathStyle
 	})
-	return NewWithClient(client, cfg), nil
+	return NewWithClient(client, cfg)
 }
 
 // NewWithClient is the escape hatch for callers that build their own
 // *s3.Client (typically because they're using IAM-role credentials in
 // production). The Bucket / MaxUploadBytes / DefaultPresignTTL fields of
 // cfg are honored; the credentials/region/endpoint fields are ignored.
-func NewWithClient(client *s3.Client, cfg Config) *Store {
+//
+// Validates the inputs so a nil client or a missing bucket fails at
+// construction time rather than later inside Put with a confusing nil-
+// pointer panic.
+func NewWithClient(client *s3.Client, cfg Config) (*Store, error) {
+	if client == nil {
+		return nil, errors.New("objectstore: NewWithClient: client is nil")
+	}
+	if strings.TrimSpace(cfg.Bucket) == "" {
+		return nil, errors.New("objectstore: NewWithClient: Config.Bucket is required")
+	}
+	if cfg.MaxUploadBytes < 0 {
+		return nil, fmt.Errorf("objectstore: NewWithClient: Config.MaxUploadBytes must be >= 0, got %d", cfg.MaxUploadBytes)
+	}
 	ttl := cfg.DefaultPresignTTL
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
@@ -97,7 +111,7 @@ func NewWithClient(client *s3.Client, cfg Config) *Store {
 		bucket:            cfg.Bucket,
 		maxUploadBytes:    cfg.MaxUploadBytes,
 		defaultPresignTTL: ttl,
-	}
+	}, nil
 }
 
 func validateConfig(cfg Config) error {
@@ -233,23 +247,21 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return fmt.Errorf("objectstore: Delete %q: %w", key, err)
 }
 
-// isNotFound reports whether err is the SDK's NoSuchKey response. AWS S3
-// returns 204 even for missing keys; MinIO sometimes surfaces a 404. Either
-// way Delete should treat it as success.
+// isNotFound reports whether err is the SDK's NoSuchKey / NotFound response.
+// AWS S3 returns 204 even for missing keys; MinIO sometimes surfaces a 404
+// with `NoSuchKey`. Either way Delete should treat it as success.
 func isNotFound(err error) bool {
-	var apiErr *smithyhttp.ResponseError
-	if errors.As(err, &apiErr) && apiErr.HTTPStatusCode() == 404 {
+	var httpErr *smithyhttp.ResponseError
+	if errors.As(err, &httpErr) && httpErr.HTTPStatusCode() == 404 {
 		return true
 	}
-	// Fallback: a NoSuchKey error type from the s3 service.
-	var nsk *s3NoSuchKeyMarker
-	return errors.As(err, &nsk)
+	// Generic Smithy APIError fallback (the SDK's typed NoSuchKey errors
+	// satisfy this interface and report their ErrorCode without us having
+	// to import s3types directly).
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		code := apiErr.ErrorCode()
+		return code == "NoSuchKey" || code == "NotFound"
+	}
+	return false
 }
-
-// s3NoSuchKeyMarker exists purely so we can errors.As against the SDK's
-// NoSuchKey error without importing every error type. The SDK's NoSuchKey
-// type implements error and has Method() returning a known string; this
-// stub matches that interface for forward compatibility.
-type s3NoSuchKeyMarker struct{}
-
-func (s3NoSuchKeyMarker) Error() string { return "NoSuchKey" }
