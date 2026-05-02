@@ -45,18 +45,27 @@ LIMIT $4;
 
 -- name: GetDirectByPair :one
 -- Looks up the (at most one) direct conversation between two users by
--- intersecting their membership rows.
+-- intersecting their membership rows. The `$1 <> $2` guard prevents a
+-- self-lookup from matching a single membership row twice and pretending
+-- a 1-person conversation exists (CodeRabbit caught this on PR #34).
 SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
 FROM conversations c
 JOIN conversation_members ma ON ma.conversation_id = c.id AND ma.user_id = $1
 JOIN conversation_members mb ON mb.conversation_id = c.id AND mb.user_id = $2
-WHERE c.type = 'direct';
+WHERE c.type = 'direct' AND $1::uuid <> $2::uuid;
 
 -- name: AddMember :one
 INSERT INTO conversation_members (conversation_id, user_id, role)
 VALUES ($1, $2, $3)
 RETURNING conversation_id, user_id, role, joined_at, last_read_message_id;
+
+-- name: LockConversationForMemberWrite :one
+-- Step 1 of the cap-enforcing add: row-lock the conversation so
+-- concurrent member writes serialize through it. Used in tandem with
+-- CountMembers + AddMember inside a transaction — see the
+-- AddMemberWithCap method on Queries for the full pattern.
+SELECT id FROM conversations WHERE id = $1 FOR UPDATE;
 
 -- name: RemoveMember :exec
 DELETE FROM conversation_members

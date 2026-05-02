@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -327,6 +328,140 @@ func TestGetDirectByPair_NotFound(t *testing.T) {
 	b := makeUser(ctx, t, pool)
 	if _, err := repo.GetDirectByPair(ctx, a, b); !errors.Is(err, conversation.ErrNotFound) {
 		t.Errorf("got %v, want ErrNotFound", err)
+	}
+}
+
+func TestGetDirectByPair_SameUserReturnsNotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	a := makeUser(ctx, t, pool)
+	b := makeUser(ctx, t, pool)
+	_ = makeDirect(ctx, t, repo, a, b)
+
+	// `a, a` would self-join and match a single membership row twice
+	// without the explicit `<>` guard. Repo must return ErrNotFound.
+	if _, err := repo.GetDirectByPair(ctx, a, a); !errors.Is(err, conversation.ErrNotFound) {
+		t.Errorf("self-pair should return ErrNotFound, got %v", err)
+	}
+}
+
+// --- AddMemberWithCap atomic cap-25 ------------------------------------
+
+func TestAddMemberWithCap_BelowCapInserts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	creator := makeUser(ctx, t, pool)
+	groupName := "Capped"
+	c, err := repo.CreateConversation(ctx, conversation.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), Type: domain.ConversationGroup, Name: &groupName, CreatedBy: creator,
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	other := makeUser(ctx, t, pool)
+	got, err := conversation.AddMemberWithCap(ctx, pool, c.ID, other, domain.MemberRoleMember, 5)
+	if err != nil {
+		t.Fatalf("AddMemberWithCap: %v", err)
+	}
+	if got.UserID != other {
+		t.Errorf("UserID mismatch")
+	}
+}
+
+func TestAddMemberWithCap_AtCapReturnsErrGroupTooLarge(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	creator := makeUser(ctx, t, pool)
+	groupName := "Tiny"
+	c, err := repo.CreateConversation(ctx, conversation.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), Type: domain.ConversationGroup, Name: &groupName, CreatedBy: creator,
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	// Cap = 2; add 2 members up to the cap, then a third must fail.
+	for i := 0; i < 2; i++ {
+		other := makeUser(ctx, t, pool)
+		if _, err := conversation.AddMemberWithCap(ctx, pool, c.ID, other, domain.MemberRoleMember, 2); err != nil {
+			t.Fatalf("AddMemberWithCap %d: %v", i, err)
+		}
+	}
+	overflow := makeUser(ctx, t, pool)
+	_, err = conversation.AddMemberWithCap(ctx, pool, c.ID, overflow, domain.MemberRoleMember, 2)
+	if !errors.Is(err, conversation.ErrGroupTooLarge) {
+		t.Errorf("got %v, want ErrGroupTooLarge", err)
+	}
+	// Underlying count is still 2 — the overflow attempt didn't sneak in.
+	n, _ := repo.CountMembers(ctx, c.ID)
+	if n != 2 {
+		t.Errorf("count = %d, want 2", n)
+	}
+}
+
+func TestAddMemberWithCap_ConcurrentAddsRespectCap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	creator := makeUser(ctx, t, pool)
+	groupName := "Race"
+	c, err := repo.CreateConversation(ctx, conversation.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), Type: domain.ConversationGroup, Name: &groupName, CreatedBy: creator,
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	const memberCap = 3
+	const concurrent = 10
+	others := make([]uuid.UUID, concurrent)
+	for i := range others {
+		others[i] = makeUser(ctx, t, pool)
+	}
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		okN     int
+		tooBig  int
+		otherEr error
+	)
+	for i := 0; i < concurrent; i++ {
+		wg.Add(1)
+		go func(uid uuid.UUID) {
+			defer wg.Done()
+			_, err := conversation.AddMemberWithCap(ctx, pool, c.ID, uid, domain.MemberRoleMember, memberCap)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				okN++
+			case errors.Is(err, conversation.ErrGroupTooLarge):
+				tooBig++
+			default:
+				otherEr = err
+			}
+		}(others[i])
+	}
+	wg.Wait()
+
+	if otherEr != nil {
+		t.Fatalf("unexpected error: %v", otherEr)
+	}
+	if okN != memberCap {
+		t.Errorf("ok = %d, want %d (cap)", okN, memberCap)
+	}
+	if okN+tooBig != concurrent {
+		t.Errorf("ok+tooBig = %d, want %d (concurrent)", okN+tooBig, concurrent)
+	}
+	n, _ := repo.CountMembers(ctx, c.ID)
+	if n != memberCap {
+		t.Errorf("count = %d, want %d", n, memberCap)
 	}
 }
 

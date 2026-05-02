@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
@@ -91,12 +92,15 @@ SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
 FROM conversations c
 JOIN conversation_members ma ON ma.conversation_id = c.id AND ma.user_id = $1
 JOIN conversation_members mb ON mb.conversation_id = c.id AND mb.user_id = $2
-WHERE c.type = 'direct'`
+WHERE c.type = 'direct' AND $1::uuid <> $2::uuid`
 
 const addMemberSQL = `-- name: AddMember :one
 INSERT INTO conversation_members (conversation_id, user_id, role)
 VALUES ($1, $2, $3)
 RETURNING conversation_id, user_id, role, joined_at, last_read_message_id`
+
+const lockConversationForMemberWriteSQL = `-- name: LockConversationForMemberWrite :one
+SELECT id FROM conversations WHERE id = $1 FOR UPDATE`
 
 const removeMemberSQL = `-- name: RemoveMember :exec
 DELETE FROM conversation_members
@@ -267,13 +271,71 @@ func (q *Queries) GetDirectByPair(ctx context.Context, a, b uuid.UUID) (domain.C
 	return c, nil
 }
 
-// AddMember inserts a single conversation_members row. Caller controls
-// the cap-25 check via CountMembers; this method only enforces the
-// PK uniqueness.
+// AddMember inserts a single conversation_members row. The PK on
+// (conversation_id, user_id) prevents duplicates; concurrent adds to
+// the same conversation can race past the cap-25 invariant — use
+// AddMemberWithCap to enforce that atomically.
 func (q *Queries) AddMember(ctx context.Context, conversationID, userID uuid.UUID, role domain.MemberRole) (domain.ConversationMember, error) {
 	m, err := scanMember(q.db.QueryRow(ctx, addMemberSQL, conversationID, userID, string(role)))
 	if err != nil {
 		return domain.ConversationMember{}, fmt.Errorf("conversation: add member: %w", err)
+	}
+	return m, nil
+}
+
+// AddMemberWithCap inserts a single conversation_members row, refusing
+// when the conversation is already at `memberCap` members.
+//
+// Atomicity is multi-statement and requires its own transaction:
+//
+//  1. SELECT FROM conversations WHERE id=$1 FOR UPDATE — locks the row,
+//     concurrent writers block here.
+//  2. SELECT count(*) FROM conversation_members WHERE conversation_id=$1.
+//     This second statement gets a fresh READ COMMITTED snapshot AFTER
+//     the FOR UPDATE returns, so concurrent inserts that committed
+//     before our lock acquired ARE visible (Postgres `FOR UPDATE` plus
+//     follow-the-lock semantics — see PR #34 review for why a single-
+//     statement CTE is NOT enough).
+//  3. INSERT IF count < cap.
+//
+// We need a *pgxpool.Pool here because we BEGIN our own transaction;
+// the storage.DBTX interface doesn't expose Begin. Returns
+// ErrGroupTooLarge when the cap is hit; ErrNotFound when the
+// conversation row doesn't exist; SQLSTATE 23505 unique-violation when
+// the user is already a member.
+func AddMemberWithCap(ctx context.Context, pool *pgxpool.Pool, conversationID, userID uuid.UUID, role domain.MemberRole, memberCap int) (domain.ConversationMember, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return domain.ConversationMember{}, fmt.Errorf("conversation: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Step 1: row-lock the conversation. Concurrent calls block here.
+	var lockedID uuid.UUID
+	if err := tx.QueryRow(ctx, lockConversationForMemberWriteSQL, conversationID).Scan(&lockedID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ConversationMember{}, ErrNotFound
+		}
+		return domain.ConversationMember{}, fmt.Errorf("conversation: lock for member write: %w", err)
+	}
+
+	// Step 2: count after lock. Fresh snapshot in this new statement
+	// reflects any inserts committed by writers that ran before us.
+	var count int
+	if err := tx.QueryRow(ctx, countMembersSQL, conversationID).Scan(&count); err != nil {
+		return domain.ConversationMember{}, fmt.Errorf("conversation: count members: %w", err)
+	}
+	if count >= memberCap {
+		return domain.ConversationMember{}, ErrGroupTooLarge
+	}
+
+	// Step 3: insert.
+	m, err := scanMember(tx.QueryRow(ctx, addMemberSQL, conversationID, userID, string(role)))
+	if err != nil {
+		return domain.ConversationMember{}, fmt.Errorf("conversation: add member with cap: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.ConversationMember{}, fmt.Errorf("conversation: commit add member with cap: %w", err)
 	}
 	return m, nil
 }
