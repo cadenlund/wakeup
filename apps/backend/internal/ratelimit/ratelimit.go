@@ -72,7 +72,7 @@ func (l *Limiter) Allow(ctx context.Context, key string, limit int, window time.
 	}
 
 	nowMs := l.now().UnixMilli()
-	windowMs := window.Milliseconds()
+	windowMs := windowMillisCeil(window)
 
 	// Random unique member so concurrent requests within the same ms don't
 	// collide on score collisions in the sorted set.
@@ -114,6 +114,19 @@ func uniqueMember() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf[:]), nil
+}
+
+// windowMillisCeil rounds the window UP to at least 1ms. time.Duration.
+// Milliseconds() truncates sub-millisecond durations to 0, which would make
+// Redis PEXPIRE 0 the bucket key immediately and let traffic past the limit.
+// Ceiling division preserves the limiter's contract for any positive window.
+//
+// Exported for tests; not part of the public surface a caller should use.
+func windowMillisCeil(window time.Duration) int64 {
+	if window <= 0 {
+		return 0
+	}
+	return int64((window + time.Millisecond - 1) / time.Millisecond)
 }
 
 // allowScript is the atomic check-and-log primitive. KEYS[1] = bucket key.

@@ -115,12 +115,16 @@ func TestAllow_SeparateKeysAreIndependent(t *testing.T) {
 	keyA := keyFor(t, "A")
 	keyB := keyFor(t, "B")
 
-	// Saturate keyA.
+	// Saturate keyA — assert allowed=true on each priming request so a
+	// transport hiccup can't pass the test for the wrong reason.
 	for i := 0; i < 3; i++ {
-		_, _, _ = l.Allow(ctx, keyA, 3, time.Minute)
+		ok, _, err := l.Allow(ctx, keyA, 3, time.Minute)
+		if err != nil || !ok {
+			t.Fatalf("keyA prime req %d: ok=%v err=%v", i, ok, err)
+		}
 	}
-	if ok, _, _ := l.Allow(ctx, keyA, 3, time.Minute); ok {
-		t.Fatal("keyA should be saturated")
+	if ok, _, err := l.Allow(ctx, keyA, 3, time.Minute); err != nil || ok {
+		t.Fatalf("keyA saturation check: ok=%v err=%v (want allowed=false, err=nil)", ok, err)
 	}
 
 	// keyB must be unaffected.
