@@ -23,8 +23,12 @@ clean:
 test:
     cd apps/backend && go test -race -count=1 ./...
 
+# Coverage recipe — produces apps/backend/coverage.out. Scoped to ./internal/...
+# because the cmd/server main package has no tests and triggers a `go: no such tool
+# "covdata"` error on hosted runners when included with -coverprofile (see GH actions
+# logs from PR #1). Restore broader scope at Phase 1.4 if/when cmd/server gets tests.
 test-cover:
-    cd apps/backend && go test -race -covermode=atomic -coverprofile=coverage.out ./...
+    cd apps/backend && go test -race -covermode=atomic -coverprofile=coverage.out ./internal/...
 
 # Lint
 lint:

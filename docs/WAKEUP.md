@@ -2333,9 +2333,11 @@ test:
     cd apps/backend && go test -race -count=1 ./...
 
 test-cover:
-    # `-race` requires atomic covermode; `-coverprofile` avoids the `go: no such tool "covdata"`
-    # error you'd get from bare `-cover` because the merge step needs an explicit profile.
-    cd apps/backend && go test -race -covermode=atomic -coverprofile=coverage.out ./...
+    # Scoped to ./internal/... — the cmd/server main package has no tests and
+    # triggers `go: no such tool "covdata"` on hosted runners when included with
+    # -coverprofile. Lint + `go build ./...` still verify cmd/server compiles.
+    # Restore broader scope at Phase 1.4 if cmd/server ever gets a test.
+    cd apps/backend && go test -race -covermode=atomic -coverprofile=coverage.out ./internal/...
 
 # Lint
 lint:
