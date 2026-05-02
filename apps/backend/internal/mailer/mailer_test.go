@@ -156,6 +156,9 @@ func TestNew_ValidatesConfig(t *testing.T) {
 		{"missing api key", func(c *mailer.Config) { c.APIKey = "" }},
 		{"missing from", func(c *mailer.Config) { c.FromEmail = "" }},
 		{"missing reset URL", func(c *mailer.Config) { c.ResetURLBase = "" }},
+		{"relative reset URL", func(c *mailer.Config) { c.ResetURLBase = "/auth/reset?token=" }},
+		{"scheme-only reset URL", func(c *mailer.Config) { c.ResetURLBase = "https:///path" }},
+		{"non-URL reset", func(c *mailer.Config) { c.ResetURLBase = "not a url" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

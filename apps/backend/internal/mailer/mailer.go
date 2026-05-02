@@ -76,8 +76,15 @@ func validate(cfg Config) error {
 	if strings.TrimSpace(cfg.ResetURLBase) == "" {
 		return errors.New("mailer: Config.ResetURLBase is required")
 	}
-	if _, err := url.Parse(cfg.ResetURLBase); err != nil {
+	// ParseRequestURI rejects relative URLs (url.Parse accepts them).
+	// We then explicitly require Scheme + Host so a path-only string like
+	// "/auth/reset?token=" doesn't slip through.
+	u, err := url.ParseRequestURI(cfg.ResetURLBase)
+	if err != nil {
 		return fmt.Errorf("mailer: Config.ResetURLBase is not a valid URL: %w", err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return errors.New("mailer: Config.ResetURLBase must be an absolute URL with scheme + host")
 	}
 	return nil
 }
