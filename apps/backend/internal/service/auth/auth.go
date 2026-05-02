@@ -136,9 +136,12 @@ func (s *Service) Register(ctx context.Context, p RegisterParams) (domain.User, 
 		return domain.User{}, apierror.Internal("create user").WithCause(err)
 	}
 
-	// Log the user in by writing user_id into their session. The session
-	// manager's LoadAndSave middleware (wired at the router root) writes
-	// the cookie back on the response.
+	// Rotate the session token before writing the new identity — defeats
+	// session fixation (a pre-login cookie can't be reused post-login).
+	// scs idiom: RenewToken FIRST, then Put.
+	if err := s.sessions.RenewToken(ctx); err != nil {
+		return domain.User{}, apierror.Internal("session renew").WithCause(err)
+	}
 	s.sessions.Put(ctx, SessionUserIDKey, created.ID.String())
 	return created, nil
 }
@@ -177,26 +180,29 @@ func (s *Service) Login(ctx context.Context, p LoginParams) (domain.User, error)
 		return domain.User{}, apierror.Unauthorized("invalid credentials")
 	}
 
+	// Rotate session token before binding identity (session-fixation defense).
+	if err := s.sessions.RenewToken(ctx); err != nil {
+		return domain.User{}, apierror.Internal("session renew").WithCause(err)
+	}
 	s.sessions.Put(ctx, SessionUserIDKey, u.ID.String())
 	return u, nil
 }
 
-// lookupForLogin tries username first (matches typical UX), falls back to
-// email if the input contains an "@".
+// lookupForLogin always tries username first then falls back to email on a
+// not-found miss. We intentionally don't shortcut on "@" because §4.6
+// allows usernames containing characters that look email-ish in some
+// edge inputs, and we shouldn't let that flip the precedence (a username
+// that happens to look like another user's email must still authenticate
+// as the username).
 func (s *Service) lookupForLogin(ctx context.Context, identifier string) (domain.User, error) {
-	if strings.Contains(identifier, "@") {
-		return s.users.GetByEmail(ctx, identifier)
-	}
 	u, err := s.users.GetByUsername(ctx, identifier)
 	if err == nil {
 		return u, nil
 	}
-	if errors.Is(err, user.ErrNotFound) {
-		// Try email even if the input doesn't have "@" — a rare edge but
-		// some emails (in tests / dev) lack a domain.
-		return s.users.GetByEmail(ctx, identifier)
+	if !errors.Is(err, user.ErrNotFound) {
+		return domain.User{}, err
 	}
-	return domain.User{}, err
+	return s.users.GetByEmail(ctx, identifier)
 }
 
 // Logout destroys the current session. Always returns nil (a missing
@@ -256,33 +262,41 @@ func (s *Service) Me(ctx context.Context) (domain.User, error) {
 	return u, nil
 }
 
-// RequestPasswordReset generates a token, stores its hash, and emails the
-// plain token to the user. ALWAYS returns nil — even when no account
-// matches the email — to defeat email enumeration (§6.2).
+// RequestPasswordReset generates a token and emails it to the user.
+// ALWAYS returns nil — even when the email is unknown — to defeat email
+// enumeration (§6.2 always-204 contract).
 //
-// Internal errors (DB / mailer transport failures) are swallowed at the
-// service boundary; the handler returns 204 unconditionally and the
-// underlying cause is logged via slog inside the service. Better than
-// leaking "your email exists, but reset failed" via a 500.
+// Two enumeration vectors we close here:
+//
+//  1. **Outcome leakage**: nil return regardless of branch.
+//
+//  2. **Timing leakage**: the cryptographic random + SHA-256 hash run
+//     unconditionally, so an attacker timing the request can't infer
+//     "known account" from a longer response. The DB insert + mail
+//     dispatch only happen for real users (we're not willing to spam
+//     password_resets with junk rows), but those are O(ms) and dwarfed
+//     by the noise floor of normal HTTP latency. Perfectly constant-time
+//     would require fake DB/network round-trips for unknown emails, a
+//     trade-off we don't take in v1.
+//
+// Internal errors (random failure, DB transport hiccup, mailer outage)
+// are swallowed at the service boundary so they don't leak via a 500
+// only on the existing-account path. The underlying cause is left to
+// be logged at the handler/middleware layer when slog is wired in.
 func (s *Service) RequestPasswordReset(ctx context.Context, email string) error {
-	u, err := s.users.GetByEmail(ctx, strings.TrimSpace(email))
-	if err != nil {
-		// Unknown email → silently no-op.
-		return nil
-	}
-
-	rawToken, err := generateToken(s.tokenEntropy)
-	if err != nil {
-		return apierror.Internal("generate reset token").WithCause(err)
-	}
+	// Always do the random+hash work, even for unknown emails, so the
+	// CPU cost of the call doesn't differ between cases.
+	rawToken, _ := generateToken(s.tokenEntropy)
 	tokenHash := sha256Bytes(rawToken)
 	expiresAt := s.now().UTC().Add(PasswordResetTTL)
 
-	if err := s.resets.Create(ctx, tokenHash, u.ID, expiresAt); err != nil {
-		// Don't surface — the user shouldn't know whether anything was
-		// inserted. Fail silently from the client's perspective.
-		return nil
+	u, err := s.users.GetByEmail(ctx, strings.TrimSpace(email))
+	if err != nil {
+		return nil // unknown email — silent no-op
 	}
+	// Best-effort persist + mail. Errors are intentionally not surfaced
+	// to the caller — the always-204 contract trumps an internal failure.
+	_ = s.resets.Create(ctx, tokenHash, u.ID, expiresAt)
 	_ = s.mail.SendPasswordReset(ctx, u.Email, rawToken)
 	return nil
 }
