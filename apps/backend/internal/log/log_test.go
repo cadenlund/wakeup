@@ -23,6 +23,8 @@ func TestParseLevel_Canonical(t *testing.T) {
 		{"warn", slog.LevelWarn},
 		{"warning", slog.LevelWarn},
 		{"error", slog.LevelError},
+		{" info ", slog.LevelInfo}, // surrounding whitespace is trimmed
+		{"\tDebug\n", slog.LevelDebug},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {

@@ -38,7 +38,7 @@ func NewWithWriter(level string, w io.Writer) *slog.Logger {
 //
 // "" is treated as recognized and resolves to info, matching koanf's default.
 func ParseLevel(s string) (slog.Level, bool) {
-	switch strings.ToLower(s) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "debug":
 		return slog.LevelDebug, true
 	case "", "info":
