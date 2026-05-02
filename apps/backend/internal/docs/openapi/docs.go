@@ -449,6 +449,73 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/healthz": {
+            "get": {
+                "description": "Returns 200 unconditionally. The load balancer uses this to confirm the process is running; it does not check downstream dependencies (use readyz for that).",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Liveness probe",
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/openapi.json": {
+            "get": {
+                "description": "Serves the generated OpenAPI 2.0 spec for this API. /v1/docs (Swagger UI) loads it from this endpoint.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "OpenAPI spec",
+                "responses": {
+                    "200": {
+                        "description": "OpenAPI document",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/readyz": {
+            "get": {
+                "description": "Pings Postgres and Redis with independent 1.5s timeouts. Returns 200 only when both respond; otherwise 500 with a §4.4 envelope listing failed dependencies.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Readiness probe",
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Dependency failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_cadenlund_wakeup_apps_backend_internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/users": {
             "get": {
                 "security": [
@@ -938,6 +1005,54 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "github_com_cadenlund_wakeup_apps_backend_internal_handler_http.ErrorBody": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "RESOURCE_NOT_FOUND"
+                },
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_cadenlund_wakeup_apps_backend_internal_handler_http.ErrorField"
+                    }
+                },
+                "message": {
+                    "type": "string",
+                    "example": "user not found"
+                },
+                "retry_after_seconds": {
+                    "type": "integer",
+                    "example": 30
+                }
+            }
+        },
+        "github_com_cadenlund_wakeup_apps_backend_internal_handler_http.ErrorField": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "INVALID_FORMAT"
+                },
+                "field": {
+                    "type": "string",
+                    "example": "email"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "must be a valid email"
+                }
+            }
+        },
+        "github_com_cadenlund_wakeup_apps_backend_internal_handler_http.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/github_com_cadenlund_wakeup_apps_backend_internal_handler_http.ErrorBody"
+                }
+            }
+        },
         "internal_handler_http.AvatarUploadResponse": {
             "type": "object",
             "properties": {

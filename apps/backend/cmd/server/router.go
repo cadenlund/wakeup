@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
@@ -112,6 +113,11 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 			r.Post("/v1/auth/login", d.AuthHandler.Login)
 			r.Post("/v1/auth/password-reset/request", d.AuthHandler.RequestPasswordReset)
 			r.Post("/v1/auth/password-reset/confirm", d.AuthHandler.ConfirmPasswordReset)
+			// Logout is idempotent (handler returns 204 even with no
+			// active session), so it sits OUTSIDE RequireAuth so a
+			// stale-cookie client can still drop their session cleanly.
+			// CodeRabbit caught the previous misplacement on PR #28.
+			r.Post("/v1/auth/logout", d.AuthHandler.Logout)
 		})
 
 		// Authenticated routes. Writes vs reads sit in separate scopes so
@@ -125,7 +131,6 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 					Limit: rateLimitWrites.Limit, Window: rateLimitWrites.Window,
 					Logger: d.Logger,
 				}, httpapi.WriteError))
-				r.Post("/v1/auth/logout", d.AuthHandler.Logout)
 				r.Post("/v1/auth/logout-all", d.AuthHandler.LogoutAll)
 				r.Patch("/v1/users/me", d.UserHandler.UpdateMe)
 				r.Delete("/v1/users/me", d.UserHandler.DeleteMe)
@@ -165,25 +170,57 @@ func corsMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 }
 
 // healthz is the unauthenticated liveness probe — process is up.
+//
+// @Summary      Liveness probe
+// @Description  Returns 200 unconditionally. The load balancer uses this to confirm the process is running; it does not check downstream dependencies (use readyz for that).
+// @Tags         system
+// @Produce      plain
+// @Success      200  {string}  string  "ok"
+// @Router       /v1/healthz [get]
 func healthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
 }
 
-// readyz checks downstreams: Postgres + Redis. Returns 200 when both
-// respond within the per-check deadline; otherwise 503 with a §4.4
-// error envelope listing what failed.
+// readyz checks downstreams: Postgres + Redis. Each ping gets its own
+// per-dependency timeout — a slow Postgres can't burn the whole budget
+// and make Redis flap as a side effect (CodeRabbit caught the shared-
+// context bug on PR #28).
+//
+// @Summary      Readiness probe
+// @Description  Pings Postgres and Redis with independent 1.5s timeouts. Returns 200 only when both respond; otherwise 500 with a §4.4 envelope listing failed dependencies.
+// @Tags         system
+// @Produce      json
+// @Success      200  {string}  string                "ok"
+// @Failure      500  {object}  httpapi.ErrorResponse  "Dependency failure"
+// @Router       /v1/readyz [get]
 func readyz(d routerDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
+		var (
+			pgErr, redisErr error
+		)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), readyDependencyTimeout)
+			defer cancel()
+			pgErr = d.Pool.Ping(ctx)
+		}()
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), readyDependencyTimeout)
+			defer cancel()
+			redisErr = d.Redis.Ping(ctx).Err()
+		}()
+		wg.Wait()
 
 		var failures []string
-		if err := d.Pool.Ping(ctx); err != nil {
-			failures = append(failures, "postgres: "+err.Error())
+		if pgErr != nil {
+			failures = append(failures, "postgres: "+pgErr.Error())
 		}
-		if err := d.Redis.Ping(ctx).Err(); err != nil {
-			failures = append(failures, "redis: "+err.Error())
+		if redisErr != nil {
+			failures = append(failures, "redis: "+redisErr.Error())
 		}
 		if len(failures) > 0 {
 			httpapi.WriteError(w, r, apierror.Internal("not ready").
@@ -195,13 +232,23 @@ func readyz(d routerDeps) http.HandlerFunc {
 	}
 }
 
+// readyDependencyTimeout is the per-ping budget for /v1/readyz. Kept
+// short so a wedged dependency can't stall the load balancer for long.
+const readyDependencyTimeout = 1500 * time.Millisecond
+
 // openAPISpec serves the generated swagger.json.
 //
 // docs.SwaggerInfo.ReadDoc() returns the spec as a string (the swag-
-// generated package registers itself with the swag runtime), but it
-// requires the calling package to import the docs package. We do that
-// at the top of the file via the openapidocs blank import so the
-// generated init() runs.
+// generated package registers itself with the swag runtime); the
+// blank import of openapidocs at the top of the file ensures the
+// generated init() runs so the spec is registered.
+//
+// @Summary      OpenAPI spec
+// @Description  Serves the generated OpenAPI 2.0 spec for this API. /v1/docs (Swagger UI) loads it from this endpoint.
+// @Tags         system
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "OpenAPI document"
+// @Router       /v1/openapi.json [get]
 func openAPISpec(w http.ResponseWriter, _ *http.Request) {
 	spec := openapidocs.SwaggerInfo.ReadDoc()
 	w.Header().Set("Content-Type", "application/json")

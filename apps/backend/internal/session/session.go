@@ -23,13 +23,30 @@ import (
 // (e.g. logout / impersonation guard) can find / clear it without re-deriving.
 const CookieName = "wakeup_session"
 
+// Options tweaks the manager produced by New. Production callers should
+// pass the zero value (Cookie.Secure=true). Local dev / smoke tests need
+// SecureOverride=Insecure so the browser will round-trip cookies over
+// plain-HTTP — §8.2 keeps Secure ON in production where TLS terminates
+// upstream, but `just dev` is HTTP-only.
+type Options struct {
+	// Insecure: when true, set Cookie.Secure=false. Use only in local /
+	// test environments. Production MUST leave this false (the spec
+	// locks SameSite=Lax + Secure + HttpOnly as the v1 CSRF stance).
+	Insecure bool
+}
+
 // New returns a scs.SessionManager backed by the provided pgxpool. The
 // `sessions` table created by migration 0002 holds (token, data, expiry)
 // in the schema pgxstore expects.
 //
 // The returned manager is goroutine-safe and intended to be a long-lived
 // singleton — call once in cmd/server/main.go and reuse for every request.
-func New(pool *pgxpool.Pool) *scs.SessionManager {
+func New(pool *pgxpool.Pool, opts ...Options) *scs.SessionManager {
+	o := Options{}
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+
 	m := scs.New()
 	m.Store = pgxstore.New(pool)
 
@@ -38,7 +55,7 @@ func New(pool *pgxpool.Pool) *scs.SessionManager {
 
 	m.Cookie.Name = CookieName
 	m.Cookie.HttpOnly = true
-	m.Cookie.Secure = true
+	m.Cookie.Secure = !o.Insecure
 	m.Cookie.SameSite = http.SameSiteLaxMode
 	m.Cookie.Persist = true
 	m.Cookie.Path = "/"

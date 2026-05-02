@@ -104,7 +104,13 @@ func run() error {
 	resets := passwordreset.New(pool)
 	prefsRepo := notifprefrepo.New(pool)
 
-	sessions := session.New(pool)
+	// §8.2 locks Cookie.Secure=true in production. Local/test envs run
+	// over plain HTTP (`just dev`), so the browser would refuse to send
+	// the session cookie back. Relax Secure outside production —
+	// CodeRabbit caught the mismatch on PR #28.
+	sessions := session.New(pool, session.Options{
+		Insecure: cfg.Env != "production",
+	})
 	limiter := ratelimit.New(redisClient)
 
 	authSvc, err := auth.New(auth.Config{
@@ -187,13 +193,19 @@ func run() error {
 }
 
 // buildMailer returns a Resend-backed mailer in production. When
-// ResendAPIKey is empty (the local default), it returns a no-op
-// implementation so `just dev` doesn't require a Resend key just to
-// stand the server up. The password-reset flow simply has no observable
-// side effect in that case.
+// ResendAPIKey is empty in local/test envs, it returns a no-op so
+// `just dev` works without a Resend key. In any other env (staging,
+// production) a missing key is a startup error — silently no-op'ing
+// would turn a bad secret rollout into a silent password-reset outage
+// (CodeRabbit caught this on PR #28).
 func buildMailer(cfg *config.Config) (mailer.Mailer, error) {
 	if cfg.ResendAPIKey == "" {
-		return noopMailer{}, nil
+		switch cfg.Env {
+		case "local", "test":
+			return noopMailer{}, nil
+		default:
+			return nil, fmt.Errorf("mailer: RESEND_API_KEY is required in env=%s", cfg.Env)
+		}
 	}
 	return mailer.New(mailer.Config{
 		APIKey:       cfg.ResendAPIKey,

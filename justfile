@@ -57,12 +57,22 @@ gen-docs:
     cp apps/backend/internal/docs/openapi/swagger.json docs/openapi/swagger.json
     cp apps/backend/internal/docs/openapi/swagger.yaml docs/openapi/swagger.yaml
 
+# Verifies the committed swagger artifacts match what gen-docs produces.
+# CI runs this after gen-docs so a forgotten regen fails the pipeline
+# instead of silently shipping a stale spec.
+gen-docs-check: gen-docs
+    @if ! git diff --quiet HEAD -- apps/backend/internal/docs/openapi/docs.go docs/openapi/swagger.json docs/openapi/swagger.yaml; then \
+        echo "ERROR: swagger artifacts are stale — run 'just gen-docs' and commit the output."; \
+        git --no-pager diff HEAD -- apps/backend/internal/docs/openapi/docs.go docs/openapi/swagger.json docs/openapi/swagger.yaml | head -80; \
+        exit 1; \
+    fi
+
 # Generate mobile client from OpenAPI
 gen-client:
     oapi-codegen -package wakeupapi -generate types,client docs/openapi/swagger.json > apps/mobile/lib/wakeupapi/client.go
 
 # Verify all (used in CI and as the final acceptance gate)
-verify: lint test gen-docs
+verify: lint test gen-docs-check
     @echo "All checks passed."
 
 # Reset local DB
