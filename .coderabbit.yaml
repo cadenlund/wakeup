@@ -1,0 +1,23 @@
+language: en-US
+reviews:
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "apps/backend/**"
+      instructions: |
+        Enforce the layered architecture: handler → service → repository → storage.
+        Repositories must use the DBTX interface, never *pgxpool.Pool directly.
+        Every handler must have swaggo annotations.
+        Every test must use t.Parallel() and pgtestdb for DB isolation.
+        Errors returned to clients must be *apierror.Error.
+    - path: "apps/backend/internal/{argon2id,session,apierror,pagination,ratelimit,pubsub,mailer,pushnotif,objectstore,wsproto}/**"
+      instructions: |
+        These are utility packages. They must not import from internal/repository, internal/service, internal/handler, or internal/middleware.
+chat:
+  auto_reply: true
