@@ -72,6 +72,20 @@ type UpdateProfileParams struct {
 	ColorScheme *string
 }
 
+// ListByIDs fetches every user whose ID appears in ids. Soft-deleted
+// users ARE included so handlers can render the §4.6 placeholder shape
+// for message-history and friend-list views (rather than vanishing).
+//
+// The returned slice is NOT guaranteed to be in input order — callers
+// should map by ID if order matters.
+func (s *Service) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]domain.User, error) {
+	users, err := s.users.ListByIDs(ctx, ids)
+	if err != nil {
+		return nil, apierror.Internal("list users by ids").WithCause(err)
+	}
+	return users, nil
+}
+
 // GetByID returns the public profile for id. Returns apierror.NotFound
 // when the user doesn't exist or is soft-deleted.
 func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (domain.User, error) {

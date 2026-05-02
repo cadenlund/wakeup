@@ -31,10 +31,12 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
+	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
+	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
@@ -76,9 +78,11 @@ type Harness struct {
 	Sessions     *scs.SessionManager
 	UserRepo     *userrepo.Queries
 	ResetsRepo   *passwordreset.Queries
+	FriendRepo   *friendrepo.Queries
 	NotifPrefSvc *notifprefsvc.Service
 	AuthSvc      *auth.Service
 	UserSvc      *usersvc.Service
+	FriendSvc    *friendsvc.Service
 
 	serverURL *url.URL
 }
@@ -111,6 +115,7 @@ func New(t *testing.T) *Harness {
 	users := userrepo.New(pool)
 	resets := passwordreset.New(pool)
 	notifPrefs := notifprefrepo.New(pool)
+	friends := friendrepo.New(pool)
 	sm := session.New(pool)
 
 	endpoint := StartMinIO(t)
@@ -143,6 +148,10 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build user service: %v", err)
 	}
+	friendSvc, err := friendsvc.New(friendsvc.Config{Friends: friends, Users: users})
+	if err != nil {
+		t.Fatalf("Harness: build friend service: %v", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -153,11 +162,16 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build user handler: %v", err)
 	}
+	friendHandler, err := httpapi.NewFriendHandler(friendSvc, userSvc, authSvc, v)
+	if err != nil {
+		t.Fatalf("Harness: build friend handler: %v", err)
+	}
 
 	router := chi.NewRouter()
 	router.Use(requestIDMiddleware) // §4.7 entry — full chain lands in 3.8.
 	authHandler.Mount(router)
 	userHandler.Mount(router)
+	friendHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
 	t.Cleanup(server.Close)
@@ -182,9 +196,11 @@ func New(t *testing.T) *Harness {
 		Sessions:     sm,
 		UserRepo:     users,
 		ResetsRepo:   resets,
+		FriendRepo:   friends,
 		NotifPrefSvc: notifSvc,
 		AuthSvc:      authSvc,
 		UserSvc:      userSvc,
+		FriendSvc:    friendSvc,
 		serverURL:    srvURL,
 	}
 }
