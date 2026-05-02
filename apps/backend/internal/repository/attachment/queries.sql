@@ -25,10 +25,19 @@ ORDER BY a.created_at ASC;
 
 -- name: DeleteByIDs :exec
 -- Bulk delete by id list. Used by the orphan sweeper after the S3 object
--- has been removed; ON DELETE CASCADE on message_attachments_attachment_fk
--- means any (improbable, race-window) message_attachments rows go too.
+-- has been removed. The NOT EXISTS guard is defense-in-depth: between
+-- ListOrphansOlderThan() and this delete, a slow client might finish
+-- composing and insert a message_attachments row. Without the guard, we
+-- would unconditionally delete the attachment AND its just-created link
+-- via the ON DELETE CASCADE FK, silently dropping a real attachment from
+-- a real message. Filtering here means the worst case is the row stays
+-- for the next sweeper tick (the S3 object is gone — see service-layer
+-- ordering), which is a recoverable state.
 DELETE FROM attachments
-WHERE id = ANY($1::uuid[]);
+WHERE id = ANY($1::uuid[])
+  AND NOT EXISTS (
+      SELECT 1 FROM message_attachments ma WHERE ma.attachment_id = attachments.id
+  );
 
 -- name: CallerCanRead :one
 -- Returns true iff one of:

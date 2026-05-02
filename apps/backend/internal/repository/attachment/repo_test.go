@@ -225,6 +225,48 @@ func TestDeleteByIDs(t *testing.T) {
 	}
 }
 
+// Regression: between the sweeper's ListOrphansOlderThan() and its
+// DeleteByIDs(), a slow client might finish composing and link the
+// attachment to a message. Without a guard, DeleteByIDs would delete
+// the row unconditionally and CASCADE would drop the just-created
+// message_attachments link, silently corrupting a real message. The
+// guard means the row stays for the next sweep tick (S3 object is
+// gone, but that's a recoverable state — the row is dropped next pass
+// after the user-visible link survives).
+func TestDeleteByIDs_SkipsLinkedRowsRaceGuard(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := attachment.New(pool)
+	a := makeUser(ctx, t, pool)
+	b := makeUser(ctx, t, pool)
+	cid := makeDirect(ctx, t, pool, a, b)
+
+	orphan := makeAttachment(ctx, t, repo, a)
+	linked := makeAttachment(ctx, t, repo, a)
+
+	mr := msgrepo.New(pool)
+	msg, err := mr.Create(ctx, msgrepo.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), ConversationID: cid, SenderID: a, Body: "x",
+	})
+	if err != nil {
+		t.Fatalf("Create message: %v", err)
+	}
+	linkAttachment(ctx, t, pool, msg.ID, linked.ID)
+
+	// Caller asks to delete BOTH ids — sweeper-style. Only the truly
+	// orphan one should be removed.
+	if err := repo.DeleteByIDs(ctx, []uuid.UUID{orphan.ID, linked.ID}); err != nil {
+		t.Fatalf("DeleteByIDs: %v", err)
+	}
+	if _, err := repo.GetByID(ctx, orphan.ID); !errors.Is(err, attachment.ErrNotFound) {
+		t.Errorf("orphan should be deleted: %v", err)
+	}
+	if _, err := repo.GetByID(ctx, linked.ID); err != nil {
+		t.Errorf("linked attachment must survive: %v", err)
+	}
+}
+
 func TestDeleteByIDs_EmptySliceNoOp(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

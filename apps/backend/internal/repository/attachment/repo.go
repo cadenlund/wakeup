@@ -55,7 +55,10 @@ ORDER BY a.created_at ASC`
 
 const deleteByIDsSQL = `-- name: DeleteByIDs :exec
 DELETE FROM attachments
-WHERE id = ANY($1::uuid[])`
+WHERE id = ANY($1::uuid[])
+  AND NOT EXISTS (
+      SELECT 1 FROM message_attachments ma WHERE ma.attachment_id = attachments.id
+  )`
 
 const callerCanReadSQL = `-- name: CallerCanRead :one
 SELECT EXISTS (
