@@ -63,7 +63,10 @@ func New(cfg Config) (*ExpoPusher, error) {
 // NewWithHTTP is the test-injection escape hatch. Tests pass an httptest
 // .Server's URL as endpoint and an http.Client with no extra config.
 func NewWithHTTP(cfg Config, client *http.Client, endpoint string) (*ExpoPusher, error) {
-	if strings.TrimSpace(cfg.AccessToken) == "" {
+	// Trim AccessToken before storing — leading/trailing whitespace would
+	// silently corrupt the Authorization header otherwise.
+	token := strings.TrimSpace(cfg.AccessToken)
+	if token == "" {
 		return nil, errors.New("pushnotif: Config.AccessToken is required")
 	}
 	if client == nil {
@@ -72,7 +75,7 @@ func NewWithHTTP(cfg Config, client *http.Client, endpoint string) (*ExpoPusher,
 	if strings.TrimSpace(endpoint) == "" {
 		return nil, errors.New("pushnotif: NewWithHTTP: endpoint is empty")
 	}
-	return &ExpoPusher{client: client, endpoint: endpoint, accessToken: cfg.AccessToken}, nil
+	return &ExpoPusher{client: client, endpoint: endpoint, accessToken: token}, nil
 }
 
 // expoMessage is one Expo Push message. Per Expo docs, the `to` field can
@@ -164,6 +167,13 @@ func (p *ExpoPusher) Send(ctx context.Context, tokens []string, n Notification) 
 	if len(parsed.Errors) > 0 {
 		return fmt.Errorf("pushnotif: expo top-level error: %s (%s)",
 			parsed.Errors[0].Message, parsed.Errors[0].Code)
+	}
+	// Expo returns one ticket per input token. If counts don't match, the
+	// response is malformed or some recipients are silently unresolved —
+	// surface that rather than reporting success.
+	if len(parsed.Data) != len(tokens) {
+		return fmt.Errorf("pushnotif: ticket count mismatch: sent=%d received=%d",
+			len(tokens), len(parsed.Data))
 	}
 	for _, t := range parsed.Data {
 		if t.Status != "ok" {

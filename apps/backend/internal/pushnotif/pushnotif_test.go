@@ -205,6 +205,48 @@ func TestNew_RequiresAccessToken(t *testing.T) {
 	}
 }
 
+// AccessToken with surrounding whitespace must be trimmed before being put
+// into the Authorization header — a token like " abc " would otherwise
+// produce "Bearer  abc " which Expo rejects with 401.
+func TestNewWithHTTP_TrimsAccessToken(t *testing.T) {
+	t.Parallel()
+	var auth string
+	srv := fakeExpo(t, http.StatusOK, `{"data":[{"status":"ok"}]}`, nil, &auth)
+
+	p, err := pushnotif.NewWithHTTP(
+		pushnotif.Config{AccessToken: "  test-token-spaces  "},
+		http.DefaultClient, srv.URL,
+	)
+	if err != nil {
+		t.Fatalf("NewWithHTTP: %v", err)
+	}
+	if err := p.Send(context.Background(), []string{"x"}, pushnotif.Notification{Title: "T", Body: "B"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if auth != "Bearer test-token-spaces" {
+		t.Fatalf("Authorization = %q, want trimmed token", auth)
+	}
+}
+
+// Expo returns one ticket per input token. A response with fewer tickets
+// than tokens means recipients went unresolved — Send must not report
+// success in that case.
+func TestSend_RejectsTicketCountMismatch(t *testing.T) {
+	t.Parallel()
+	srv := fakeExpo(t, http.StatusOK,
+		`{"data":[{"status":"ok","id":"r-1"}]}`, // only 1 ticket for 2 tokens
+		nil, nil,
+	)
+	p := newPusher(t, srv.URL)
+	err := p.Send(context.Background(), []string{"a", "b"}, pushnotif.Notification{Title: "T", Body: "B"})
+	if err == nil {
+		t.Fatal("ticket count mismatch should error")
+	}
+	if !strings.Contains(err.Error(), "mismatch") {
+		t.Errorf("error should mention mismatch: %v", err)
+	}
+}
+
 func TestNewWithHTTP_RejectsBadInputs(t *testing.T) {
 	t.Parallel()
 	cfg := pushnotif.Config{AccessToken: "k"}
