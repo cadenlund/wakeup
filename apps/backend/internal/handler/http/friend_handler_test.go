@@ -33,6 +33,46 @@ func otherClient(t *testing.T, h *testutil.Harness) (*http.Client, domain.User) 
 	return c, u
 }
 
+// setupSendRequest fires POST /v1/friends/requests, asserts 201, closes
+// the body on every path, and returns the friendship `id` from the
+// response. Used by tests that need a pre-existing pending row before
+// driving the actual assertion (CodeRabbit caught loose patterns on
+// PR #32 — assert + close in the right order, in one place).
+func setupSendRequest(t *testing.T, h *testutil.Harness, c *http.Client, toUsername string) string {
+	t.Helper()
+	r := post(t, c, h.Server.URL+"/v1/friends/requests", map[string]any{"username": toUsername})
+	body, readErr := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if readErr != nil {
+		t.Fatalf("setup send request: read body: %v", readErr)
+	}
+	if r.StatusCode != http.StatusCreated {
+		t.Fatalf("setup send request status=%d body=%s", r.StatusCode, body)
+	}
+	var pending map[string]any
+	if err := json.Unmarshal(body, &pending); err != nil {
+		t.Fatalf("setup send request: decode: %v\nbody=%s", err, body)
+	}
+	id, ok := pending["id"].(string)
+	if !ok || id == "" {
+		t.Fatalf("setup send request: missing id in response: %s", body)
+	}
+	return id
+}
+
+// setupAccept fires POST /v1/friends/requests/{id}/accept, asserts 200,
+// closes the body on every path. Used to set up an accepted friendship
+// so a test can drive Unfriend / Block-after-friends / etc.
+func setupAccept(t *testing.T, h *testutil.Harness, c *http.Client, id string) {
+	t.Helper()
+	r := post(t, c, h.Server.URL+"/v1/friends/requests/"+id+"/accept", nil)
+	body, _ := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("setup accept status=%d body=%s", r.StatusCode, body)
+	}
+}
+
 // --- POST /v1/friends/requests -----------------------------------------
 
 func TestSendFriendRequest_Success(t *testing.T) {
@@ -120,12 +160,7 @@ func TestAcceptFriendRequest_Success(t *testing.T) {
 	a, ua := makeAuthedClient(t, h)
 	bClient, ub := otherClient(t, h)
 
-	r := post(t, a, h.Server.URL+"/v1/friends/requests", map[string]any{"username": ub.Username})
-	defer func() { _ = r.Body.Close() }()
-	body, _ := io.ReadAll(r.Body)
-	var pending map[string]any
-	_ = json.Unmarshal(body, &pending)
-	id, _ := pending["id"].(string)
+	id := setupSendRequest(t, h, a, ub.Username)
 
 	resp := post(t, bClient, h.Server.URL+"/v1/friends/requests/"+id+"/accept", nil)
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -152,12 +187,7 @@ func TestAcceptFriendRequest_RequesterCannotAccept(t *testing.T) {
 	a, _ := makeAuthedClient(t, h)
 	_, b := otherClient(t, h)
 
-	r := post(t, a, h.Server.URL+"/v1/friends/requests", map[string]any{"username": b.Username})
-	defer func() { _ = r.Body.Close() }()
-	body, _ := io.ReadAll(r.Body)
-	var pending map[string]any
-	_ = json.Unmarshal(body, &pending)
-	id, _ := pending["id"].(string)
+	id := setupSendRequest(t, h, a, b.Username)
 
 	// Requester (a) tries to accept their own outgoing request.
 	resp := post(t, a, h.Server.URL+"/v1/friends/requests/"+id+"/accept", nil)
@@ -191,12 +221,7 @@ func TestDeclineFriendRequest_Success(t *testing.T) {
 	a, _ := makeAuthedClient(t, h)
 	bClient, ub := otherClient(t, h)
 
-	r := post(t, a, h.Server.URL+"/v1/friends/requests", map[string]any{"username": ub.Username})
-	defer func() { _ = r.Body.Close() }()
-	body, _ := io.ReadAll(r.Body)
-	var pending map[string]any
-	_ = json.Unmarshal(body, &pending)
-	id, _ := pending["id"].(string)
+	id := setupSendRequest(t, h, a, ub.Username)
 
 	req, _ := http.NewRequest(http.MethodPost, h.Server.URL+"/v1/friends/requests/"+id+"/decline", nil)
 	resp, err := bClient.Do(req)
@@ -218,14 +243,8 @@ func TestListFriends_AfterAccept(t *testing.T) {
 	a, _ := makeAuthedClient(t, h)
 	bClient, ub := otherClient(t, h)
 
-	// Create + accept.
-	r := post(t, a, h.Server.URL+"/v1/friends/requests", map[string]any{"username": ub.Username})
-	defer func() { _ = r.Body.Close() }()
-	rb, _ := io.ReadAll(r.Body)
-	var pending map[string]any
-	_ = json.Unmarshal(rb, &pending)
-	id, _ := pending["id"].(string)
-	_ = post(t, bClient, h.Server.URL+"/v1/friends/requests/"+id+"/accept", nil).Body.Close()
+	id := setupSendRequest(t, h, a, ub.Username)
+	setupAccept(t, h, bClient, id)
 
 	resp, err := a.Get(h.Server.URL + "/v1/friends")
 	if err != nil {
@@ -270,35 +289,14 @@ func TestListFriends_Unauthenticated(t *testing.T) {
 func TestListFriendRequests_PartitionsByDirection(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := makeAuthedClient(t, h)
-	_, ub := otherClient(t, h) // outgoing: a → b
+	a, ua := makeAuthedClient(t, h)
+	_, ub := otherClient(t, h) // outgoing target: a → b
 	cClient, _ := otherClient(t, h)
-	_, ua := h.AuthClient(t) // unused identity, replaced below — just wire ids
 
-	_ = ua // silence unused warning if we don't reach the loop body
-
-	// Outgoing request from a → b.
-	if r := post(t, a, h.Server.URL+"/v1/friends/requests", map[string]any{"username": ub.Username}); r.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(r.Body)
-		_ = r.Body.Close()
-		t.Fatalf("setup outgoing status=%d body=%s", r.StatusCode, body)
-	}
-
-	// Incoming request: c → a's username. We need a's username; round-trip via /v1/auth/me.
-	meResp, err := a.Get(h.Server.URL + "/v1/auth/me")
-	if err != nil {
-		t.Fatalf("GET /me: %v", err)
-	}
-	mb, _ := io.ReadAll(meResp.Body)
-	_ = meResp.Body.Close()
-	var me map[string]any
-	_ = json.Unmarshal(mb, &me)
-	aUsername, _ := me["username"].(string)
-	if r := post(t, cClient, h.Server.URL+"/v1/friends/requests", map[string]any{"username": aUsername}); r.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(r.Body)
-		_ = r.Body.Close()
-		t.Fatalf("setup incoming status=%d body=%s", r.StatusCode, body)
-	}
+	// Outgoing: a → b.
+	_ = setupSendRequest(t, h, a, ub.Username)
+	// Incoming: c → a.
+	_ = setupSendRequest(t, h, cClient, ua.Username)
 
 	resp, err := a.Get(h.Server.URL + "/v1/friends/requests")
 	if err != nil {
@@ -329,13 +327,8 @@ func TestUnfriend_Success(t *testing.T) {
 	h := testutil.New(t)
 	a, _ := makeAuthedClient(t, h)
 	bClient, ub := otherClient(t, h)
-	r := post(t, a, h.Server.URL+"/v1/friends/requests", map[string]any{"username": ub.Username})
-	rb, _ := io.ReadAll(r.Body)
-	_ = r.Body.Close()
-	var pending map[string]any
-	_ = json.Unmarshal(rb, &pending)
-	id, _ := pending["id"].(string)
-	_ = post(t, bClient, h.Server.URL+"/v1/friends/requests/"+id+"/accept", nil).Body.Close()
+	id := setupSendRequest(t, h, a, ub.Username)
+	setupAccept(t, h, bClient, id)
 
 	req, _ := http.NewRequest(http.MethodDelete, h.Server.URL+"/v1/friends/"+ub.ID.String(), nil)
 	resp, err := a.Do(req)
