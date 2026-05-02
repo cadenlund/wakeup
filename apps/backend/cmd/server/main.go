@@ -30,11 +30,13 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/mailer"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
+	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
+	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
@@ -106,6 +108,7 @@ func run() error {
 	resets := passwordreset.New(pool)
 	prefsRepo := notifprefrepo.New(pool)
 	friendsRepo := friendrepo.New(pool)
+	convsRepo := convrepo.New(pool)
 
 	// §8.2 locks Cookie.Secure=true in production. Local/test envs run
 	// over plain HTTP (`just dev`), so the browser would refuse to send
@@ -134,6 +137,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("friend service: %w", err)
 	}
+	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convsRepo, Users: users})
+	if err != nil {
+		return fmt.Errorf("conversation service: %w", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -148,21 +155,27 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("friend handler: %w", err)
 	}
+	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, v)
+	if err != nil {
+		return fmt.Errorf("conversation handler: %w", err)
+	}
 
 	router, err := buildRouter(routerDeps{
-		Cfg:           cfg,
-		Logger:        logger,
-		Pool:          pool,
-		Redis:         redisClient,
-		Sessions:      sessions,
-		Limiter:       limiter,
-		UserSvc:       userSvc,
-		AuthSvc:       authSvc,
-		NotifPrefSvc:  notifPrefSvc,
-		FriendSvc:     friendSvc,
-		UserHandler:   userHandler,
-		AuthHandler:   authHandler,
-		FriendHandler: friendHandler,
+		Cfg:                 cfg,
+		Logger:              logger,
+		Pool:                pool,
+		Redis:               redisClient,
+		Sessions:            sessions,
+		Limiter:             limiter,
+		UserSvc:             userSvc,
+		AuthSvc:             authSvc,
+		NotifPrefSvc:        notifPrefSvc,
+		FriendSvc:           friendSvc,
+		ConvSvc:             convSvc,
+		UserHandler:         userHandler,
+		AuthHandler:         authHandler,
+		FriendHandler:       friendHandler,
+		ConversationHandler: convHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("router: %w", err)

@@ -21,6 +21,7 @@ import (
 	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
+	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
@@ -36,19 +37,21 @@ import (
 // The struct exists so tests can construct a deterministic router without
 // dragging in the full main() side effects (env, signal handlers).
 type routerDeps struct {
-	Cfg           *config.Config
-	Logger        *slog.Logger
-	Pool          *pgxpool.Pool
-	Redis         *redis.Client
-	Sessions      *scs.SessionManager
-	Limiter       *ratelimit.Limiter
-	UserSvc       *usersvc.Service
-	AuthSvc       *auth.Service
-	NotifPrefSvc  *notifprefsvc.Service
-	FriendSvc     *friendsvc.Service
-	UserHandler   *httpapi.UserHandler
-	AuthHandler   *httpapi.AuthHandler
-	FriendHandler *httpapi.FriendHandler
+	Cfg                 *config.Config
+	Logger              *slog.Logger
+	Pool                *pgxpool.Pool
+	Redis               *redis.Client
+	Sessions            *scs.SessionManager
+	Limiter             *ratelimit.Limiter
+	UserSvc             *usersvc.Service
+	AuthSvc             *auth.Service
+	NotifPrefSvc        *notifprefsvc.Service
+	FriendSvc           *friendsvc.Service
+	ConvSvc             *convsvc.Service
+	UserHandler         *httpapi.UserHandler
+	AuthHandler         *httpapi.AuthHandler
+	FriendHandler       *httpapi.FriendHandler
+	ConversationHandler *httpapi.ConversationHandler
 }
 
 // rateLimitTier groups the §8.3 default scopes so we wire the chain
@@ -71,8 +74,8 @@ var (
 func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
-		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil ||
-		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil {
+		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil ||
+		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
 
@@ -145,6 +148,12 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Delete("/v1/friends/{user_id}", d.FriendHandler.Unfriend)
 				r.Post("/v1/friends/{user_id}/block", d.FriendHandler.Block)
 				r.Delete("/v1/friends/{user_id}/block", d.FriendHandler.Unblock)
+				r.Post("/v1/conversations", d.ConversationHandler.Create)
+				r.Patch("/v1/conversations/{id}", d.ConversationHandler.Update)
+				r.Delete("/v1/conversations/{id}", d.ConversationHandler.Leave)
+				r.Post("/v1/conversations/{id}/members", d.ConversationHandler.AddMembers)
+				r.Delete("/v1/conversations/{id}/members/{user_id}", d.ConversationHandler.RemoveMember)
+				r.Post("/v1/conversations/{id}/read", d.ConversationHandler.MarkRead)
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RateLimit(mw.RateLimitConfig{
@@ -158,6 +167,8 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Get("/v1/users/me/notifications", d.UserHandler.GetNotifications)
 				r.Get("/v1/friends", d.FriendHandler.List)
 				r.Get("/v1/friends/requests", d.FriendHandler.ListRequests)
+				r.Get("/v1/conversations", d.ConversationHandler.List)
+				r.Get("/v1/conversations/{id}", d.ConversationHandler.Get)
 			})
 		})
 	})

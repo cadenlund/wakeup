@@ -31,11 +31,13 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
+	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
+	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
@@ -79,10 +81,12 @@ type Harness struct {
 	UserRepo     *userrepo.Queries
 	ResetsRepo   *passwordreset.Queries
 	FriendRepo   *friendrepo.Queries
+	ConvRepo     *convrepo.Queries
 	NotifPrefSvc *notifprefsvc.Service
 	AuthSvc      *auth.Service
 	UserSvc      *usersvc.Service
 	FriendSvc    *friendsvc.Service
+	ConvSvc      *convsvc.Service
 
 	serverURL *url.URL
 }
@@ -116,6 +120,7 @@ func New(t *testing.T) *Harness {
 	resets := passwordreset.New(pool)
 	notifPrefs := notifprefrepo.New(pool)
 	friends := friendrepo.New(pool)
+	convs := convrepo.New(pool)
 	sm := session.New(pool)
 
 	endpoint := StartMinIO(t)
@@ -152,6 +157,10 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build friend service: %v", err)
 	}
+	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users})
+	if err != nil {
+		t.Fatalf("Harness: build conversation service: %v", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -166,12 +175,17 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build friend handler: %v", err)
 	}
+	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, v)
+	if err != nil {
+		t.Fatalf("Harness: build conversation handler: %v", err)
+	}
 
 	router := chi.NewRouter()
 	router.Use(requestIDMiddleware) // §4.7 entry — full chain lands in 3.8.
 	authHandler.Mount(router)
 	userHandler.Mount(router)
 	friendHandler.Mount(router)
+	convHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
 	t.Cleanup(server.Close)
@@ -197,10 +211,12 @@ func New(t *testing.T) *Harness {
 		UserRepo:     users,
 		ResetsRepo:   resets,
 		FriendRepo:   friends,
+		ConvRepo:     convs,
 		NotifPrefSvc: notifSvc,
 		AuthSvc:      authSvc,
 		UserSvc:      userSvc,
 		FriendSvc:    friendSvc,
+		ConvSvc:      convSvc,
 		serverURL:    srvURL,
 	}
 }
