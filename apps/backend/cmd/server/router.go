@@ -79,9 +79,13 @@ var (
 	rateLimitReads  = rateLimitTier{Scope: "reads", Limit: 300, Window: time.Minute}
 )
 
-// resolveTier returns the override when set, otherwise the production default.
+// resolveTier returns the override when set, otherwise the production
+// default. An override is only honored when ALL three fields are
+// populated — a partial override (e.g. Limit=10000, Window=time.Minute,
+// Scope="") used to slip through and panic at request time inside
+// mw.RateLimit (CodeRabbit caught this on PR #37).
 func resolveTier(override, fallback rateLimitTier) rateLimitTier {
-	if override.Limit > 0 && override.Window > 0 {
+	if override.Scope != "" && override.Limit > 0 && override.Window > 0 {
 		return override
 	}
 	return fallback
