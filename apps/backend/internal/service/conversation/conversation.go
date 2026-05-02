@@ -350,8 +350,19 @@ type UpdateParams struct {
 
 // Update patches a group conversation's name / avatar_url. The caller
 // must be an admin of the conversation. Direct conversations are
-// immutable — Update returns Forbidden for them.
+// immutable — Update returns Forbidden for them, but only AFTER
+// confirming membership so non-members can't enumerate which
+// conversations exist (CodeRabbit caught the leak on PR #35).
 func (s *Service) Update(ctx context.Context, p UpdateParams) (domain.Conversation, error) {
+	// Check membership first; non-members get NotFound regardless of
+	// the conversation's type.
+	member, err := s.convs.GetMember(ctx, p.ConvID, p.Actor)
+	if err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return domain.Conversation{}, apierror.NotFound("conversation")
+		}
+		return domain.Conversation{}, apierror.Internal("get member").WithCause(err)
+	}
 	conv, err := s.convs.GetConversation(ctx, p.ConvID)
 	if err != nil {
 		if errors.Is(err, convrepo.ErrNotFound) {
@@ -361,13 +372,6 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (domain.Conversati
 	}
 	if !conv.IsGroup() {
 		return domain.Conversation{}, apierror.Forbidden("only group conversations are mutable")
-	}
-	member, err := s.convs.GetMember(ctx, p.ConvID, p.Actor)
-	if err != nil {
-		if errors.Is(err, convrepo.ErrNotFound) {
-			return domain.Conversation{}, apierror.NotFound("conversation")
-		}
-		return domain.Conversation{}, apierror.Internal("get member").WithCause(err)
 	}
 	if !member.IsAdmin() {
 		return domain.Conversation{}, apierror.Forbidden("only group admins can update the conversation")
@@ -426,7 +430,17 @@ type AddMembersResult struct {
 // admin. Each invitee is added with role=member and goes through
 // AddMemberWithCap so the cap-25 invariant is preserved under
 // concurrent adds.
+//
+// Membership is checked before any conversation-type / role checks so
+// non-members can't enumerate which conversation IDs exist.
 func (s *Service) AddMembers(ctx context.Context, p AddMembersParams) (AddMembersResult, error) {
+	caller, err := s.convs.GetMember(ctx, p.ConvID, p.Actor)
+	if err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return AddMembersResult{}, apierror.NotFound("conversation")
+		}
+		return AddMembersResult{}, apierror.Internal("get member").WithCause(err)
+	}
 	conv, err := s.convs.GetConversation(ctx, p.ConvID)
 	if err != nil {
 		if errors.Is(err, convrepo.ErrNotFound) {
@@ -436,13 +450,6 @@ func (s *Service) AddMembers(ctx context.Context, p AddMembersParams) (AddMember
 	}
 	if !conv.IsGroup() {
 		return AddMembersResult{}, apierror.Forbidden("cannot add members to a direct conversation")
-	}
-	caller, err := s.convs.GetMember(ctx, p.ConvID, p.Actor)
-	if err != nil {
-		if errors.Is(err, convrepo.ErrNotFound) {
-			return AddMembersResult{}, apierror.NotFound("conversation")
-		}
-		return AddMembersResult{}, apierror.Internal("get member").WithCause(err)
 	}
 	if !caller.IsAdmin() {
 		return AddMembersResult{}, apierror.Forbidden("only group admins can add members")
@@ -502,10 +509,18 @@ func (s *Service) AddMembers(ctx context.Context, p AddMembersParams) (AddMember
 //   - actor == target (self-removal == Leave), OR
 //   - actor is an admin of a group (kicking another user)
 //
-// Direct conversations only support self-removal.
+// Direct conversations only support self-removal. Membership is checked
+// first so non-members can't enumerate conversation IDs.
 func (s *Service) RemoveMember(ctx context.Context, actor, convID, target uuid.UUID) error {
 	if actor == target {
 		return s.Leave(ctx, actor, convID)
+	}
+	caller, err := s.convs.GetMember(ctx, convID, actor)
+	if err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return apierror.NotFound("conversation")
+		}
+		return apierror.Internal("get member").WithCause(err)
 	}
 	conv, err := s.convs.GetConversation(ctx, convID)
 	if err != nil {
@@ -516,13 +531,6 @@ func (s *Service) RemoveMember(ctx context.Context, actor, convID, target uuid.U
 	}
 	if !conv.IsGroup() {
 		return apierror.Forbidden("cannot remove other members from a direct conversation")
-	}
-	caller, err := s.convs.GetMember(ctx, convID, actor)
-	if err != nil {
-		if errors.Is(err, convrepo.ErrNotFound) {
-			return apierror.NotFound("conversation")
-		}
-		return apierror.Internal("get member").WithCause(err)
 	}
 	if !caller.IsAdmin() {
 		return apierror.Forbidden("only group admins can remove other members")

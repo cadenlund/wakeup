@@ -385,6 +385,64 @@ func TestUpdate_NonAdminForbidden(t *testing.T) {
 	}
 }
 
+// TestUpdate_NonMemberSeesNotFoundEvenForDirect verifies the
+// enumeration-leak fix CodeRabbit caught on PR #35: a non-member calling
+// Update on a direct conversation must NOT receive Forbidden ("only
+// group conversations are mutable") because that reveals the
+// conversation exists. They must see NotFound.
+func TestUpdate_NonMemberSeesNotFoundEvenForDirect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	stranger := makeUser(ctx, t, st)
+	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	_, err := st.svc.Update(ctx, conversation.UpdateParams{
+		Actor: stranger.ID, ConvID: created.Conversation.ID, Name: ptr("Hi"),
+	})
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND (no enumeration)", asAPIError(t, err).Code)
+	}
+}
+
+func TestAddMembers_NonMemberSeesNotFoundEvenForDirect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	stranger := makeUser(ctx, t, st)
+	target := makeUser(ctx, t, st)
+	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	_, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
+		Actor: stranger.ID, ConvID: created.Conversation.ID, UserIDs: []uuid.UUID{target.ID},
+	})
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND (no enumeration)", asAPIError(t, err).Code)
+	}
+}
+
+func TestRemoveMember_NonMemberSeesNotFoundEvenForDirect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	stranger := makeUser(ctx, t, st)
+	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	err := st.svc.RemoveMember(ctx, stranger.ID, created.Conversation.ID, b.ID)
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND (no enumeration)", asAPIError(t, err).Code)
+	}
+}
+
 func TestUpdate_DirectIsImmutable(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
