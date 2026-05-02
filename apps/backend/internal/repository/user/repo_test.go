@@ -274,6 +274,43 @@ func TestListByPrefix_PrefixMatch(t *testing.T) {
 	}
 }
 
+// LIKE-metacharacter input must NOT behave as a wildcard. A user typing
+// "%" into the search box should see only literal-percent matches, not
+// every row.
+func TestListByPrefix_EscapesWildcardChars(t *testing.T) {
+	t.Parallel()
+	repo, _ := newRepo(t)
+	ctx := context.Background()
+
+	// Two users: one whose username starts with literal "%", another with
+	// a totally different prefix. A naive ILIKE without escape would
+	// treat "%" as wildcard and return BOTH.
+	literalPercent := makeBaseParams()
+	literalPercent.Username = "%percent_user"
+	literalPercent.DisplayName = "%pct"
+	literalPercent.Email = "pct@x.test"
+	if _, err := repo.Create(ctx, literalPercent); err != nil {
+		t.Fatalf("Create literal: %v", err)
+	}
+	other := makeBaseParams()
+	if _, err := repo.Create(ctx, other); err != nil {
+		t.Fatalf("Create other: %v", err)
+	}
+
+	got, err := repo.ListByPrefix(ctx, "%", nil, 10)
+	if err != nil {
+		t.Fatalf("ListByPrefix: %v", err)
+	}
+	// Without the escape, both would match. With escape, only the literal
+	// one (whose username actually starts with "%") matches.
+	if len(got) != 1 {
+		t.Fatalf("expected 1 row (only the literal-%% user), got %d: %+v", len(got), got)
+	}
+	if got[0].Username != "%percent_user" {
+		t.Errorf("matched the wrong row: %+v", got[0])
+	}
+}
+
 func TestListByPrefix_ExcludesSoftDeleted(t *testing.T) {
 	t.Parallel()
 	repo, _ := newRepo(t)

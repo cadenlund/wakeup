@@ -55,13 +55,18 @@ UPDATE users SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL;
 -- GIN index accelerates `ILIKE 'prefix%'` patterns against either column
 -- (Postgres 9.1+). q="" returns all (non-deleted) users.
 -- $2/$3 are the (created_at, id) keyset cursor; pass NULL for first page.
+--
+-- Caller MUST pass $1 already escaped for LIKE — the Go layer replaces \,
+-- %, and _ with their backslash-escaped forms so user input like "100%"
+-- stays a literal "100%" instead of becoming a wildcard. The ESCAPE '\'
+-- clause makes that explicit (PG's default depends on version).
 SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE deleted_at IS NULL
   AND (
     $1::text = ''
-    OR username ILIKE $1::text || '%'
-    OR display_name ILIKE $1::text || '%'
+    OR username ILIKE $1::text || '%' ESCAPE '\'
+    OR display_name ILIKE $1::text || '%' ESCAPE '\'
   )
   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
 ORDER BY created_at DESC, id DESC

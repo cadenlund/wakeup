@@ -84,12 +84,45 @@ FROM users
 WHERE deleted_at IS NULL
   AND (
     $1::text = ''
-    OR username ILIKE $1::text || '%'
-    OR display_name ILIKE $1::text || '%'
+    OR username ILIKE $1::text || '%' ESCAPE '\'
+    OR display_name ILIKE $1::text || '%' ESCAPE '\'
   )
   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
 ORDER BY created_at DESC, id DESC
 LIMIT $4`
+
+// escapeLikePrefix backslash-escapes the LIKE metacharacters \, %, and _
+// so user-supplied search input like "100%" matches a literal "100%"
+// instead of being treated as wildcards. The SQL uses an explicit
+// `ESCAPE '\'` clause so behavior doesn't depend on PG's default
+// (which has flipped between versions).
+//
+// One-pass byte walk is enough because all three target chars are ASCII;
+// no need for utf8 decoding even if the rest of the input is multi-byte.
+func escapeLikePrefix(s string) string {
+	if !needsLikeEscape(s) {
+		return s
+	}
+	b := make([]byte, 0, len(s)+4)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' || c == '%' || c == '_' {
+			b = append(b, '\\')
+		}
+		b = append(b, c)
+	}
+	return string(b)
+}
+
+func needsLikeEscape(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\', '%', '_':
+			return true
+		}
+	}
+	return false
+}
 
 const listByIDsSQL = `-- name: ListByIDs :many
 SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
@@ -253,7 +286,10 @@ func (q *Queries) ListByPrefix(ctx context.Context, prefix string, cursor *pagin
 		id = &cursor.ID
 	}
 
-	rows, err := q.db.Query(ctx, listByPrefixSQL, prefix, ts, id, overFetch)
+	// Escape LIKE metachars so a search for "100%" matches the literal
+	// string "100%" instead of becoming a wildcard. The SQL has an explicit
+	// `ESCAPE '\'` clause to honor the escapes.
+	rows, err := q.db.Query(ctx, listByPrefixSQL, escapeLikePrefix(prefix), ts, id, overFetch)
 	if err != nil {
 		return nil, fmt.Errorf("user: list by prefix: %w", err)
 	}
