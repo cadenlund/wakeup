@@ -72,7 +72,8 @@ type Notification struct {
 	Data  map[string]any
 }
 
-// Send records the call. Always returns nil.
+// Send records the call. Always returns nil. Tokens and Data are deep-copied
+// so caller-side mutations after Send returns can't corrupt recorded pushes.
 func (p *FakePusher) Send(_ context.Context, tokens []string, n Notification) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -80,10 +81,25 @@ func (p *FakePusher) Send(_ context.Context, tokens []string, n Notification) er
 		Tokens: append([]string(nil), tokens...),
 		Title:  n.Title,
 		Body:   n.Body,
-		Data:   n.Data,
+		Data:   copyAnyMap(n.Data),
 		At:     time.Now().UTC(),
 	})
 	return nil
+}
+
+// copyAnyMap returns a shallow copy of m (sufficient because the values we
+// pass to Expo Push are JSON primitives — strings / numbers / bools — never
+// nested maps or pointers). Returns nil when m is nil so the recorded
+// FakePush.Data preserves "caller passed nil" vs "caller passed empty map".
+func copyAnyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string]any, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
 }
 
 // Reset clears captured pushes.
