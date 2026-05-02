@@ -1,0 +1,23 @@
+policies:
+  - type: commit
+    spec:
+      conventional:
+        types:
+          - feat
+          - fix
+          - chore
+          - refactor
+          - test
+          - docs
+          - ci
+          - perf
+        scopes:
+          - root
+          - backend
+          - mobile
+          - infra
+          - deps
+      header:
+        length: 89
+      body:
+        required: false
