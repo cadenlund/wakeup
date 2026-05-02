@@ -44,16 +44,27 @@ ORDER BY c.last_message_at DESC, c.id DESC
 LIMIT $4;
 
 -- name: GetDirectByPair :one
--- Looks up the (at most one) direct conversation between two users by
--- intersecting their membership rows. The `$1 <> $2` guard prevents a
--- self-lookup from matching a single membership row twice and pretending
--- a 1-person conversation exists (CodeRabbit caught this on PR #34).
+-- Looks up the direct conversation between two users by intersecting
+-- their membership rows.
+--
+-- Invariant: at most one direct row per pair. The schema doesn't
+-- enforce this yet (see PR #34 review) — the service layer is
+-- responsible for refusing duplicate creates via the
+-- LockConversationForMemberWrite pattern. To keep the repo deterministic
+-- in the worst case (e.g. a backfill that produced duplicates), the
+-- query is `:one` with `ORDER BY c.id ASC LIMIT 1` so two callers
+-- always see the same row.
+--
+-- The `$1 <> $2` guard prevents a self-lookup from matching a single
+-- membership row twice and pretending a 1-person conversation exists.
 SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
 FROM conversations c
 JOIN conversation_members ma ON ma.conversation_id = c.id AND ma.user_id = $1
 JOIN conversation_members mb ON mb.conversation_id = c.id AND mb.user_id = $2
-WHERE c.type = 'direct' AND $1::uuid <> $2::uuid;
+WHERE c.type = 'direct' AND $1::uuid <> $2::uuid
+ORDER BY c.id ASC
+LIMIT 1;
 
 -- name: AddMember :one
 INSERT INTO conversation_members (conversation_id, user_id, role)

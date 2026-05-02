@@ -331,6 +331,39 @@ func TestGetDirectByPair_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetDirectByPair_DuplicateDirectsAreDeterministic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	a := makeUser(ctx, t, pool)
+	b := makeUser(ctx, t, pool)
+
+	// Schema doesn't yet enforce one-direct-per-pair (see PR #34
+	// review); the service layer is responsible. The repo must still
+	// behave deterministically when duplicates exist — `:one` with
+	// `ORDER BY id ASC LIMIT 1` returns the same row every time.
+	first := makeDirect(ctx, t, repo, a, b)
+	second := makeDirect(ctx, t, repo, a, b)
+
+	got1, err := repo.GetDirectByPair(ctx, a, b)
+	if err != nil {
+		t.Fatalf("GetDirectByPair: %v", err)
+	}
+	got2, err := repo.GetDirectByPair(ctx, b, a)
+	if err != nil {
+		t.Fatalf("GetDirectByPair reversed: %v", err)
+	}
+	if got1.ID != got2.ID {
+		t.Errorf("non-deterministic: ab=%s ba=%s", got1.ID, got2.ID)
+	}
+	// Sanity: the returned id is one of the two we created (whichever
+	// has the smaller UUID by id-asc ordering).
+	if got1.ID != first && got1.ID != second {
+		t.Errorf("returned id %s is neither created id (%s, %s)", got1.ID, first, second)
+	}
+}
+
 func TestGetDirectByPair_SameUserReturnsNotFound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -92,7 +92,9 @@ SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
 FROM conversations c
 JOIN conversation_members ma ON ma.conversation_id = c.id AND ma.user_id = $1
 JOIN conversation_members mb ON mb.conversation_id = c.id AND mb.user_id = $2
-WHERE c.type = 'direct' AND $1::uuid <> $2::uuid`
+WHERE c.type = 'direct' AND $1::uuid <> $2::uuid
+ORDER BY c.id ASC
+LIMIT 1`
 
 const addMemberSQL = `-- name: AddMember :one
 INSERT INTO conversation_members (conversation_id, user_id, role)
