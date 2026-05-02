@@ -12,4 +12,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING key, user_id, request_hash, response_status, response_body, created_at, expires_at;
 
 -- name: DeleteExpired :execrows
-DELETE FROM idempotency_keys WHERE expires_at < now();
+-- Use <= so the boundary case (expires_at == now()) is removed too — matches
+-- GetByKeyAndUser's strict `> now()` filter, which already treats the
+-- boundary as expired/invisible.
+DELETE FROM idempotency_keys WHERE expires_at <= now();

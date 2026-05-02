@@ -48,7 +48,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING key, user_id, request_hash, response_status, response_body, created_at, expires_at`
 
 const deleteExpired = `-- name: DeleteExpired :execrows
-DELETE FROM idempotency_keys WHERE expires_at < now()`
+DELETE FROM idempotency_keys WHERE expires_at <= now()`
 
 // Get returns the Entry for (key, userID) if it exists and has not expired.
 // Returns ErrNotFound on miss; any other error is a real DB failure.
