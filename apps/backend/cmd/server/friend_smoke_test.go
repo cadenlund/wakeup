@@ -42,8 +42,6 @@ func TestSmoke_FriendsGoldenPath(t *testing.T) {
 		"username": bobUsername, "email": bobUsername + "@x.test",
 		"display_name": "Bob", "password": "Password123!",
 	}, http.StatusCreated)
-	bobID := h.Mailer // silence the harness import — we don't use the mailer here
-	_ = bobID
 	bobUserRow, err := h.UserRepo.GetByUsername(t.Context(), bobUsername)
 	if err != nil {
 		t.Fatalf("load bob: %v", err)
@@ -53,7 +51,10 @@ func TestSmoke_FriendsGoldenPath(t *testing.T) {
 	pending := mustPostJSON(t, alice, srv.URL+"/v1/friends/requests", map[string]any{
 		"username": bobUsername,
 	}, http.StatusCreated)
-	pendingID, _ := pending["id"].(string)
+	pendingID, ok := pending["id"].(string)
+	if !ok || pendingID == "" {
+		t.Fatalf("missing id in send-request response: %#v", pending)
+	}
 	if pending["status"] != "pending" {
 		t.Errorf("expected pending status, got %v", pending["status"])
 	}
@@ -116,13 +117,25 @@ func TestSmoke_FriendsGoldenPath(t *testing.T) {
 
 	// 11) bob's friend-request to alice now collides on the pair-unique
 	// index → 409. The error message is intentionally generic so
-	// bob can't tell from the response that alice blocked him.
+	// bob can't tell from the response that alice blocked him —
+	// verify both that a body came back AND that it doesn't reveal
+	// the block direction (CodeRabbit caught the loose check on PR #33).
 	resp2 := mustPostJSONExpectStatus(t, bob, srv.URL+"/v1/friends/requests",
 		map[string]any{"username": aliceUsername}, http.StatusConflict)
 	body2, _ := json.Marshal(resp2)
 	if !strings.Contains(string(body2), "blocked") && !strings.Contains(string(body2), "exists") {
-		// We accept either wording — just verify it's not a leak about who blocked whom.
-		t.Logf("conflict body: %s", body2)
+		t.Fatalf("unexpected conflict body: %s", body2)
+	}
+	for _, leak := range []string{
+		aliceUsername,      // who blocked
+		bobUsername,        // who was blocked
+		"blocked you",      // active-voice leak
+		"you were blocked", // passive-voice leak
+		"alice blocked",    // generic prefix in case usernames change
+	} {
+		if strings.Contains(string(body2), leak) {
+			t.Fatalf("conflict body leaks block direction (%q): %s", leak, body2)
+		}
 	}
 
 	// 12) alice unblocks
@@ -132,7 +145,10 @@ func TestSmoke_FriendsGoldenPath(t *testing.T) {
 	// 13) bob → alice: now succeeds, alice declines.
 	pending2 := mustPostJSON(t, bob, srv.URL+"/v1/friends/requests",
 		map[string]any{"username": aliceUsername}, http.StatusCreated)
-	pending2ID, _ := pending2["id"].(string)
+	pending2ID, ok := pending2["id"].(string)
+	if !ok || pending2ID == "" {
+		t.Fatalf("missing id in second send-request response: %#v", pending2)
+	}
 	resp3 := mustPostJSONNoBody(t, alice, srv.URL+"/v1/friends/requests/"+pending2ID+"/decline",
 		http.StatusNoContent)
 	_ = resp3
