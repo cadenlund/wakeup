@@ -2336,7 +2336,13 @@ jobs:
           go install github.com/pressly/goose/v3/cmd/goose@latest
           curl -sSfL https://raw.githubusercontent.com/casey/just/master/www/install.sh | bash -s -- --to /usr/local/bin
       - name: Run migrations
-        run: just migrate-up
+        run: |
+          # goose errors out on an empty migrations dir; skip while there are none.
+          if compgen -G 'migrations/*.sql' > /dev/null; then
+            just migrate-up
+          else
+            echo "No migrations yet — skipping goose."
+          fi
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
       - name: Lint
