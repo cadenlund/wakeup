@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -60,6 +61,19 @@ func asAPIError(t *testing.T, err error) *apierror.Error {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// mustCreate is a setup helper that fails the test immediately on a
+// Create error. Tests that need a pre-existing conversation use this to
+// avoid masking setup failures behind discarded errors (CodeRabbit
+// caught the pattern on PR #35).
+func mustCreate(ctx context.Context, t *testing.T, st *stack, p conversation.CreateParams) conversation.CreateResult {
+	t.Helper()
+	got, err := st.svc.Create(ctx, p)
+	if err != nil {
+		t.Fatalf("setup Create: %v", err)
+	}
+	return got
+}
 
 // --- Create direct -----------------------------------------------------
 
@@ -307,7 +321,7 @@ func TestGet_MemberSeesConversation(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	got, err := st.svc.Get(ctx, a.ID, created.Conversation.ID)
@@ -327,20 +341,49 @@ func TestList_OrdersByLastMessageAtDESC(t *testing.T) {
 	ctx := context.Background()
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
+
+	// Build 3 conversations and bump their last_message_at in order so
+	// the DESC ordering is exercised — without distinct timestamps the
+	// initial creation ordering would be the same and the test would
+	// pass on count alone.
+	convIDs := make([]uuid.UUID, 0, 3)
 	for i := 0; i < 3; i++ {
 		other := makeUser(ctx, t, st)
-		if _, err := st.svc.Create(ctx, conversation.CreateParams{
+		c := mustCreate(ctx, t, st, conversation.CreateParams{
 			Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{other.ID},
-		}); err != nil {
-			t.Fatalf("Create %d: %v", i, err)
+		})
+		convIDs = append(convIDs, c.Conversation.ID)
+	}
+	// Touch each conversation's last_message_at in sequence, so the
+	// most-recently-touched is conv[0], then [1], then [2]. We expect
+	// List to return them in reverse insertion order (newest-touched first).
+	base := time.Now().UTC().Add(1 * time.Hour) // future, to dodge createdAt
+	for i := range convIDs {
+		// i=0 oldest touch, i=2 newest touch.
+		ts := base.Add(time.Duration(i) * time.Minute)
+		if err := st.convs.TouchLastMessageAt(ctx, convIDs[i], ts); err != nil {
+			t.Fatalf("Touch %d: %v", i, err)
 		}
 	}
+
 	got, err := st.svc.List(ctx, conversation.ListParams{UserID: a.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if len(got.Conversations) != 3 {
-		t.Errorf("len = %d, want 3", len(got.Conversations))
+		t.Fatalf("len = %d, want 3", len(got.Conversations))
+	}
+	// DESC ordering: each subsequent row's last_message_at must be ≤ the previous.
+	for i := 1; i < len(got.Conversations); i++ {
+		prev := got.Conversations[i-1].LastMessageAt
+		curr := got.Conversations[i].LastMessageAt
+		if curr.After(prev) {
+			t.Errorf("rows out of DESC order at i=%d: %v > %v", i, curr, prev)
+		}
+	}
+	// Newest-touched conversation should be first.
+	if got.Conversations[0].ID != convIDs[2] {
+		t.Errorf("first row = %s, want last-touched %s", got.Conversations[0].ID, convIDs[2])
 	}
 }
 
@@ -352,7 +395,7 @@ func TestUpdate_GroupAdminCanRename(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Old"),
 	})
@@ -373,7 +416,7 @@ func TestUpdate_NonAdminForbidden(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Old"),
 	})
@@ -397,7 +440,7 @@ func TestUpdate_NonMemberSeesNotFoundEvenForDirect(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	stranger := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	_, err := st.svc.Update(ctx, conversation.UpdateParams{
@@ -416,7 +459,7 @@ func TestAddMembers_NonMemberSeesNotFoundEvenForDirect(t *testing.T) {
 	b := makeUser(ctx, t, st)
 	stranger := makeUser(ctx, t, st)
 	target := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	_, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
@@ -434,7 +477,7 @@ func TestRemoveMember_NonMemberSeesNotFoundEvenForDirect(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	stranger := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	err := st.svc.RemoveMember(ctx, stranger.ID, created.Conversation.ID, b.ID)
@@ -449,7 +492,7 @@ func TestUpdate_RejectsEmptyName(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Old"),
 	})
@@ -495,7 +538,7 @@ func TestAddMembers_SkipsExistingMembers(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	c := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Group"),
 	})
@@ -518,7 +561,7 @@ func TestUpdate_DirectIsImmutable(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	_, err := st.svc.Update(ctx, conversation.UpdateParams{
@@ -537,7 +580,7 @@ func TestLeave_RemovesMembership(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	if err := st.svc.Leave(ctx, a.ID, created.Conversation.ID); err != nil {
@@ -559,7 +602,7 @@ func TestLeave_NonMemberReturnsNotFound(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	c := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	err := st.svc.Leave(ctx, c.ID, created.Conversation.ID)
@@ -574,7 +617,7 @@ func TestRemoveMember_AdminCanKick(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Group"),
 	})
@@ -593,7 +636,7 @@ func TestRemoveMember_NonAdminForbidden(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	c := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID, c.ID}, Name: ptr("Group"),
 	})
@@ -609,7 +652,7 @@ func TestRemoveMember_SelfWorks(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Group"),
 	})
@@ -628,7 +671,7 @@ func TestAddMembers_AdminAdds(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	c := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Group"),
 	})
@@ -650,7 +693,7 @@ func TestAddMembers_NonAdminForbidden(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	c := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Group"),
 	})
@@ -669,7 +712,7 @@ func TestAddMembers_DirectForbidden(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	c := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	_, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
@@ -717,7 +760,7 @@ func TestMarkRead_NonMemberReturnsNotFound(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	c := makeUser(ctx, t, st)
-	created, _ := st.svc.Create(ctx, conversation.CreateParams{
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 	err := st.svc.MarkRead(ctx, c.ID, created.Conversation.ID, uuid.Must(uuid.NewV7()))
