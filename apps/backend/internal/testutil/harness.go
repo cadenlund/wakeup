@@ -2,7 +2,10 @@ package testutil
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha1" //nolint:gosec // bucket name hash, not crypto
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,10 +13,15 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alexedwards/scs/v2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,11 +30,13 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
+	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
+	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 )
 
@@ -51,9 +61,14 @@ type Harness struct {
 	Redis   *redis.Client
 	Mailer  *FakeMailer
 	Pusher  *FakePusher
-	Storage *FakeObjectStore
+	Storage *FakeObjectStore // in-memory store; not wired into services. Tests that exercise object storage hit the real MinIO via ObjStore below.
 	Sentry  *SentryRecorder
 	Cfg     config.Config
+
+	// ObjStore is the production *objectstore.Store backed by the test
+	// MinIO singleton. The user service uploads avatars through this.
+	ObjStore   *objectstore.Store
+	BucketName string
 
 	// Services + repos exposed for tests that want to bypass HTTP. Tests
 	// drive flows either via the wired router (the realistic path) or via
@@ -63,6 +78,7 @@ type Harness struct {
 	ResetsRepo   *passwordreset.Queries
 	NotifPrefSvc *notifprefsvc.Service
 	AuthSvc      *auth.Service
+	UserSvc      *usersvc.Service
 
 	serverURL *url.URL
 }
@@ -97,6 +113,22 @@ func New(t *testing.T) *Harness {
 	notifPrefs := notifprefrepo.New(pool)
 	sm := session.New(pool)
 
+	endpoint := StartMinIO(t)
+	bucket := perTestBucket(t)
+	createBucket(t, endpoint, bucket)
+	objStore, err := objectstore.New(objectstore.Config{
+		Endpoint:       endpoint,
+		Region:         "us-east-1",
+		AccessKey:      MinIOAccessKey,
+		SecretKey:      MinIOSecretKey,
+		Bucket:         bucket,
+		ForcePathStyle: true,
+		MaxUploadBytes: usersvc.MaxAvatarBytes + (256 << 10),
+	})
+	if err != nil {
+		t.Fatalf("Harness: build objectstore: %v", err)
+	}
+
 	authSvc, err := auth.New(auth.Config{
 		Pool: pool, Users: users, Resets: resets, Sessions: sm, Mailer: mailer,
 	})
@@ -107,15 +139,25 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build notificationpref service: %v", err)
 	}
+	userSvc, err := usersvc.New(usersvc.Config{Users: users, Storage: objStore})
+	if err != nil {
+		t.Fatalf("Harness: build user service: %v", err)
+	}
 
-	authHandler, err := httpapi.NewAuthHandler(authSvc, httpapi.NewValidator())
+	v := httpapi.NewValidator()
+	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
 	if err != nil {
 		t.Fatalf("Harness: build auth handler: %v", err)
+	}
+	userHandler, err := httpapi.NewUserHandler(userSvc, authSvc, notifSvc, v)
+	if err != nil {
+		t.Fatalf("Harness: build user handler: %v", err)
 	}
 
 	router := chi.NewRouter()
 	router.Use(requestIDMiddleware) // §4.7 entry — full chain lands in 3.8.
 	authHandler.Mount(router)
+	userHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
 	t.Cleanup(server.Close)
@@ -135,12 +177,49 @@ func New(t *testing.T) *Harness {
 		Storage:      NewFakeObjectStore(),
 		Sentry:       &SentryRecorder{},
 		Cfg:          defaultTestConfig(),
+		ObjStore:     objStore,
+		BucketName:   bucket,
 		Sessions:     sm,
 		UserRepo:     users,
 		ResetsRepo:   resets,
 		NotifPrefSvc: notifSvc,
 		AuthSvc:      authSvc,
+		UserSvc:      userSvc,
 		serverURL:    srvURL,
+	}
+}
+
+// perTestBucket builds a unique, S3-bucket-name-legal bucket id for the
+// current test. SHA-1(t.Name())[:16] is short enough to fit in the 63-char
+// cap with a "test-" prefix and contains only [0-9a-f].
+func perTestBucket(t *testing.T) string {
+	t.Helper()
+	sum := sha1.Sum([]byte(t.Name())) //nolint:gosec
+	return "test-" + hex.EncodeToString(sum[:])[:16]
+}
+
+// createBucket performs a one-shot CreateBucket against the test MinIO
+// using a raw S3 client. objectstore.Store doesn't expose CreateBucket
+// (that's deployment infra) — we drive it directly here. Idempotent:
+// "BucketAlreadyOwnedByYou" is fine.
+func createBucket(t *testing.T, endpoint, bucket string) {
+	t.Helper()
+	client := awss3.NewFromConfig(aws.Config{
+		Region: "us-east-1",
+		Credentials: credentials.NewStaticCredentialsProvider(
+			MinIOAccessKey, MinIOSecretKey, "",
+		),
+	}, func(o *awss3.Options) {
+		o.BaseEndpoint = aws.String(endpoint)
+		o.UsePathStyle = true
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := client.CreateBucket(ctx, &awss3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil && !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou") {
+		t.Fatalf("Harness: create bucket: %v", err)
 	}
 }
 

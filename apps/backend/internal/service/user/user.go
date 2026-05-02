@@ -20,6 +20,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	repo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 )
 
@@ -69,6 +70,48 @@ type UpdateProfileParams struct {
 	DisplayName *string
 	AvatarURL   *string
 	ColorScheme *string
+}
+
+// GetByID returns the public profile for id. Returns apierror.NotFound
+// when the user doesn't exist or is soft-deleted.
+func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (domain.User, error) {
+	u, err := s.users.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return domain.User{}, apierror.NotFound("user")
+		}
+		return domain.User{}, apierror.Internal("get user").WithCause(err)
+	}
+	return u, nil
+}
+
+// SearchParams is the input to Search.
+type SearchParams struct {
+	Query  string             // q query param; "" returns all users
+	Cursor *pagination.Cursor // nil for first page
+	Limit  int                // 0 → DefaultLimit; clamped to MaxLimit
+}
+
+// SearchResult is the paginated payload returned by Search.
+type SearchResult struct {
+	Users      []domain.User
+	NextCursor *string
+	HasMore    bool
+}
+
+// Search returns up to limit users whose username/display_name match q
+// (case-insensitive prefix; trigram). Empty q returns the catalog in
+// (created_at DESC, id DESC) order. The pagination envelope is the §6.4
+// keyset shape — never offset.
+func (s *Service) Search(ctx context.Context, p SearchParams) (SearchResult, error) {
+	overFetched, err := s.users.ListByPrefix(ctx, p.Query, p.Cursor, p.Limit)
+	if err != nil {
+		return SearchResult{}, apierror.Internal("search users").WithCause(err)
+	}
+	data, next, hasMore := pagination.Page(overFetched, p.Limit, func(u domain.User) pagination.Cursor {
+		return pagination.Cursor{Timestamp: u.CreatedAt, ID: u.ID}
+	})
+	return SearchResult{Users: data, NextCursor: next, HasMore: hasMore}, nil
 }
 
 // UpdateProfile patches the user's writable profile fields.

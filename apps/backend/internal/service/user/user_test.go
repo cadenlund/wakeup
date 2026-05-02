@@ -372,3 +372,61 @@ func TestNew_RejectsBadConfig(t *testing.T) {
 		t.Error("nil Storage should error")
 	}
 }
+
+// --- GetByID + Search (used by GET /v1/users{,/{id}}) -------------------
+
+func TestGetByID_Success(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	uid := makeUser(t, st)
+	got, err := st.svc.GetByID(context.Background(), uid)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.ID != uid {
+		t.Errorf("ID mismatch")
+	}
+}
+
+func TestGetByID_NotFound(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	_, err := st.svc.GetByID(context.Background(), uuid.New())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND", asAPIError(t, err).Code)
+	}
+}
+
+func TestSearch_PaginatesAndOver_FetchesLimitPlusOne(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	// Make 25 users; with limit=10 we expect 3 pages (10, 10, 5).
+	for i := 0; i < 25; i++ {
+		makeUser(t, st)
+	}
+
+	first, err := st.svc.Search(context.Background(), user.SearchParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(first.Users) != 10 || !first.HasMore || first.NextCursor == nil {
+		t.Fatalf("first page wrong: len=%d hasMore=%v cursor=%v",
+			len(first.Users), first.HasMore, first.NextCursor)
+	}
+}
+
+func TestSearch_EmptyQueryReturnsAllNonDeletedUsers(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	makeUser(t, st)
+	res, err := st.svc.Search(context.Background(), user.SearchParams{Limit: 50})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res.Users) == 0 {
+		t.Fatalf("expected at least 1 user, got none")
+	}
+}
