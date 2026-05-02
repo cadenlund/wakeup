@@ -14,8 +14,9 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
-// newTestServer builds an httptest.Server backed by the provided session
-// manager. Two endpoints:
+// newTestServer builds an httptest TLS server backed by the provided session
+// manager. TLS is required because session.New locks `Cookie.Secure = true`
+// per §8.2 and Go's cookiejar will not send Secure cookies on plain HTTP.
 //
 //	POST /login  — calls manager.Put("user_id", "alice") then 204
 //	GET  /me     — returns the user_id from the session, or 401
@@ -25,7 +26,7 @@ import (
 // response and read on subsequent requests.
 func newTestServer(t *testing.T, m *http.ServeMux, sm sessionManager) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(sm.LoadAndSave(m))
+	server := httptest.NewTLSServer(sm.LoadAndSave(m))
 	t.Cleanup(server.Close)
 	return server
 }
@@ -69,22 +70,33 @@ func (a *scsAdapter) Destroy(ctx context.Context) error {
 // the test infrastructure happens to declare it. Returns the zero value.
 func (a *scsAdapter) Cookie() http.Cookie { return http.Cookie{} }
 
-func mustClient(t *testing.T, _ *httptest.Server) *http.Client {
+// mustClient returns the httptest.Server's pre-configured client (trusts the
+// server's self-signed TLS cert) with a cookie jar attached so session cookies
+// round-trip across requests.
+func mustClient(t *testing.T, server *httptest.Server) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatalf("cookiejar: %v", err)
 	}
-	return &http.Client{Jar: jar}
+	c := server.Client()
+	c.Jar = jar
+	return c
 }
 
-// loginNoBody posts to /login and discards/closes the body so bodyclose
-// is happy without sprinkling defer Close everywhere in the test bodies.
+// loginNoBody posts to /login, asserts the 204 contract, and discards/closes
+// the body so bodyclose is happy without sprinkling defer Close everywhere.
+// Failing here surfaces a clearer error than waiting for downstream
+// assertions to fail with stale state.
 func loginNoBody(t *testing.T, client *http.Client, base string) {
 	t.Helper()
 	resp, err := client.Post(base+"/login", "", nil)
 	if err != nil {
 		t.Fatalf("login: %v", err)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		_ = resp.Body.Close()
+		t.Fatalf("login status = %d, want %d", resp.StatusCode, http.StatusNoContent)
 	}
 	_ = resp.Body.Close()
 }
@@ -147,6 +159,9 @@ func TestSession_CookieSetOnLogin(t *testing.T) {
 	if !found.HttpOnly {
 		t.Error("cookie should be HttpOnly")
 	}
+	if !found.Secure {
+		t.Error("cookie should be Secure (the §8.2 lock; tests run over TLS so this travels)")
+	}
 	if found.SameSite != http.SameSiteLaxMode {
 		t.Errorf("cookie SameSite = %v, want Lax", found.SameSite)
 	}
@@ -196,15 +211,19 @@ func TestSession_TamperedCookieReturnsNoUser(t *testing.T) {
 	t.Parallel()
 	server, _, _ := buildHandlerStack(t)
 
-	// Hand-craft a client whose jar has a fake session token.
+	// Hand-craft a client whose jar has a fake session token. server.Client()
+	// trusts the test TLS cert; we attach a custom jar pre-loaded with the
+	// tampered cookie before any request is made.
 	jar, _ := cookiejar.New(nil)
 	u, _ := url.Parse(server.URL)
 	jar.SetCookies(u, []*http.Cookie{{
-		Name:  session.CookieName,
-		Value: "TAMPERED_TOKEN_NOT_IN_DB",
-		Path:  "/",
+		Name:   session.CookieName,
+		Value:  "TAMPERED_TOKEN_NOT_IN_DB",
+		Path:   "/",
+		Secure: true, // jar would refuse to send a plain cookie back over https
 	}})
-	client := &http.Client{Jar: jar}
+	client := server.Client()
+	client.Jar = jar
 
 	resp, err := client.Get(server.URL + "/me")
 	if err != nil {
@@ -237,7 +256,7 @@ func TestSession_ExpiredSessionReturnsNoUser(t *testing.T) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	server := httptest.NewServer(mgr.LoadAndSave(mux))
+	server := httptest.NewTLSServer(mgr.LoadAndSave(mux))
 	t.Cleanup(server.Close)
 	client := mustClient(t, server)
 
