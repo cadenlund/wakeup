@@ -2401,7 +2401,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache: true                # caches GOMODCACHE + ~/.cache/go-build keyed on go.sum
+          cache: true
+          cache-dependency-path: apps/backend/go.sum   # caches GOMODCACHE + ~/.cache/go-build keyed on this file
 
       - uses: extractions/setup-just@v2
 
