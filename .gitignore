@@ -1,0 +1,48 @@
+# Go build
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+/build/
+vendor/
+go.work
+go.work.sum
+
+# Env (NEVER commit real env)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage.out
+coverage.html
+*.coverage
+
+# Logs
+*.log
+
+# Local data (docker-compose volumes)
+.docker-data/
+.minio-data/
+.postgres-data/
+
+# Expo / Node (mobile, even though we don't write JS yet)
+node_modules/
+.expo/
+.expo-shared/
+dist-mobile/
