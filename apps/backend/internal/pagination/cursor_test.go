@@ -88,7 +88,7 @@ func TestDecode_MalformedReturnsBadRequest(t *testing.T) {
 	}
 }
 
-func TestDecode_RejectsCursorForNonexistentRecord(t *testing.T) {
+func TestDecode_AllowsCursorForNonexistentRecord(t *testing.T) {
 	t.Parallel()
 	// Per §6.4: "cursor pointing to a deleted/missing record → returns the
 	// next page (no error; the keyset just continues)."
