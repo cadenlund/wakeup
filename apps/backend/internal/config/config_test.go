@@ -113,8 +113,10 @@ func TestLoad_MissingRequired(t *testing.T) {
 
 func TestLoad_NonExistentEnvFileIsNotFatal(t *testing.T) {
 	t.Parallel()
+	// t.TempDir() gives a path that exists but the file inside doesn't.
+	missingPath := filepath.Join(t.TempDir(), "missing.env")
 	cfg, err := config.Load(config.LoadOpts{
-		EnvFilePath: "/path/that/does/not/exist.env",
+		EnvFilePath: missingPath,
 		Environ:     []string{"DATABASE_URL=" + testDB, "REDIS_URL=" + testRedis},
 	})
 	if err != nil {
