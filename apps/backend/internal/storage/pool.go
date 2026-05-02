@@ -27,6 +27,20 @@ func NewPool(ctx context.Context, c PoolConfig) (*pgxpool.Pool, error) {
 	if c.DatabaseURL == "" {
 		return nil, errors.New("storage: PoolConfig.DatabaseURL is required")
 	}
+	// Reject negative knobs up front so a misconfigured env var fails at boot
+	// rather than silently being ignored at runtime.
+	if c.MaxConns < 0 {
+		return nil, fmt.Errorf("storage: PoolConfig.MaxConns must be >= 0, got %d", c.MaxConns)
+	}
+	if c.MinConns < 0 {
+		return nil, fmt.Errorf("storage: PoolConfig.MinConns must be >= 0, got %d", c.MinConns)
+	}
+	if c.MaxConnLifetime < 0 {
+		return nil, fmt.Errorf("storage: PoolConfig.MaxConnLifetime must be >= 0, got %s", c.MaxConnLifetime)
+	}
+	if c.MaxConnIdleTime < 0 {
+		return nil, fmt.Errorf("storage: PoolConfig.MaxConnIdleTime must be >= 0, got %s", c.MaxConnIdleTime)
+	}
 
 	cfg, err := pgxpool.ParseConfig(c.DatabaseURL)
 	if err != nil {
@@ -43,6 +57,14 @@ func NewPool(ctx context.Context, c PoolConfig) (*pgxpool.Pool, error) {
 	}
 	if c.MaxConnIdleTime > 0 {
 		cfg.MaxConnIdleTime = c.MaxConnIdleTime
+	}
+	// pgxpool itself doesn't enforce this; pool startup will eventually fail in
+	// confusing ways if MinConns > MaxConns, so catch it here.
+	if cfg.MinConns > cfg.MaxConns {
+		return nil, fmt.Errorf(
+			"storage: PoolConfig.MinConns (%d) must be <= MaxConns (%d)",
+			cfg.MinConns, cfg.MaxConns,
+		)
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)

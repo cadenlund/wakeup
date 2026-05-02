@@ -3,7 +3,9 @@ package storage_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/storage"
 )
@@ -27,6 +29,54 @@ func TestNewPool_RejectsMalformedURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected parse error, got nil")
+	}
+}
+
+func TestNewPool_RejectsInvalidKnobs(t *testing.T) {
+	t.Parallel()
+	const url = "postgres://user:pass@localhost:5432/db?sslmode=disable"
+	cases := []struct {
+		name   string
+		cfg    storage.PoolConfig
+		errSub string
+	}{
+		{
+			name:   "negative MaxConns",
+			cfg:    storage.PoolConfig{DatabaseURL: url, MaxConns: -1},
+			errSub: "MaxConns",
+		},
+		{
+			name:   "negative MinConns",
+			cfg:    storage.PoolConfig{DatabaseURL: url, MinConns: -3},
+			errSub: "MinConns",
+		},
+		{
+			name:   "negative MaxConnLifetime",
+			cfg:    storage.PoolConfig{DatabaseURL: url, MaxConnLifetime: -time.Second},
+			errSub: "MaxConnLifetime",
+		},
+		{
+			name:   "negative MaxConnIdleTime",
+			cfg:    storage.PoolConfig{DatabaseURL: url, MaxConnIdleTime: -time.Hour},
+			errSub: "MaxConnIdleTime",
+		},
+		{
+			name:   "MinConns greater than MaxConns",
+			cfg:    storage.PoolConfig{DatabaseURL: url, MinConns: 10, MaxConns: 5},
+			errSub: "MinConns",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := storage.NewPool(context.Background(), tc.cfg)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.errSub) {
+				t.Fatalf("expected error to mention %q, got: %v", tc.errSub, err)
+			}
+		})
 	}
 }
 
