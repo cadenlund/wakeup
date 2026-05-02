@@ -6,7 +6,12 @@ CREATE TABLE password_resets (
     used_at    timestamptz
 );
 CREATE INDEX password_resets_user_idx ON password_resets (user_id);
+-- Partial index for the expiry-sweep job: only unconsumed tokens matter.
+CREATE INDEX password_resets_expiry_idx
+    ON password_resets (expires_at)
+    WHERE used_at IS NULL;
 
 -- +goose Down
+DROP INDEX IF EXISTS password_resets_expiry_idx;
 DROP INDEX IF EXISTS password_resets_user_idx;
 DROP TABLE IF EXISTS password_resets;

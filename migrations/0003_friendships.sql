@@ -11,8 +11,15 @@ CREATE TABLE friendships (
 );
 CREATE INDEX friendships_addressee_idx ON friendships (addressee_id, status);
 CREATE INDEX friendships_requester_idx ON friendships (requester_id, status);
+-- The UNIQUE (requester_id, addressee_id) above only blocks duplicates in one
+-- direction; without the next index a single logical friendship between A and B
+-- could exist as both (A,B) and (B,A) with conflicting status. The pair-unique
+-- index normalizes the ordering so either direction maps to the same key.
+CREATE UNIQUE INDEX friendships_pair_unique_idx
+    ON friendships (LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id));
 
 -- +goose Down
+DROP INDEX IF EXISTS friendships_pair_unique_idx;
 DROP INDEX IF EXISTS friendships_requester_idx;
 DROP INDEX IF EXISTS friendships_addressee_idx;
 DROP TABLE IF EXISTS friendships;

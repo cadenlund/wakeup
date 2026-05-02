@@ -2,7 +2,7 @@
 CREATE TABLE device_tokens (
     id           uuid PRIMARY KEY,
     user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expo_token   text NOT NULL,
+    expo_token   text NOT NULL CHECK (length(trim(expo_token)) > 0),
     platform     text NOT NULL CHECK (platform IN ('ios','android')),
     created_at   timestamptz NOT NULL DEFAULT now(),
     last_seen_at timestamptz NOT NULL DEFAULT now(),

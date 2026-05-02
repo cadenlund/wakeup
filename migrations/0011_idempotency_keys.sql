@@ -1,20 +1,23 @@
 -- Caches the response body for write requests carrying an Idempotency-Key
--- header. See WAKEUP.md §4.8 for middleware semantics.
+-- header. See WAKEUP.md §4.8 for middleware semantics. Keys are scoped per
+-- user_id (composite primary key) so two users may use the same key string
+-- without collision.
 
 -- +goose Up
 CREATE TABLE idempotency_keys (
-    key             text PRIMARY KEY,                                                 -- client-supplied UUID v7 (or any unique string ≤ 255 chars)
+    key             text NOT NULL CHECK (char_length(key) <= 255),                    -- client-supplied UUID v7 (or any unique string ≤ 255 chars)
     user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,             -- key is scoped per user
     request_hash    bytea NOT NULL,                                                   -- sha256(method + path + body)
     response_status int NOT NULL,
     response_body   bytea NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now(),
-    expires_at      timestamptz NOT NULL DEFAULT (now() + interval '24 hours')
+    expires_at      timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
+    PRIMARY KEY (user_id, key)
 );
-CREATE INDEX idempotency_keys_user_idx ON idempotency_keys (user_id);
+-- The composite PK above already serves user_id-prefix lookups; only need a
+-- separate index for the expiry sweeper (§4.12 idempotency sweeper).
 CREATE INDEX idempotency_keys_expires_idx ON idempotency_keys (expires_at);
 
 -- +goose Down
 DROP INDEX IF EXISTS idempotency_keys_expires_idx;
-DROP INDEX IF EXISTS idempotency_keys_user_idx;
 DROP TABLE IF EXISTS idempotency_keys;
