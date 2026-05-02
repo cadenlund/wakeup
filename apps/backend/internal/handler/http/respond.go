@@ -23,16 +23,57 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 )
 
-// ErrorResponse is the §4.4 outer JSON shape for error responses:
+// ErrorResponse is the §4.4 outer JSON shape for every error response:
 //
 //	{ "error": { "code": "...", "message": "...", "fields": [...], ... } }
 //
-// Exported so swaggo `@Failure` annotations render the correct envelope
-// shape in the generated OpenAPI spec (CodeRabbit caught the missing
-// wrapper on PR #25). Every handler should reference this type — never
-// `apierror.Error` directly — in `@Failure` lines.
+// Body / FieldError mirror apierror.Error / apierror.FieldError exactly
+// (same JSON tags). We keep a handler-local mirror because swag's
+// --parseDependency mode can't resolve apierror's named types when
+// traversed from outside the package; without these mirrors the
+// generated OpenAPI would render `error` as a generic object.
+//
+// Handlers MUST reference ErrorResponse (never apierror.Error directly)
+// in `@Failure` annotations so the spec matches the wire format.
 type ErrorResponse struct {
-	Error *apierror.Error `json:"error"`
+	Error ErrorBody `json:"error"`
+}
+
+// ErrorBody mirrors apierror.Error's wire shape.
+type ErrorBody struct {
+	Code              string       `json:"code"                          example:"RESOURCE_NOT_FOUND"`
+	Message           string       `json:"message"                       example:"user not found"`
+	Fields            []ErrorField `json:"fields,omitempty"`
+	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty" example:"30"`
+}
+
+// ErrorField mirrors apierror.FieldError's wire shape.
+type ErrorField struct {
+	Field   string `json:"field"   example:"email"`
+	Code    string `json:"code"    example:"INVALID_FORMAT"`
+	Message string `json:"message" example:"must be a valid email"`
+}
+
+// toErrorResponse converts an *apierror.Error to its wire envelope. The
+// JSON tags on each side match, so an existing test that decodes into
+// either shape sees the same bytes.
+func toErrorResponse(e *apierror.Error) ErrorResponse {
+	body := ErrorBody{
+		Code:              string(e.Code),
+		Message:           e.Message,
+		RetryAfterSeconds: e.RetryAfterSeconds,
+	}
+	if len(e.Fields) > 0 {
+		body.Fields = make([]ErrorField, len(e.Fields))
+		for i, fe := range e.Fields {
+			body.Fields[i] = ErrorField{
+				Field:   fe.Field,
+				Code:    fe.Code,
+				Message: fe.Message,
+			}
+		}
+	}
+	return ErrorResponse{Error: body}
 }
 
 // WriteJSON marshals body and writes with the given status. JSON encoding
@@ -66,9 +107,8 @@ func WriteNoContent(w http.ResponseWriter) {
 // Never leaks a raw Go error string to the client.
 func WriteError(w http.ResponseWriter, _ *http.Request, err error) {
 	if err == nil {
-		WriteJSON(w, http.StatusInternalServerError, ErrorResponse{
-			Error: apierror.Internal("WriteError called with nil"),
-		})
+		WriteJSON(w, http.StatusInternalServerError,
+			toErrorResponse(apierror.Internal("WriteError called with nil")))
 		return
 	}
 
@@ -76,7 +116,7 @@ func WriteError(w http.ResponseWriter, _ *http.Request, err error) {
 	if apiErr.Code == apierror.CodeRateLimited && apiErr.RetryAfterSeconds > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(apiErr.RetryAfterSeconds))
 	}
-	WriteJSON(w, apiErr.HTTPStatus(), ErrorResponse{Error: apiErr})
+	WriteJSON(w, apiErr.HTTPStatus(), toErrorResponse(apiErr))
 }
 
 // toAPIError performs the single-source-of-truth conversion used by both
@@ -123,9 +163,14 @@ func DecodeJSON(r *http.Request, v *validator.Validate, dst any) *apierror.Error
 		}
 		return apierror.BadRequest("malformed JSON")
 	}
-	// Reject trailing tokens after the first JSON value — protects against
-	// "two JSON objects concatenated" smuggling and obvious typos.
-	if dec.More() {
+	// Reject trailing tokens after the first JSON value — protects
+	// against "two JSON objects concatenated" smuggling and obvious
+	// typos. Decoder.More() only reports position INSIDE an array or
+	// object, not whether more top-level values exist; the reliable
+	// pattern is to attempt a second Decode and require io.EOF
+	// (CodeRabbit caught this on PR #25).
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		return apierror.BadRequest("malformed JSON")
 	}
 

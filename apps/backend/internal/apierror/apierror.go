@@ -93,6 +93,12 @@ type FieldError struct {
 
 // Error is the typed error every service returns. JSON-shape mirrors §4.4 —
 // `cause` is intentionally unexported so it never leaks to the wire.
+//
+// The Swagger schema for this shape is published from the handler package
+// via httpapi.APIError + httpapi.ErrorResponse — they mirror the JSON
+// shape exactly. We keep the docs source local to the handler package
+// because swag's --parseDependency mode struggles to resolve named types
+// across internal/* packages.
 type Error struct {
 	Code              Code         `json:"code"`
 	Message           string       `json:"message"`

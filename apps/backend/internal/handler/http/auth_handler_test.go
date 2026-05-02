@@ -61,7 +61,7 @@ func assertCode(t *testing.T, resp *http.Response, wantStatus int, wantCode apie
 		return
 	}
 	env := decodeErr(t, resp.Body)
-	if env.Error.Code != wantCode {
+	if apierror.Code(env.Error.Code) != wantCode {
 		t.Fatalf("error.code = %q, want %q", env.Error.Code, wantCode)
 	}
 }
@@ -199,7 +199,7 @@ func TestRegister_Validation(t *testing.T) {
 				t.Fatalf("%s: status=%d body=%s", tc.name, resp.StatusCode, rb)
 			}
 			env := decodeErr(t, resp.Body)
-			if env.Error.Code != apierror.CodeValidation {
+			if apierror.Code(env.Error.Code) != apierror.CodeValidation {
 				t.Errorf("Code=%q want VALIDATION_FAILED", env.Error.Code)
 			}
 			if len(env.Error.Fields) == 0 {
@@ -245,7 +245,7 @@ func TestRegister_BadRequest(t *testing.T) {
 				t.Fatalf("status=%d body=%s", resp.StatusCode, rb)
 			}
 			env := decodeErr(t, resp.Body)
-			if env.Error.Code != apierror.CodeBadRequest {
+			if apierror.Code(env.Error.Code) != apierror.CodeBadRequest {
 				t.Errorf("Code=%q want BAD_REQUEST", env.Error.Code)
 			}
 		})
