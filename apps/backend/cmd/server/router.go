@@ -52,6 +52,14 @@ type routerDeps struct {
 	AuthHandler         *httpapi.AuthHandler
 	FriendHandler       *httpapi.FriendHandler
 	ConversationHandler *httpapi.ConversationHandler
+
+	// Rate-limit tier overrides. Zero values fall back to the
+	// production §8.3 defaults (10/min auth, 60/min writes, 300/min
+	// reads). Tests pass effectively-unlimited values to dodge
+	// per-IP collisions across parallel runs on 127.0.0.1.
+	RateLimitAuth   rateLimitTier
+	RateLimitWrites rateLimitTier
+	RateLimitReads  rateLimitTier
 }
 
 // rateLimitTier groups the §8.3 default scopes so we wire the chain
@@ -62,11 +70,22 @@ type rateLimitTier struct {
 	Window time.Duration
 }
 
+// Production §8.3 defaults. Test code overrides via routerDeps so
+// parallel test runs (which all share 127.0.0.1 as the rate-limit
+// identifier) don't collide on the per-IP auth-tier bucket.
 var (
 	rateLimitAuth   = rateLimitTier{Scope: "auth", Limit: 10, Window: time.Minute}
 	rateLimitWrites = rateLimitTier{Scope: "writes", Limit: 60, Window: time.Minute}
 	rateLimitReads  = rateLimitTier{Scope: "reads", Limit: 300, Window: time.Minute}
 )
+
+// resolveTier returns the override when set, otherwise the production default.
+func resolveTier(override, fallback rateLimitTier) rateLimitTier {
+	if override.Limit > 0 && override.Window > 0 {
+		return override
+	}
+	return fallback
+}
 
 // buildRouter wires the §4.7 middleware chain and mounts every handler
 // under /v1/*. All cross-cutting middleware lives in internal/middleware;
@@ -78,6 +97,10 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
+
+	authTier := resolveTier(d.RateLimitAuth, rateLimitAuth)
+	writesTier := resolveTier(d.RateLimitWrites, rateLimitWrites)
+	readsTier := resolveTier(d.RateLimitReads, rateLimitReads)
 
 	r := chi.NewRouter()
 
@@ -110,9 +133,9 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 		r.Group(func(r chi.Router) {
 			r.Use(mw.RateLimit(mw.RateLimitConfig{
 				Limiter: d.Limiter,
-				Scope:   rateLimitAuth.Scope,
-				Limit:   rateLimitAuth.Limit,
-				Window:  rateLimitAuth.Window,
+				Scope:   authTier.Scope,
+				Limit:   authTier.Limit,
+				Window:  authTier.Window,
 				Logger:  d.Logger,
 			}, httpapi.WriteError))
 			r.Post("/v1/auth/register", d.AuthHandler.Register)
@@ -133,8 +156,8 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RateLimit(mw.RateLimitConfig{
-					Limiter: d.Limiter, Scope: rateLimitWrites.Scope,
-					Limit: rateLimitWrites.Limit, Window: rateLimitWrites.Window,
+					Limiter: d.Limiter, Scope: writesTier.Scope,
+					Limit: writesTier.Limit, Window: writesTier.Window,
 					Logger: d.Logger,
 				}, httpapi.WriteError))
 				r.Post("/v1/auth/logout-all", d.AuthHandler.LogoutAll)
@@ -157,8 +180,8 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RateLimit(mw.RateLimitConfig{
-					Limiter: d.Limiter, Scope: rateLimitReads.Scope,
-					Limit: rateLimitReads.Limit, Window: rateLimitReads.Window,
+					Limiter: d.Limiter, Scope: readsTier.Scope,
+					Limit: readsTier.Limit, Window: readsTier.Window,
 					Logger: d.Logger,
 				}, httpapi.WriteError))
 				r.Get("/v1/auth/me", d.AuthHandler.Me)
