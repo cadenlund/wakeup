@@ -47,9 +47,15 @@ func TestNewTestDB_AppliesMigrations(t *testing.T) {
 
 func TestNewTestDB_ParallelIsolation(t *testing.T) {
 	t.Parallel()
+	// alphaInserted is closed AFTER alpha commits its row, so beta only
+	// queries against a state where the row would be visible if isolation
+	// were broken. Without this barrier the test could pass spuriously
+	// when beta runs first.
+	alphaInserted := make(chan struct{})
 
 	t.Run("alpha", func(t *testing.T) {
 		t.Parallel()
+		defer close(alphaInserted)
 		pool := testutil.NewTestDB(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -64,6 +70,7 @@ func TestNewTestDB_ParallelIsolation(t *testing.T) {
 
 	t.Run("beta_must_not_see_alpha", func(t *testing.T) {
 		t.Parallel()
+		<-alphaInserted
 		pool := testutil.NewTestDB(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
