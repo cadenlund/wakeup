@@ -2360,7 +2360,7 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11.4
           working-directory: apps/backend
