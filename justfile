@@ -53,6 +53,7 @@ migrate-create name:
 # client codegen step below.
 gen-docs:
     cd apps/backend && swag init -g cmd/server/main.go -o internal/docs/openapi --parseDependency
+    mkdir -p docs/openapi
     cp apps/backend/internal/docs/openapi/swagger.json docs/openapi/swagger.json
     cp apps/backend/internal/docs/openapi/swagger.yaml docs/openapi/swagger.yaml
 
