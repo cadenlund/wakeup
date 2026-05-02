@@ -6,6 +6,47 @@ import (
 	"testing"
 )
 
+// asMap fails fast if v isn't a JSON object. Avoids the silent-skip
+// pattern (`x, ok := v.(map[string]any); ok && ...`) that lets type
+// mismatches sail through as no-ops, and the panic-prone direct cast
+// (`v.(map[string]any)`) that explodes on the first regression.
+func asMap(t *testing.T, v any, label string) map[string]any {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("%s: expected map[string]any, got %T (%#v)", label, v, v)
+	}
+	return m
+}
+
+// asString fails fast if the field isn't a string.
+func asString(t *testing.T, m map[string]any, key string) string {
+	t.Helper()
+	v, ok := m[key]
+	if !ok {
+		t.Fatalf("missing %q in %#v", key, m)
+	}
+	s, ok := v.(string)
+	if !ok {
+		t.Fatalf("%q: expected string, got %T (%#v)", key, v, v)
+	}
+	return s
+}
+
+// asBool fails fast if the field isn't a bool.
+func asBool(t *testing.T, m map[string]any, key string) bool {
+	t.Helper()
+	v, ok := m[key]
+	if !ok {
+		t.Fatalf("missing %q in %#v", key, m)
+	}
+	b, ok := v.(bool)
+	if !ok {
+		t.Fatalf("%q: expected bool, got %T (%#v)", key, v, v)
+	}
+	return b
+}
+
 // TestSmoke_MessagesGoldenPath drives every endpoint listed in §16
 // milestone 6.4 in the documented order:
 //
@@ -72,8 +113,9 @@ func TestSmoke_MessagesGoldenPath(t *testing.T) {
 	if len(bobData) != 3 {
 		t.Fatalf("bob list len = %d, want 3", len(bobData))
 	}
-	if first, ok := bobData[0].(map[string]any); ok && first["body"] != "third" {
-		t.Errorf("bob's newest row body = %v, want third", first["body"])
+	bobNewest := asMap(t, bobData[0], "bob list[0]")
+	if got := asString(t, bobNewest, "body"); got != "third" {
+		t.Errorf("bob's newest row body = %q, want third", got)
 	}
 
 	// 6) alice edits her first message — body update + edited_at stamp.
@@ -97,8 +139,8 @@ func TestSmoke_MessagesGoldenPath(t *testing.T) {
 	}
 	var deletedRow map[string]any
 	for _, raw := range postDeleteData {
-		row, _ := raw.(map[string]any)
-		if row["id"] == ids[1] {
+		row := asMap(t, raw, "post-delete list row")
+		if asString(t, row, "id") == ids[1] {
 			deletedRow = row
 			break
 		}
@@ -106,10 +148,10 @@ func TestSmoke_MessagesGoldenPath(t *testing.T) {
 	if deletedRow == nil {
 		t.Fatalf("deleted row %q not found in list", ids[1])
 	}
-	if deletedRow["body"] != "" {
-		t.Errorf("deleted body = %v, want empty string", deletedRow["body"])
+	if got := asString(t, deletedRow, "body"); got != "" {
+		t.Errorf("deleted body = %q, want empty string", got)
 	}
-	if !deletedRow["is_deleted"].(bool) {
+	if !asBool(t, deletedRow, "is_deleted") {
 		t.Errorf("is_deleted = false, want true")
 	}
 
@@ -166,11 +208,10 @@ func TestSmoke_MessagesGoldenPath(t *testing.T) {
 	hit := mustGetJSON(t, alice, srv.URL+"/v1/conversations/"+groupID+"/messages?q=fox", http.StatusOK)
 	hitData, _ := hit["data"].([]any)
 	if len(hitData) != 1 {
-		t.Errorf("q=fox len = %d, want 1", len(hitData))
-	} else if first, ok := hitData[0].(map[string]any); ok {
-		body, _ := first["body"].(string)
-		if !strings.Contains(body, "fox") {
-			t.Errorf("q=fox match body = %q, expected contains 'fox'", body)
-		}
+		t.Fatalf("q=fox len = %d, want 1", len(hitData))
+	}
+	hitFirst := asMap(t, hitData[0], "q=fox match[0]")
+	if body := asString(t, hitFirst, "body"); !strings.Contains(body, "fox") {
+		t.Errorf("q=fox match body = %q, expected contains 'fox'", body)
 	}
 }
