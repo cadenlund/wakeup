@@ -2333,7 +2333,11 @@ test:
     cd apps/backend && go test -race -count=1 ./...
 
 test-cover:
-    cd apps/backend && go test -race -cover ./...
+    # Scoped to ./internal/... — the cmd/server main package has no tests and
+    # triggers `go: no such tool "covdata"` on hosted runners when included with
+    # -coverprofile. Lint + `go build ./...` still verify cmd/server compiles.
+    # Restore broader scope at Phase 1.4 if cmd/server ever gets a test.
+    cd apps/backend && go test -race -covermode=atomic -coverprofile=coverage.out ./internal/...
 
 # Lint
 lint:
@@ -2385,25 +2389,20 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports: [5432:5432]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-      redis:
-        image: redis:7
-        ports: [6379:6379]
+    # No `services:` block — repository tests own their own infra via
+    # testcontainers-go (postgres / redis / minio / livekit), which uses
+    # the runner's host Docker. Adding GA services on top would just be a
+    # second postgres on :5432 fighting testcontainers for the port.
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # conform validates the whole PR commit range, needs full history
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
-          cache: true                # caches GOMODCACHE + ~/.cache/go-build keyed on go.sum
+          go-version-file: apps/backend/go.mod         # auto-derive Go version from the module directive
+          cache: true
+          cache-dependency-path: apps/backend/go.sum   # caches GOMODCACHE + ~/.cache/go-build keyed on this file
 
       - uses: extractions/setup-just@v2
 
@@ -2420,18 +2419,7 @@ jobs:
         if: steps.cache-go-bin.outputs.cache-hit != 'true'
         run: |
           go install github.com/swaggo/swag/cmd/swag@v1.16.4
-          go install github.com/pressly/goose/v3/cmd/goose@latest
-
-      - name: Run migrations
-        run: |
-          # goose errors out on an empty migrations dir; skip while there are none.
-          if compgen -G 'migrations/*.sql' > /dev/null; then
-            just migrate-up
-          else
-            echo "No migrations yet — skipping goose."
-          fi
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+          go install github.com/pressly/goose/v3/cmd/goose@v3.27.1
 
       - name: Lint
         uses: golangci/golangci-lint-action@v7
