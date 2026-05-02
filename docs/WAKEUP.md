@@ -2387,18 +2387,10 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports: [5432:5432]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-      redis:
-        image: redis:7
-        ports: [6379:6379]
+    # No `services:` block — repository tests own their own infra via
+    # testcontainers-go (postgres / redis / minio / livekit), which uses
+    # the runner's host Docker. Adding GA services on top would just be a
+    # second postgres on :5432 fighting testcontainers for the port.
     steps:
       - uses: actions/checkout@v4
 
@@ -2423,17 +2415,6 @@ jobs:
         run: |
           go install github.com/swaggo/swag/cmd/swag@v1.16.4
           go install github.com/pressly/goose/v3/cmd/goose@latest
-
-      - name: Run migrations
-        run: |
-          # goose errors out on an empty migrations dir; skip while there are none.
-          if compgen -G 'migrations/*.sql' > /dev/null; then
-            just migrate-up
-          else
-            echo "No migrations yet — skipping goose."
-          fi
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
 
       - name: Lint
         uses: golangci/golangci-lint-action@v7
