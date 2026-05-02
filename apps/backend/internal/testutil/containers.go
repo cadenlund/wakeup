@@ -116,7 +116,11 @@ func StartMinIO(t *testing.T) string {
 	minioOnce.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), containerStartTimeout)
 		defer cancel()
-		c, err := tcminio.Run(ctx, "minio/minio:latest",
+		// Pin to a specific MinIO release rather than :latest. The OSS image has
+		// stopped receiving new releases (archived late 2025); the last published
+		// tag is RELEASE.2025-09-07T16-13-09Z. Pinning insulates CI from any
+		// future tag drift while we evaluate alternatives.
+		c, err := tcminio.Run(ctx, "minio/minio:RELEASE.2025-09-07T16-13-09Z",
 			tcminio.WithUsername(MinIOAccessKey),
 			tcminio.WithPassword(MinIOSecretKey),
 		)

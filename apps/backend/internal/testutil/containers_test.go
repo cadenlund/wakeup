@@ -18,6 +18,12 @@ import (
 // They share singleton containers (sync.Once) so the boot cost is paid once
 // per package-test-binary, not once per test.
 
+// This test deliberately uses raw pgxpool against the testcontainers DSN
+// rather than pgtestdb. Reason: it validates the foundation pgtestdb (added in
+// milestone 1.5) sits on top of — using pgtestdb here would be circular, and
+// the test's purpose is "the container is reachable," not "schema is isolated."
+// Repository tests under internal/repository/* MUST use pgtestdb per the
+// CodeRabbit path instructions; this is the one exception.
 func TestStartPostgres_ReturnsConnectableDSN(t *testing.T) {
 	t.Parallel()
 	dsn := testutil.StartPostgres(t)
