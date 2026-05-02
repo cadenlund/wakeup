@@ -843,6 +843,10 @@ CREATE TABLE friendships (
 );
 CREATE INDEX friendships_addressee_idx ON friendships (addressee_id, status);
 CREATE INDEX friendships_requester_idx ON friendships (requester_id, status);
+-- Block both (A,B) and (B,A) for the same logical friendship — direction-only
+-- UNIQUE above isn't enough.
+CREATE UNIQUE INDEX friendships_pair_unique_idx
+    ON friendships (LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id));
 ```
 
 ```sql
@@ -879,15 +883,20 @@ CREATE TABLE messages (
     id                   uuid PRIMARY KEY,
     conversation_id      uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id            uuid NOT NULL REFERENCES users(id),
-    body                 text NOT NULL,
+    body                 text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 10000),  -- mirrors §4.6
     body_tsv             tsvector GENERATED ALWAYS AS (to_tsvector('english', body)) STORED,
     reply_to_message_id  uuid REFERENCES messages(id),
     created_at           timestamptz NOT NULL DEFAULT now(),
     edited_at            timestamptz,
     deleted_at           timestamptz
 );
-CREATE INDEX messages_conv_created_idx ON messages (conversation_id, created_at DESC);
+CREATE INDEX messages_conv_created_idx ON messages (conversation_id, created_at DESC, id DESC);
 CREATE INDEX messages_body_tsv_idx ON messages USING gin (body_tsv);
+
+-- Now that `messages` exists, attach the FK that 0004 couldn't (forward ref).
+ALTER TABLE conversation_members
+    ADD CONSTRAINT conversation_members_last_read_message_fk
+    FOREIGN KEY (last_read_message_id) REFERENCES messages(id) ON DELETE SET NULL;
 
 CREATE TABLE message_attachments (
     message_id     uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -912,9 +921,14 @@ CREATE TABLE attachments (
     storage_key   text NOT NULL,
     filename      text NOT NULL,
     content_type  text NOT NULL,
-    size_bytes    bigint NOT NULL,
+    size_bytes    bigint NOT NULL CHECK (size_bytes >= 1),                            -- mirrors §4.6 (1..50 MiB)
     created_at    timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX attachments_uploader_idx ON attachments (uploader_id);
+-- Wire the FK that 0005 couldn't (forward ref to a later table).
+ALTER TABLE message_attachments
+    ADD CONSTRAINT message_attachments_attachment_fk
+    FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE;
 ```
 
 ```sql
@@ -941,6 +955,10 @@ CREATE TABLE password_resets (
     used_at      timestamptz
 );
 CREATE INDEX password_resets_user_idx ON password_resets (user_id);
+-- Partial index for the expiry-sweep job: only unconsumed tokens matter.
+CREATE INDEX password_resets_expiry_idx
+    ON password_resets (expires_at)
+    WHERE used_at IS NULL;
 ```
 
 ```sql
@@ -948,7 +966,7 @@ CREATE INDEX password_resets_user_idx ON password_resets (user_id);
 CREATE TABLE device_tokens (
     id          uuid PRIMARY KEY,
     user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expo_token  text NOT NULL,
+    expo_token  text NOT NULL CHECK (length(trim(expo_token)) > 0),
     platform    text NOT NULL CHECK (platform IN ('ios','android')),
     created_at  timestamptz NOT NULL DEFAULT now(),
     last_seen_at timestamptz NOT NULL DEFAULT now(),
@@ -976,15 +994,16 @@ CREATE INDEX audit_log_actor_idx ON audit_log (actor_id);
 -- Caches the response body for write requests carrying an Idempotency-Key header.
 -- See §4.9 for middleware semantics.
 CREATE TABLE idempotency_keys (
-    key             text PRIMARY KEY,                                                -- client-supplied UUID v7 (or any unique string ≤ 255 chars)
-    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,            -- key is scoped per user
-    request_hash    bytea NOT NULL,                                                  -- sha256(method + path + body)
+    key             text NOT NULL CHECK (char_length(key) BETWEEN 1 AND 255),        -- client-supplied UUID v7 (or any unique string of 1..255 chars)
+    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,             -- key is scoped per user
+    request_hash    bytea NOT NULL CHECK (octet_length(request_hash) = 32),           -- sha256(method + path + body); SHA-256 = 32 bytes
     response_status int NOT NULL,
     response_body   bytea NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now(),
-    expires_at      timestamptz NOT NULL DEFAULT (now() + interval '24 hours')
+    expires_at      timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
+    PRIMARY KEY (user_id, key)
 );
-CREATE INDEX idempotency_keys_user_idx ON idempotency_keys (user_id);
+-- Composite PK above already serves user_id-prefix lookups.
 CREATE INDEX idempotency_keys_expires_idx ON idempotency_keys (expires_at);
 ```
 
