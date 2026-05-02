@@ -16,13 +16,16 @@ import (
 type errorWriter func(w http.ResponseWriter, r *http.Request, err error)
 
 // Recovery catches panics in downstream handlers, logs the panic + stack
-// via slog, and returns a generic 500. Pass writeError so the recovery
-// can produce the standard envelope shape — `nil` falls back to a plain
-// "500 Internal Server Error" string body.
+// via slog, and returns the §4.4 INTERNAL envelope through writeError.
+// writeError is required — the chain MUST emit a typed response, never
+// plaintext (CodeRabbit caught the fallback path on PR #27).
 //
 // Recovery sits at the OUTSIDE of the chain (§4.7) so it sees panics
 // from every other middleware too — including Logger and RequestID.
 func Recovery(logger *slog.Logger, writeError errorWriter) func(http.Handler) http.Handler {
+	if writeError == nil {
+		panic("middleware.Recovery: nil writeError")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -47,14 +50,8 @@ func Recovery(logger *slog.Logger, writeError errorWriter) func(http.Handler) ht
 					slog.Any("panic", rec),
 					slog.String("stack", string(stack)),
 				)
-				if writeError != nil {
-					writeError(w, r, apierror.Internal("internal error").
-						WithCause(fmt.Errorf("panic: %v", rec)))
-					return
-				}
-				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte("internal error"))
+				writeError(w, r, apierror.Internal("internal error").
+					WithCause(fmt.Errorf("panic: %v", rec)))
 			}()
 			next.ServeHTTP(w, r)
 		})

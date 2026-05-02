@@ -12,7 +12,6 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
-	repo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
@@ -27,11 +26,12 @@ func parseURL(t *testing.T, s string) *url.URL {
 }
 
 // loadUserStack wires LoadUser + a downstream handler that records the
-// resolved user, behind scs.LoadAndSave so session reads work.
+// resolved user, behind scs.LoadAndSave so session reads work. Uses the
+// harness user service (the production UserLoader) so the middleware
+// goes through the §4.1 service boundary.
 func loadUserStack(t *testing.T, h *testutil.Harness, downstream http.HandlerFunc) http.Handler {
 	t.Helper()
-	users := repo.New(h.DB)
-	chain := mw.LoadUser(h.Sessions, users, fakeWriteError)(downstream)
+	chain := mw.LoadUser(h.Sessions, h.UserSvc, fakeWriteError)(downstream)
 	return h.Sessions.LoadAndSave(chain)
 }
 
@@ -87,8 +87,7 @@ func TestLoadUser_ValidSession_PopulatesCtx(t *testing.T) {
 func TestLoadUser_GarbledUserID_ClearsSession(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	users := repo.New(h.DB)
-	stack := h.Sessions.LoadAndSave(mw.LoadUser(h.Sessions, users, fakeWriteError)(http.HandlerFunc(
+	stack := h.Sessions.LoadAndSave(mw.LoadUser(h.Sessions, h.UserSvc, fakeWriteError)(http.HandlerFunc(
 		func(_ http.ResponseWriter, r *http.Request) {
 			if got := mw.UserFromContext(r.Context()); got != nil {
 				t.Errorf("expected nil user, got %+v", got)

@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"errors"
+	"context"
 	"net/http"
 
 	"github.com/alexedwards/scs/v2"
@@ -9,8 +9,22 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
-	repo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 )
+
+// UserLoader is the §4.1 service-layer surface LoadUser needs to resolve
+// a session's user_id into a *domain.User. The user service satisfies it
+// directly (`*usersvc.Service.GetByID`); declaring the interface here
+// keeps the middleware decoupled from the service package and respects
+// the layering rule (handler → service → repository → storage).
+//
+// Implementations should return:
+//   - apierror.NotFound (or any error matching apierror.CodeNotFound) when
+//     the row is missing or soft-deleted — LoadUser will silently destroy
+//     the session.
+//   - any other error → propagated as Internal so writeError can render it.
+type UserLoader interface {
+	GetByID(ctx context.Context, id uuid.UUID) (domain.User, error)
+}
 
 // SessionUserIDKey is the scs session key the auth service writes the
 // authenticated user_id under. Mirrors `auth.SessionUserIDKey` so the
@@ -26,22 +40,29 @@ const (
 // LoadUser is the §4.7 step 8 middleware. After scs.LoadAndSave has
 // populated the session into ctx, this:
 //   - reads `user_id` from the session
-//   - loads the *domain.User row (excluding soft-deleted)
+//   - delegates to a UserLoader (the user service in production) to fetch
+//     the *domain.User
 //   - attaches it to ctx via WithUser + WithRealUser
 //
 // Missing session, malformed user_id, or a row that's been soft-deleted
 // out from under the session all silently leave ctx without a user.
 // RequireAuth is the gate that produces a 401; LoadUser only enriches.
 //
+// writeError is required so any failure path emits the §4.4 envelope —
+// no plaintext fallbacks (CodeRabbit caught those on PR #27).
+//
 // Impersonation (§8.7) is added in milestone 12.x by reading
 // `impersonating_user_id` after the real user is loaded and overriding
 // `WithUser` accordingly. The shape stays compatible.
-func LoadUser(sm *scs.SessionManager, users *repo.Queries, writeError errorWriter) func(http.Handler) http.Handler {
+func LoadUser(sm *scs.SessionManager, users UserLoader, writeError errorWriter) func(http.Handler) http.Handler {
+	if writeError == nil {
+		panic("middleware.LoadUser: nil writeError")
+	}
 	if sm == nil {
 		panic("middleware.LoadUser: nil session manager")
 	}
 	if users == nil {
-		panic("middleware.LoadUser: nil user repository")
+		panic("middleware.LoadUser: nil user loader")
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +75,7 @@ func LoadUser(sm *scs.SessionManager, users *repo.Queries, writeError errorWrite
 			if err != nil {
 				// Garbled session — clear it via Destroy so a stale value
 				// can't keep tripping this branch on every request.
-				if destroyErr := sm.Destroy(r.Context()); destroyErr != nil && writeError != nil {
+				if destroyErr := sm.Destroy(r.Context()); destroyErr != nil {
 					writeError(w, r, apierror.Internal("destroy session").WithCause(destroyErr))
 					return
 				}
@@ -63,18 +84,14 @@ func LoadUser(sm *scs.SessionManager, users *repo.Queries, writeError errorWrite
 			}
 			u, err := users.GetByID(r.Context(), id)
 			if err != nil {
-				if errors.Is(err, repo.ErrNotFound) {
+				if apierror.IsCode(err, apierror.CodeNotFound) {
 					// Session points at a soft-deleted user — drop the
 					// session so RequireAuth returns 401 cleanly.
 					_ = sm.Destroy(r.Context())
 					next.ServeHTTP(w, r)
 					return
 				}
-				if writeError != nil {
-					writeError(w, r, apierror.Internal("load session user").WithCause(err))
-					return
-				}
-				http.Error(w, "internal error", http.StatusInternalServerError)
+				writeError(w, r, apierror.Internal("load session user").WithCause(err))
 				return
 			}
 			loaded := u
@@ -86,20 +103,19 @@ func LoadUser(sm *scs.SessionManager, users *repo.Queries, writeError errorWrite
 }
 
 // RequireAuth rejects requests that don't have a *domain.User on the
-// context (set by LoadUser). The §4.4 envelope is rendered via
-// writeError; if it's nil, falls back to a plaintext 401.
+// context (set by LoadUser). writeError is required so the 401 always
+// uses the §4.4 envelope shape.
 func RequireAuth(writeError errorWriter) func(http.Handler) http.Handler {
+	if writeError == nil {
+		panic("middleware.RequireAuth: nil writeError")
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if u := UserFromContext(r.Context()); u != nil {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if writeError != nil {
-				writeError(w, r, apierror.Unauthorized("not authenticated"))
-				return
-			}
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, r, apierror.Unauthorized("not authenticated"))
 		})
 	}
 }
@@ -108,31 +124,21 @@ func RequireAuth(writeError errorWriter) func(http.Handler) http.Handler {
 // role=admin. Returns 401 when no user is loaded and 403 when the
 // loaded user is non-admin.
 func RequireAdmin(writeError errorWriter) func(http.Handler) http.Handler {
+	if writeError == nil {
+		panic("middleware.RequireAdmin: nil writeError")
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			u := UserFromContext(r.Context())
 			if u == nil {
-				if writeError != nil {
-					writeError(w, r, apierror.Unauthorized("not authenticated"))
-					return
-				}
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				writeError(w, r, apierror.Unauthorized("not authenticated"))
 				return
 			}
 			if u.Role != RoleAdmin {
-				if writeError != nil {
-					writeError(w, r, apierror.Forbidden("admin role required"))
-					return
-				}
-				http.Error(w, "forbidden", http.StatusForbidden)
+				writeError(w, r, apierror.Forbidden("admin role required"))
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
 }
-
-// userOK is a small predicate used by tests to assert ctx.User shape
-// without exporting the ctxKey type. (Not exported elsewhere — keep
-// behind a build-tag-free internal helper if more callers grow.)
-var _ = func(u *domain.User) bool { return u != nil && u.Role != "" }

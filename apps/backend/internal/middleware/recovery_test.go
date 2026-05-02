@@ -84,7 +84,7 @@ func TestRecovery_ReraisesAbortHandler(t *testing.T) {
 
 func TestRecovery_NoPanicPassThrough(t *testing.T) {
 	t.Parallel()
-	h := mw.Recovery(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := mw.Recovery(nil, fakeWriteError)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 	rec := httptest.NewRecorder()
@@ -94,17 +94,12 @@ func TestRecovery_NoPanicPassThrough(t *testing.T) {
 	}
 }
 
-func TestRecovery_FallbackPlaintextWhenNoWriteError(t *testing.T) {
+func TestRecovery_PanicsWhenNoWriteError(t *testing.T) {
 	t.Parallel()
-	h := mw.Recovery(slog.Default(), nil)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		panic("boom")
-	}))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "internal error") {
-		t.Errorf("plain body missing: %q", rec.Body.String())
-	}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected Recovery to panic on nil writeError")
+		}
+	}()
+	_ = mw.Recovery(slog.Default(), nil)
 }

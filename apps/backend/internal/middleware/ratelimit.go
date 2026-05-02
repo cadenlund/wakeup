@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -33,7 +32,13 @@ type RateLimitConfig struct {
 // over-budget requests with apierror.RateLimited. Identifier is
 // `user_id` when the request is authed (LoadUser ran), else the
 // remote IP. Limiter transport errors are fail-open per §8.3.
+//
+// writeError is required so the 429 response always uses the §4.4
+// envelope shape — no plaintext fallback path.
 func RateLimit(cfg RateLimitConfig, writeError errorWriter) func(http.Handler) http.Handler {
+	if writeError == nil {
+		panic("middleware.RateLimit: nil writeError")
+	}
 	if cfg.Limiter == nil {
 		panic("middleware.RateLimit: nil Limiter")
 	}
@@ -61,14 +66,15 @@ func RateLimit(cfg RateLimitConfig, writeError errorWriter) func(http.Handler) h
 					slog.String("identifier", ident),
 					slog.String("error", err.Error()),
 				)
-				// fail-open: continue
+				// Fail-open per §8.3 — better to let traffic through than
+				// reject every request when the limiter itself is down.
+				// Skip the !allowed branch entirely so a transport error
+				// can't surface as a 429 (CodeRabbit caught the bug here).
+				next.ServeHTTP(w, r)
+				return
 			}
 			if !allowed {
-				if writeError != nil {
-					writeError(w, r, apierror.RateLimited(retryAfterSeconds(retryAfter)))
-					return
-				}
-				http.Error(w, "too many requests", http.StatusTooManyRequests)
+				writeError(w, r, apierror.RateLimited(retryAfterSeconds(retryAfter)))
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -107,7 +113,3 @@ func retryAfterSeconds(d time.Duration) int {
 	}
 	return secs
 }
-
-// Recovery + Logger + LoadUser + RateLimit imports collide on errors;
-// pin the dependency so go test catches stale imports if we ever drop it.
-var _ = errors.New

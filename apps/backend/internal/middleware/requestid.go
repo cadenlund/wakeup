@@ -20,8 +20,13 @@ func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(RequestIDHeader)
 		if id == "" {
+			// Prefer UUID v7 (sortable by creation time) but fall back to
+			// v4 if the v7 path errors so we never lose request-id
+			// correlation — CodeRabbit caught the silent-drop on PR #27.
 			if v, err := uuid.NewV7(); err == nil {
 				id = v.String()
+			} else if v4, err4 := uuid.NewRandom(); err4 == nil {
+				id = v4.String()
 			}
 		}
 		if id != "" {
