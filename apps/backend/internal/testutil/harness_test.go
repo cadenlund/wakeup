@@ -3,10 +3,13 @@ package testutil_test
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil/fixtures"
@@ -19,8 +22,8 @@ func TestNew_BasicShape(t *testing.T) {
 	if h.Server == nil {
 		t.Fatal("Server is nil")
 	}
-	if !strings.HasPrefix(h.Server.URL, "http://") {
-		t.Fatalf("Server.URL = %q, want http:// prefix", h.Server.URL)
+	if !strings.HasPrefix(h.Server.URL, "https://") {
+		t.Fatalf("Server.URL = %q, want https:// prefix (TLS test server)", h.Server.URL)
 	}
 	if h.DB == nil {
 		t.Fatal("DB is nil")
@@ -99,24 +102,35 @@ func TestHTTPClient_HasCookieJar(t *testing.T) {
 	}
 }
 
-// AuthClient/AdminClient/WSDial deliberately panic until later phases (per
-// the milestone-1.9 plan documented in harness.go). Recovering the panic
-// here lets us assert the message is informative — a future agent reading
-// "wire me in Phase X" knows where to look.
-func TestAuthClient_PanicsWithMilestonePointer(t *testing.T) {
+// AuthClient registers a fresh user via the real /v1/auth/register
+// endpoint and returns a cookie-jared client + the persisted user. It
+// is wired in milestone 3.6.
+func TestAuthClient_RegistersUser(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected AuthClient to panic until Phase 3.6")
+	c, u := h.AuthClient(t)
+	if u.ID == uuid.Nil {
+		t.Fatal("AuthClient returned an empty user")
+	}
+	if u.Username == "" || u.Email == "" {
+		t.Fatalf("AuthClient produced empty fields: %+v", u)
+	}
+	if c.Jar == nil {
+		t.Fatal("AuthClient returned a client without a cookie jar")
+	}
+	// The cookie jar should now contain the wakeup_session cookie.
+	srvURL, _ := url.Parse(h.Server.URL)
+	cookies := c.Jar.Cookies(srvURL)
+	var found bool
+	for _, ck := range cookies {
+		if ck.Name == "wakeup_session" && ck.Value != "" {
+			found = true
+			break
 		}
-		msg := toString(r)
-		if !strings.Contains(msg, "Phase 3.6") {
-			t.Fatalf("panic should reference Phase 3.6, got: %s", msg)
-		}
-	}()
-	_, _ = h.AuthClient(t)
+	}
+	if !found {
+		t.Fatalf("expected wakeup_session cookie to be set, got %+v", cookies)
+	}
 }
 
 func TestMakeUser_PersistsRow(t *testing.T) {
@@ -160,19 +174,5 @@ func TestFakeMailer_Captures(t *testing.T) {
 	}
 }
 
-// toString turns a recover() value into a string for inspection.
-func toString(v any) string {
-	switch s := v.(type) {
-	case error:
-		return s.Error()
-	case string:
-		return s
-	default:
-		return ""
-	}
-}
-
-// Compile-time guard that http.Client is the type AuthClient eventually
-// returns. Not load-bearing today — silences the unused-import linter for
-// net/http while AuthClient is stubbed.
+// Compile-time guard that http.Client is the type AuthClient returns.
 var _ http.Client
