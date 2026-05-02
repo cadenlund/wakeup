@@ -1,0 +1,18 @@
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      glob: "*.go"
+      run: cd apps/backend && gofmt -w {staged_files}
+      stage_fixed: true
+    lint:
+      glob: "*.go"
+      run: cd apps/backend && golangci-lint run ./...
+    test:
+      glob: "*.go"
+      run: cd apps/backend && go test -race -count=1 ./...
+
+commit-msg:
+  commands:
+    conform:
+      run: conform enforce --commit-msg-file {1}
