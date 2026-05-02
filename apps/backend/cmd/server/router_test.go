@@ -46,21 +46,27 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("friend handler: %v", err)
 	}
+	convHandler, err := httpapi.NewConversationHandler(h.ConvSvc, h.UserSvc, h.AuthSvc, v)
+	if err != nil {
+		t.Fatalf("conversation handler: %v", err)
+	}
 
 	router, err := buildRouter(routerDeps{
-		Cfg:           cfg,
-		Logger:        slog.Default(),
-		Pool:          h.DB,
-		Redis:         h.Redis,
-		Sessions:      h.Sessions,
-		Limiter:       ratelimit.New(h.Redis),
-		UserSvc:       h.UserSvc,
-		AuthSvc:       h.AuthSvc,
-		NotifPrefSvc:  h.NotifPrefSvc,
-		FriendSvc:     h.FriendSvc,
-		UserHandler:   userHandler,
-		AuthHandler:   authHandler,
-		FriendHandler: friendHandler,
+		Cfg:                 cfg,
+		Logger:              slog.Default(),
+		Pool:                h.DB,
+		Redis:               h.Redis,
+		Sessions:            h.Sessions,
+		Limiter:             ratelimit.New(h.Redis),
+		UserSvc:             h.UserSvc,
+		AuthSvc:             h.AuthSvc,
+		NotifPrefSvc:        h.NotifPrefSvc,
+		FriendSvc:           h.FriendSvc,
+		ConvSvc:             h.ConvSvc,
+		UserHandler:         userHandler,
+		AuthHandler:         authHandler,
+		FriendHandler:       friendHandler,
+		ConversationHandler: convHandler,
 	})
 	if err != nil {
 		t.Fatalf("buildRouter: %v", err)

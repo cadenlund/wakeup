@@ -449,6 +449,684 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/conversations": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns the caller's conversations keyset-paginated by ` + "`" + `last_message_at DESC, id DESC` + "`" + ` per §6.4. Each row embeds the full member list with public profiles.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "List conversations",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "example": 20,
+                        "description": "Page size (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0=\"",
+                        "description": "Opaque pagination cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Page of conversations",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ConversationListResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid limit or cursor",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Creates a direct (` + "`" + `type=direct` + "`" + `, exactly 1 entry in ` + "`" + `member_ids` + "`" + `) or group (` + "`" + `type=group` + "`" + `, 1-24 entries in ` + "`" + `member_ids` + "`" + ` + ` + "`" + `name` + "`" + ` required). Direct creation deduplicates: if a direct between the same pair already exists, returns 200 with the existing row.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Create a conversation",
+                "parameters": [
+                    {
+                        "description": "Creation payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.CreateConversationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created (or 200 if direct already existed — API uses 201 in both cases for simplicity)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ConversationResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON / empty body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "A target user doesn't exist",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Concurrent direct creation conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversations/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Get conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Conversation with member list",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ConversationResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller is not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Removes the caller's membership. For groups this is \"leave\"; for directs it acts as \"hide\" — the other party still sees the conversation.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Leave a conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller is not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Patches name / avatar_url. Caller must be an admin of the conversation. Direct conversations are immutable. Non-members get 404 — no enumeration.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Update conversation (group only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Profile patch",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.UpdateConversationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated conversation",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ConversationResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON / id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Caller is not an admin of the group, or conversation is direct",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller is not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversations/{id}/members": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Admin-only. Each invitee is checked against the §4.6 cap-25; the request errors with 409 the moment the cap is hit. Direct conversations don't accept members.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Add members to a group",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "User ids to add",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AddMembersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Added member rows",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AddMembersResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON / id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Caller is not an admin or conversation is direct",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found, caller not a member, or target user missing",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Group is at the 25-member cap",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversations/{id}/members/{user_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Removes a member from the conversation. Self-removal is always allowed (acts as Leave). Removing another user requires admin role on a group.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Remove a member",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "User id to remove (UUID v7)",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id or user_id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Caller is not an admin (when removing another user) or conversation is direct",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found, caller not a member, or target not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversations/{id}/read": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Sets the caller's ` + "`" + `last_read_message_id` + "`" + ` pointer for the conversation. Frontend uses this to compute unread counts.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Mark conversation as read",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Last-read message id",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.MarkReadRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id or JSON",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller is not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/friends": {
             "get": {
                 "security": [
@@ -1665,11 +2343,154 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.AddMembersRequest": {
+            "type": "object",
+            "required": [
+                "user_ids"
+            ],
+            "properties": {
+                "user_ids": {
+                    "type": "array",
+                    "maxItems": 24,
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                    ]
+                }
+            }
+        },
+        "internal_handler_http.AddMembersResponse": {
+            "type": "object",
+            "properties": {
+                "added": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.ConversationMemberRow"
+                    }
+                }
+            }
+        },
         "internal_handler_http.AvatarUploadResponse": {
             "type": "object",
             "properties": {
                 "user": {
                     "$ref": "#/definitions/internal_handler_http.MeResponse"
+                }
+            }
+        },
+        "internal_handler_http.ConversationListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.ConversationResponse"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "next_cursor": {
+                    "type": "string",
+                    "example": "eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="
+                }
+            }
+        },
+        "internal_handler_http.ConversationMemberRow": {
+            "type": "object",
+            "properties": {
+                "joined_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
+                },
+                "role": {
+                    "type": "string",
+                    "example": "admin"
+                },
+                "user": {
+                    "$ref": "#/definitions/internal_handler_http.UserResponse"
+                }
+            }
+        },
+        "internal_handler_http.ConversationResponse": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string",
+                    "example": "https://wakeup.app/avatars/group.png"
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "last_message_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.ConversationMemberRow"
+                    }
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Wakeup Crew"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "group"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:35:11.221Z"
+                }
+            }
+        },
+        "internal_handler_http.CreateConversationRequest": {
+            "type": "object",
+            "required": [
+                "member_ids",
+                "type"
+            ],
+            "properties": {
+                "avatar_url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "example": "https://wakeup.app/avatars/group.png"
+                },
+                "member_ids": {
+                    "type": "array",
+                    "maxItems": 24,
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                    ]
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "example": "Wakeup Crew"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "direct",
+                        "group"
+                    ],
+                    "example": "group"
                 }
             }
         },
@@ -1827,6 +2648,18 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.MarkReadRequest": {
+            "type": "object",
+            "required": [
+                "up_to_message_id"
+            ],
+            "properties": {
+                "up_to_message_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
         "internal_handler_http.MeResponse": {
             "type": "object",
             "properties": {
@@ -1975,6 +2808,22 @@ const docTemplate = `{
                     "maxLength": 32,
                     "minLength": 3,
                     "example": "baron"
+                }
+            }
+        },
+        "internal_handler_http.UpdateConversationRequest": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "example": "https://wakeup.app/avatars/group.png"
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "example": "Wakeup Crew"
                 }
             }
         },
