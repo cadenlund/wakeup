@@ -2333,7 +2333,9 @@ test:
     cd apps/backend && go test -race -count=1 ./...
 
 test-cover:
-    cd apps/backend && go test -race -cover ./...
+    # `-race` requires atomic covermode; `-coverprofile` avoids the `go: no such tool "covdata"`
+    # error you'd get from bare `-cover` because the merge step needs an explicit profile.
+    cd apps/backend && go test -race -covermode=atomic -coverprofile=coverage.out ./...
 
 # Lint
 lint:
