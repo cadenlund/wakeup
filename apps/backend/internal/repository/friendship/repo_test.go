@@ -87,6 +87,28 @@ func TestCreate_DuplicatePairFails(t *testing.T) {
 	}
 }
 
+func TestCreate_RejectsAcceptedStatus(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := friendship.New(pool)
+	a, b := newPair(ctx, t, pool)
+
+	// Initial status must be pending or blocked — accepted requires the
+	// pending → accepted transition via Accept() so accepted_at gets
+	// stamped atomically.
+	_, err := repo.Create(ctx, friendship.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), RequesterID: a, AddresseeID: b,
+		Status: domain.FriendshipAccepted,
+	})
+	if err == nil {
+		t.Fatal("Create with status=accepted should error")
+	}
+	if !strings.Contains(err.Error(), "invalid initial status") {
+		t.Errorf("error = %v, want 'invalid initial status'", err)
+	}
+}
+
 func TestCreate_RequesterEqualsAddresseeFails(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -148,10 +170,13 @@ func TestAccept_PendingToAccepted(t *testing.T) {
 	pool := testutil.NewTestDB(t)
 	repo := friendship.New(pool)
 	a, b := newPair(ctx, t, pool)
-	created, _ := repo.Create(ctx, friendship.CreateParams{
+	created, err := repo.Create(ctx, friendship.CreateParams{
 		ID: uuid.Must(uuid.NewV7()), RequesterID: a, AddresseeID: b,
 		Status: domain.FriendshipPending,
 	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
 	got, err := repo.Accept(ctx, created.ID)
 	if err != nil {
@@ -192,10 +217,13 @@ func TestDelete(t *testing.T) {
 	pool := testutil.NewTestDB(t)
 	repo := friendship.New(pool)
 	a, b := newPair(ctx, t, pool)
-	created, _ := repo.Create(ctx, friendship.CreateParams{
+	created, err := repo.Create(ctx, friendship.CreateParams{
 		ID: uuid.Must(uuid.NewV7()), RequesterID: a, AddresseeID: b,
 		Status: domain.FriendshipPending,
 	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
 	if err := repo.Delete(ctx, created.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -220,11 +248,19 @@ func TestDeleteByPair_Idempotent(t *testing.T) {
 	if err := repo.DeleteByPair(ctx, a, b); err != nil {
 		t.Fatalf("DeleteByPair on missing: %v", err)
 	}
-	// Insert then delete by reverse-direction lookup.
-	_, _ = repo.Create(ctx, friendship.CreateParams{
+	// Insert pending → accept → delete by reverse-direction lookup.
+	// Repo enforces that initial status must be pending or blocked, so
+	// we transition through Accept() instead of inserting accepted directly.
+	created, err := repo.Create(ctx, friendship.CreateParams{
 		ID: uuid.Must(uuid.NewV7()), RequesterID: a, AddresseeID: b,
-		Status: domain.FriendshipAccepted,
+		Status: domain.FriendshipPending,
 	})
+	if err != nil {
+		t.Fatalf("Create pending: %v", err)
+	}
+	if _, err := repo.Accept(ctx, created.ID); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
 	if err := repo.DeleteByPair(ctx, b, a); err != nil {
 		t.Fatalf("DeleteByPair (b,a): %v", err)
 	}

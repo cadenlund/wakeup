@@ -111,12 +111,22 @@ func scanRow(row pgx.Row) (domain.Friendship, error) {
 	return f, err
 }
 
-// Create inserts a new friendship row and returns it. The pair-unique
-// index in migration 0003 enforces that no other row exists between the
-// same two users in either direction — duplicates surface as a Postgres
-// unique-violation (SQLSTATE 23505) which the service layer maps to
-// apierror.Conflict.
+// Create inserts a new friendship row and returns it.
+//
+// Initial status MUST be `pending` or `blocked` — the `accepted` state
+// is reachable only via the Accept() transition, which stamps
+// accepted_at atomically. Inserting an accepted row with a NULL
+// accepted_at would silently break the audit trail downstream
+// (CodeRabbit caught this on PR #30).
+//
+// The pair-unique index in migration 0003 enforces that no other row
+// exists between the same two users in either direction — duplicates
+// surface as a Postgres unique-violation (SQLSTATE 23505) which the
+// service layer maps to apierror.Conflict.
 func (q *Queries) Create(ctx context.Context, p CreateParams) (domain.Friendship, error) {
+	if p.Status != domain.FriendshipPending && p.Status != domain.FriendshipBlocked {
+		return domain.Friendship{}, fmt.Errorf("friendship: create: invalid initial status %q (must be pending or blocked)", p.Status)
+	}
 	f, err := scanRow(q.db.QueryRow(ctx, createSQL,
 		p.ID, p.RequesterID, p.AddresseeID, string(p.Status)))
 	if err != nil {
