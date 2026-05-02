@@ -3,7 +3,7 @@ pre-commit:
   commands:
     fmt:
       glob: "*.go"
-      run: cd apps/backend && gofmt -w {staged_files}
+      run: gofmt -w {staged_files}
       stage_fixed: true
     lint:
       glob: "*.go"

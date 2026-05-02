@@ -2215,7 +2215,7 @@ pre-commit:
   commands:
     fmt:
       glob: "*.go"
-      run: cd apps/backend && gofmt -w {staged_files}
+      run: gofmt -w {staged_files}                 # repo-relative paths; do NOT cd first
       stage_fixed: true
     lint:
       glob: "*.go"
