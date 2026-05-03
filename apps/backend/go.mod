@@ -10,7 +10,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.16
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.100.1
 	github.com/aws/smithy-go v1.25.1
+	github.com/coder/websocket v1.8.12
 	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-chi/cors v1.2.2
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
@@ -22,6 +24,9 @@ require (
 	github.com/peterldowns/pgtestdb v0.1.1
 	github.com/peterldowns/pgtestdb/migrators/goosemigrator v0.1.1
 	github.com/redis/go-redis/v9 v9.19.0
+	github.com/resend/resend-go/v2 v2.28.0
+	github.com/swaggo/http-swagger/v2 v2.0.2
+	github.com/swaggo/swag v1.16.6
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/minio v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
@@ -56,7 +61,6 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
-	github.com/go-chi/cors v1.2.2 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -96,14 +100,11 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/pressly/goose/v3 v3.22.1 // indirect
-	github.com/resend/resend-go/v2 v2.28.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/swaggo/files/v2 v2.0.0 // indirect
-	github.com/swaggo/http-swagger/v2 v2.0.2 // indirect
-	github.com/swaggo/swag v1.16.6 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
