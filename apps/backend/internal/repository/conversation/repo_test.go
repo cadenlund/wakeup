@@ -582,6 +582,165 @@ func TestCascadeDeleteConversationRemovesMembers(t *testing.T) {
 	}
 }
 
+// WithTx returns a Queries bound to a tx; the new instance reads its
+// uncommitted state and a Rollback drops it. Verifies tx isolation
+// the same way the friendship repo test does.
+func TestWithTx_RollsBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	a := makeUser(ctx, t, pool)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	txRepo := repo.WithTx(tx)
+	created, err := txRepo.CreateConversation(ctx, conversation.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), Type: domain.ConversationDirect, CreatedBy: a,
+	})
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Create in tx: %v", err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if _, err := repo.GetConversation(ctx, created.ID); !errors.Is(err, conversation.ErrNotFound) {
+		t.Errorf("after Rollback, GetConversation = %v, want ErrNotFound", err)
+	}
+}
+
+// ListMembersForConversations batches member lookups across multiple
+// conversation IDs. Empty input short-circuits without a DB query.
+func TestListMembersForConversations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	a := makeUser(ctx, t, pool)
+	b := makeUser(ctx, t, pool)
+	c := makeUser(ctx, t, pool)
+	convAB := makeDirect(ctx, t, repo, a, b)
+	convAC := makeDirect(ctx, t, repo, a, c)
+
+	got, err := repo.ListMembersForConversations(ctx, []uuid.UUID{convAB, convAC})
+	if err != nil {
+		t.Fatalf("ListMembersForConversations: %v", err)
+	}
+	if len(got[convAB]) != 2 {
+		t.Errorf("convAB members = %d, want 2", len(got[convAB]))
+	}
+	if len(got[convAC]) != 2 {
+		t.Errorf("convAC members = %d, want 2", len(got[convAC]))
+	}
+
+	empty, err := repo.ListMembersForConversations(ctx, nil)
+	if err != nil {
+		t.Fatalf("empty input: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("empty input map size = %d, want 0", len(empty))
+	}
+}
+
+// UpdateLastReadMessage stamps last_read_message_id on the membership
+// row. Idempotent — calling on a missing membership is a no-op (the
+// caller pre-validates membership at the service layer).
+func TestUpdateLastReadMessage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	a := makeUser(ctx, t, pool)
+	b := makeUser(ctx, t, pool)
+	convID := makeDirect(ctx, t, repo, a, b)
+
+	msgID := uuid.Must(uuid.NewV7())
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages (id, conversation_id, sender_id, body)
+		VALUES ($1, $2, $3, 'hello')
+	`, msgID, convID, a); err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+	if err := repo.UpdateLastReadMessage(ctx, convID, b, msgID); err != nil {
+		t.Fatalf("UpdateLastReadMessage: %v", err)
+	}
+	got, err := repo.GetMember(ctx, convID, b)
+	if err != nil {
+		t.Fatalf("GetMember: %v", err)
+	}
+	if got.LastReadMessageID == nil || *got.LastReadMessageID != msgID {
+		t.Errorf("LastReadMessageID = %v, want %s", got.LastReadMessageID, msgID)
+	}
+
+	// Idempotent on missing membership: no error, no row updated.
+	if err := repo.UpdateLastReadMessage(ctx, convID, uuid.New(), msgID); err != nil {
+		t.Errorf("UpdateLastReadMessage on missing membership: %v", err)
+	}
+}
+
+// Closed-pool sweep — every public method's wrapped error path
+// surfaces. Mirrors the friendship-repo test added in PR #84.
+func TestRepo_DBClosedErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := conversation.New(pool)
+	a := makeUser(ctx, t, pool)
+	b := makeUser(ctx, t, pool)
+	convID := makeDirect(ctx, t, repo, a, b)
+	pool.Close()
+
+	if _, err := repo.CreateConversation(ctx, conversation.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), Type: domain.ConversationDirect, CreatedBy: a,
+	}); err == nil {
+		t.Error("CreateConversation: want error")
+	}
+	if _, err := repo.GetConversation(ctx, convID); err == nil {
+		t.Error("GetConversation: want error")
+	} else if errors.Is(err, conversation.ErrNotFound) {
+		t.Errorf("GetConversation returned ErrNotFound on closed pool: %v", err)
+	}
+	if _, err := repo.UpdateConversation(ctx, conversation.UpdateParams{ID: convID}); err == nil {
+		t.Error("UpdateConversation: want error")
+	}
+	if err := repo.TouchLastMessageAt(ctx, convID, time.Now()); err == nil {
+		t.Error("TouchLastMessageAt: want error")
+	}
+	if err := repo.DeleteConversation(ctx, convID); err == nil {
+		t.Error("DeleteConversation: want error")
+	}
+	if _, err := repo.ListConversationsByUser(ctx, a, nil, 10); err == nil {
+		t.Error("ListConversationsByUser: want error")
+	}
+	if _, err := repo.GetDirectByPair(ctx, a, b); err == nil {
+		t.Error("GetDirectByPair: want error")
+	}
+	if _, err := repo.AddMember(ctx, convID, uuid.New(), domain.MemberRoleMember); err == nil {
+		t.Error("AddMember: want error")
+	}
+	if err := repo.RemoveMember(ctx, convID, b); err == nil {
+		t.Error("RemoveMember: want error")
+	}
+	if _, err := repo.GetMember(ctx, convID, a); err == nil {
+		t.Error("GetMember: want error")
+	}
+	if _, err := repo.ListMembers(ctx, convID); err == nil {
+		t.Error("ListMembers: want error")
+	}
+	if _, err := repo.ListMembersForConversations(ctx, []uuid.UUID{convID}); err == nil {
+		t.Error("ListMembersForConversations: want error")
+	}
+	if _, err := repo.CountMembers(ctx, convID); err == nil {
+		t.Error("CountMembers: want error")
+	}
+	if err := repo.UpdateLastReadMessage(ctx, convID, b, uuid.New()); err == nil {
+		t.Error("UpdateLastReadMessage: want error")
+	}
+}
+
 // --- domain helper -----------------------------------------------------
 
 func TestConversation_TypeHelpers(t *testing.T) {
