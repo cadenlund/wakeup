@@ -94,12 +94,14 @@ func TestRegister_RejectsEmptyToken(t *testing.T) {
 	st := newStack(t)
 	uid := makeUser(ctx, t, st.pool)
 
-	_, err := st.svc.Register(ctx, uid, "", domain.DeviceIOS)
-	if err == nil {
-		t.Fatal("expected error for empty token")
-	}
-	if asAPIError(t, err).Code != apierror.CodeBadRequest {
-		t.Errorf("Code = %q, want BAD_REQUEST", asAPIError(t, err).Code)
+	for _, tok := range []string{"", "   ", "\t\n"} {
+		_, err := st.svc.Register(ctx, uid, tok, domain.DeviceIOS)
+		if err == nil {
+			t.Fatalf("expected error for empty/whitespace token %q", tok)
+		}
+		if asAPIError(t, err).Code != apierror.CodeBadRequest {
+			t.Errorf("token %q: Code = %q, want BAD_REQUEST", tok, asAPIError(t, err).Code)
+		}
 	}
 }
 

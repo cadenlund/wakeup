@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -48,10 +49,14 @@ func (s *Service) Register(ctx context.Context, userID uuid.UUID, expoToken stri
 			fmt.Sprintf("platform %q is not supported (must be ios or android)", platform),
 		)
 	}
-	if expoToken == "" {
+	// Trim before persisting: migration 0009's CHECK constraint already
+	// rejects all-whitespace tokens at the DB level, but failing here
+	// surfaces a clean 400 instead of a 500.
+	trimmed := strings.TrimSpace(expoToken)
+	if trimmed == "" {
 		return domain.DeviceToken{}, apierror.BadRequest("expo_token is required")
 	}
-	tok, err := s.devices.Register(ctx, userID, expoToken, platform)
+	tok, err := s.devices.Register(ctx, userID, trimmed, platform)
 	if err != nil {
 		return domain.DeviceToken{}, apierror.Internal("register device token").WithCause(err)
 	}

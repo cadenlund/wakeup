@@ -33,6 +33,9 @@ func TestRegisterDevice_HappyPath(t *testing.T) {
 	if got["id"] == nil || got["id"] == "" {
 		t.Errorf("missing id: %+v", got)
 	}
+	if _, ok := got["user_id"]; ok {
+		t.Errorf("user_id must not be present in response (caller already knows it): %+v", got)
+	}
 	if got["expo_token"] != "ExponentPushToken[abc]" {
 		t.Errorf("expo_token mismatch: %+v", got)
 	}
@@ -69,6 +72,9 @@ func TestRegisterDevice_IdempotentSamePair(t *testing.T) {
 		t.Fatalf("second status=%d body=%s", second.StatusCode, body)
 	}
 	secondBody := mustDecode(t, second.Body)
+	if _, ok := secondBody["user_id"]; ok {
+		t.Errorf("user_id must not leak in re-register response: %+v", secondBody)
+	}
 	if secondBody["id"] != firstID {
 		t.Errorf("re-register should return same id: first=%v second=%v",
 			firstID, secondBody["id"])
