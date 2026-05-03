@@ -14,6 +14,7 @@ import (
 	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
+	"github.com/cadenlund/wakeup/apps/backend/internal/testutil/fixtures"
 )
 
 func parseURL(t *testing.T, s string) *url.URL {
@@ -196,6 +197,161 @@ func TestRequireAdmin_NoUser_401(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
+}
+
+// --- §8.7 impersonation overlay ----------------------------------------
+
+// seedSession attaches `keys` (key=value pairs) to a fresh scs session
+// and returns the session cookie. Lets impersonation tests forge a
+// session with both user_id and impersonating_user_id without going
+// through the admin handler (which lands in milestone 12.5).
+func seedSession(t *testing.T, h *testutil.Harness, keys map[string]string) *http.Cookie {
+	t.Helper()
+	setup := h.Sessions.LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		for k, v := range keys {
+			h.Sessions.Put(r.Context(), k, v)
+		}
+	}))
+	rec := httptest.NewRecorder()
+	setup.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("seedSession: no cookie issued")
+	}
+	return cookies[0]
+}
+
+func TestLoadUser_Impersonation_OverridesEffectiveUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h := testutil.New(t)
+
+	// Admin owns the session; target is the impersonated user. Pass
+	// explicit usernames since fixtures.MakeUser derives the default
+	// from the first 8 chars of a UUIDv7, which can collide when two
+	// users are inserted back-to-back in the same millisecond.
+	admin := fixtures.MakeUser(t, h.DB,
+		fixtures.WithRole("admin"),
+		fixtures.WithUsername("imp-admin-"+uuid.Must(uuid.NewV7()).String()),
+	)
+	target := fixtures.MakeUser(t, h.DB,
+		fixtures.WithUsername("imp-target-"+uuid.Must(uuid.NewV7()).String()),
+	)
+
+	cookie := seedSession(t, h, map[string]string{
+		mw.SessionUserIDKey:        admin.ID.String(),
+		mw.SessionImpersonatingKey: target.ID.String(),
+	})
+
+	stack := loadUserStack(t, h, func(_ http.ResponseWriter, r *http.Request) {
+		eff := mw.UserFromContext(r.Context())
+		realUser := mw.RealUserFromContext(r.Context())
+		if eff == nil || eff.ID != target.ID {
+			t.Errorf("ctx.User = %+v, want target %v", eff, target.ID)
+		}
+		if realUser == nil || realUser.ID != admin.ID {
+			t.Errorf("ctx.RealUser = %+v, want admin %v", realUser, admin.ID)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	stack.ServeHTTP(httptest.NewRecorder(), req)
+	_ = ctx
+}
+
+func TestLoadUser_Impersonation_AbsentBothEqualSessionOwner(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+
+	admin := fixtures.MakeUser(t, h.DB,
+		fixtures.WithRole("admin"),
+		fixtures.WithUsername("imp-absent-"+uuid.Must(uuid.NewV7()).String()),
+	)
+	cookie := seedSession(t, h, map[string]string{
+		mw.SessionUserIDKey: admin.ID.String(),
+	})
+
+	stack := loadUserStack(t, h, func(_ http.ResponseWriter, r *http.Request) {
+		eff := mw.UserFromContext(r.Context())
+		realUser := mw.RealUserFromContext(r.Context())
+		if eff == nil || realUser == nil {
+			t.Fatalf("expected both ctx users populated, got eff=%v real=%v", eff, realUser)
+		}
+		if eff.ID != realUser.ID {
+			t.Errorf("without impersonation, ctx.User must equal ctx.RealUser; got %v vs %v", eff.ID, realUser.ID)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	stack.ServeHTTP(httptest.NewRecorder(), req)
+}
+
+func TestLoadUser_Impersonation_GarbledTargetClearsField(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+
+	admin := fixtures.MakeUser(t, h.DB,
+		fixtures.WithRole("admin"),
+		fixtures.WithUsername("imp-garbled-"+uuid.Must(uuid.NewV7()).String()),
+	)
+	cookie := seedSession(t, h, map[string]string{
+		mw.SessionUserIDKey:        admin.ID.String(),
+		mw.SessionImpersonatingKey: "not-a-uuid",
+	})
+
+	stack := loadUserStack(t, h, func(_ http.ResponseWriter, r *http.Request) {
+		eff := mw.UserFromContext(r.Context())
+		realUser := mw.RealUserFromContext(r.Context())
+		// Garbled field is dropped silently → admin keeps acting as
+		// themselves (no 500, no impersonation override).
+		if eff == nil || eff.ID != admin.ID {
+			t.Errorf("ctx.User = %+v, want admin %v after dropping garbled field", eff, admin.ID)
+		}
+		if realUser == nil || realUser.ID != admin.ID {
+			t.Errorf("ctx.RealUser = %+v, want admin %v", realUser, admin.ID)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	stack.ServeHTTP(httptest.NewRecorder(), req)
+}
+
+func TestLoadUser_Impersonation_SoftDeletedTargetClearsField(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	h := testutil.New(t)
+
+	admin := fixtures.MakeUser(t, h.DB,
+		fixtures.WithRole("admin"),
+		fixtures.WithUsername("imp-deleted-admin-"+uuid.Must(uuid.NewV7()).String()),
+	)
+	target := fixtures.MakeUser(t, h.DB,
+		fixtures.WithUsername("imp-deleted-target-"+uuid.Must(uuid.NewV7()).String()),
+	)
+	if err := h.UserRepo.SoftDelete(ctx, target.ID); err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+
+	cookie := seedSession(t, h, map[string]string{
+		mw.SessionUserIDKey:        admin.ID.String(),
+		mw.SessionImpersonatingKey: target.ID.String(),
+	})
+
+	stack := loadUserStack(t, h, func(_ http.ResponseWriter, r *http.Request) {
+		eff := mw.UserFromContext(r.Context())
+		// Target was deleted out from under the session → middleware
+		// clears the field and admin acts as themselves.
+		if eff == nil || eff.ID != admin.ID {
+			t.Errorf("ctx.User = %+v, want admin %v after dropping deleted target", eff, admin.ID)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	stack.ServeHTTP(httptest.NewRecorder(), req)
 }
 
 // silence apierror import if it ever drops to 0 references in tests.
