@@ -83,6 +83,10 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("device handler: %v", err)
 	}
+	adminHandler, err := httpapi.NewAdminHandler(h.AdminSvc, h.AuthSvc, h.Sessions, v)
+	if err != nil {
+		t.Fatalf("admin handler: %v", err)
+	}
 	livekitWebhookHandler, err := httpapi.NewLiveKitWebhookHandler(
 		h.RoomSvc, h.Broker,
 		lkauth.NewSimpleKeyProvider(testutil.LiveKitDevAPIKey, testutil.LiveKitDevAPISecret),
@@ -119,6 +123,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		PresenceSvc:           h.PresenceSvc,
 		RoomSvc:               h.RoomSvc,
 		DeviceSvc:             h.DeviceSvc,
+		AdminSvc:              h.AdminSvc,
 		UserHandler:           userHandler,
 		AuthHandler:           authHandler,
 		FriendHandler:         friendHandler,
@@ -128,6 +133,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		PresenceHandler:       presenceHandler,
 		RoomHandler:           roomHandler,
 		DeviceHandler:         deviceHandler,
+		AdminHandler:          adminHandler,
 		LiveKitWebhookHandler: livekitWebhookHandler,
 		WSHandler:             wsHandler,
 		RateLimitAuth:         rateLimitTier{Scope: "auth" + suffix, Limit: 10000, Window: time.Minute},

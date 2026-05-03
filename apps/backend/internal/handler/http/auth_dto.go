@@ -50,12 +50,25 @@ type ImpersonatorInfo struct {
 // expected here — callers must reject the session before reaching this
 // converter — but we still strip the password_hash by omission (it isn't
 // even a field on MeResponse, so JSON marshal can't leak it).
-func toMeResponse(u domain.User) MeResponse {
-	return MeResponse{
+//
+// For non-impersonation requests, callers pass nil for impersonator.
+// During §8.7 admin impersonation, u is the IMPERSONATED user and
+// impersonator is the admin owning the session — the resulting response
+// renders the target's profile with `impersonated_by` populated.
+func toMeResponse(u domain.User, impersonator *domain.User) MeResponse {
+	resp := MeResponse{
 		ID: u.ID, Username: u.Username, DisplayName: u.DisplayName,
 		Email: u.Email, AvatarURL: u.AvatarURL, ColorScheme: u.ColorScheme,
 		Role: u.Role, CreatedAt: u.CreatedAt,
 	}
+	if impersonator != nil && impersonator.ID != u.ID {
+		resp.ImpersonatedBy = &ImpersonatorInfo{
+			ID:          impersonator.ID,
+			Username:    impersonator.Username,
+			DisplayName: impersonator.DisplayName,
+		}
+	}
+	return resp
 }
 
 // --- Auth requests / responses ------------------------------------------

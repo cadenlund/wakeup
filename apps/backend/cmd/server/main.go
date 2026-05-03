@@ -37,6 +37,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
 	attrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/attachment"
+	auditrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/audit"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	devicerepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/devicetoken"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
@@ -45,6 +46,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	presrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/presence"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	adminsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
@@ -133,6 +135,7 @@ func run() error {
 	attsRepo := attrepo.New(pool)
 	presRepo := presrepo.New(pool)
 	devicesRepo := devicerepo.New(pool)
+	auditsRepo := auditrepo.New(pool)
 
 	// Pubsub broker (§4.5). Production wires Redis pubsub so events fan
 	// out across replicas; the broker's Close runs on the way down.
@@ -218,6 +221,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("device service: %w", err)
 	}
+	adminSvc, err := adminsvc.New(adminsvc.Config{Pool: pool, Users: users, Audit: auditsRepo})
+	if err != nil {
+		return fmt.Errorf("admin service: %w", err)
+	}
 
 	// §4.12 background-job runner. Phase 7.4 registers the attachment
 	// orphan sweeper; later phases add presence / idempotency / session
@@ -274,6 +281,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("device handler: %w", err)
 	}
+	adminHandler, err := httpapi.NewAdminHandler(adminSvc, authSvc, sessions, v)
+	if err != nil {
+		return fmt.Errorf("admin handler: %w", err)
+	}
 	livekitWebhookHandler, err := httpapi.NewLiveKitWebhookHandler(
 		roomSvc, broker,
 		lkauth.NewSimpleKeyProvider(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret),
@@ -325,6 +336,7 @@ func run() error {
 		PresenceSvc:           presenceSvc,
 		RoomSvc:               roomSvc,
 		DeviceSvc:             deviceSvc,
+		AdminSvc:              adminSvc,
 		UserHandler:           userHandler,
 		AuthHandler:           authHandler,
 		FriendHandler:         friendHandler,
@@ -334,6 +346,7 @@ func run() error {
 		PresenceHandler:       presenceHandler,
 		RoomHandler:           roomHandler,
 		DeviceHandler:         deviceHandler,
+		AdminHandler:          adminHandler,
 		LiveKitWebhookHandler: livekitWebhookHandler,
 		WSHandler:             wsHandler,
 	})
