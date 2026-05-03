@@ -43,16 +43,17 @@ var (
 )
 
 // StartLiveKit ensures a livekit-server container is running and
-// returns the connection details + a *webhook.Receiver matched to the
-// same dev keys. One real LiveKit per test binary; reused via
-// sync.Once because boot is ~2s.
+// returns a LiveKitTestEnv (URL, dev API key/secret, and an
+// auth.KeyProvider seeded with the same keys). One real LiveKit per
+// test binary; reused via sync.Once because boot is ~2s.
 //
 // The webhookURL parameter is reserved for future Phase 10.5 e2e
 // wiring (where real LiveKit fires webhooks at the harness's HTTP
 // server). For 10.1 we accept the parameter but don't yet plumb it
-// into the container — §12.8.3 webhook tests synthesize webhooks
-// directly via the returned Receiver, so a wired-through URL isn't
-// needed for them.
+// into the container — §12.8.3 webhook tests synthesize webhook
+// bodies and sign them with auth.NewAccessToken, then verify them on
+// the handler side via webhook.Receive(req, env.KeyProvider). No live
+// container is needed for those tests. (CodeRabbit PR #55.)
 func StartLiveKit(t *testing.T, _ string) LiveKitTestEnv {
 	t.Helper()
 	livekitOnce.Do(func() {
