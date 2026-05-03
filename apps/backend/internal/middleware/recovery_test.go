@@ -112,11 +112,14 @@ func (f *fakeCapturer) Capture(err error, tags map[string]string) {
 func TestRecovery_CapturesPanicToSentry(t *testing.T) {
 	t.Parallel()
 	capturer := &fakeCapturer{}
+	// Wire RequestID upstream so the captured tags include the
+	// `request_id` Recovery propagates — without it the assertion
+	// below would only ever see "" and silently pass.
 	h := mw.Recovery(mw.RecoveryConfig{
 		Logger: slog.Default(), WriteError: fakeWriteError, Sentry: capturer,
-	})(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+	})(mw.RequestID(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		panic("boom")
-	}))
+	})))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/foo", nil))
 
@@ -129,6 +132,9 @@ func TestRecovery_CapturesPanicToSentry(t *testing.T) {
 	}
 	if got.tags["method"] != "POST" || got.tags["path"] != "/v1/foo" {
 		t.Errorf("captured tags missing route info: %+v", got.tags)
+	}
+	if got.tags["request_id"] == "" {
+		t.Errorf("captured tags missing request_id: %+v", got.tags)
 	}
 }
 

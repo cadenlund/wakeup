@@ -65,8 +65,19 @@ func Recovery(cfg RecoveryConfig) func(http.Handler) http.Handler {
 				}
 				stack := debug.Stack()
 				panicErr := fmt.Errorf("panic: %v", rec)
+				// Recovery sits OUTSIDE RequestID per §4.7 ordering, so
+				// the panicked goroutine's r.Context() doesn't carry the
+				// id RequestID stamps further down the chain. RequestID
+				// also echoes it on the response header, so use that as
+				// the fallback — keeps the panic log / Sentry tag
+				// correlated with the access log without rearranging the
+				// middleware tower.
+				reqID := RequestIDFromContext(r.Context())
+				if reqID == "" {
+					reqID = w.Header().Get(RequestIDHeader)
+				}
 				logger.ErrorContext(r.Context(), "panic recovered",
-					slog.String("request_id", RequestIDFromContext(r.Context())),
+					slog.String("request_id", reqID),
 					slog.String("method", r.Method),
 					slog.String("path", r.URL.Path),
 					slog.Any("panic", rec),
@@ -74,7 +85,7 @@ func Recovery(cfg RecoveryConfig) func(http.Handler) http.Handler {
 				)
 				if cfg.Sentry != nil {
 					cfg.Sentry.Capture(panicErr, map[string]string{
-						"request_id": RequestIDFromContext(r.Context()),
+						"request_id": reqID,
 						"method":     r.Method,
 						"path":       r.URL.Path,
 					})
