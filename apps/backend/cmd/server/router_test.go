@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -290,6 +291,273 @@ func TestRouter_RequiresAuth_OnUsersList(t *testing.T) {
 		rb, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d body=%s", resp.StatusCode, rb)
 	}
+}
+
+// TestRouter_AdminSmoke is the §16 milestone 12.6 end-to-end flow run
+// through the production middleware chain instead of a manual Swagger UI.
+//
+// It walks the full §8.7 path: register two users → SQL-promote one to
+// admin → log in as admin → list users → impersonate the second user →
+// verify /v1/auth/me returns the target with impersonated_by populated →
+// confirm the §12.4 BLOCKED_DURING_IMPERSONATION guard fires on the four
+// listed dangerous routes → end impersonation → verify /v1/auth/me
+// returns the admin → assert audit log holds the bookend pair.
+//
+// This test doubles as the §12.4 wire-level check that I deferred from
+// the admin-handler unit tests (the harness in handler/http
+// intentionally doesn't re-implement the full router middleware tower).
+func TestRouter_AdminSmoke(t *testing.T) {
+	t.Parallel()
+	srv, c, h := productionLikeServer(t)
+
+	// 1. Register two users via the public /v1/auth/register endpoint.
+	// Each registration leaves a fresh session cookie in the jar; we
+	// reset the jar between calls so the second registration doesn't
+	// inherit the first user's session.
+	adminBody := `{"username":"smokeadmin","email":"smokeadmin@x.test","display_name":"Admin","password":"Password123!"}`
+	smokeRegister(t, c, srv.URL, adminBody)
+	smokeLogout(t, c, srv.URL)
+
+	targetBody := `{"username":"smoketarget","email":"smoketarget@x.test","display_name":"Target","password":"Password123!"}`
+	smokeRegister(t, c, srv.URL, targetBody)
+	smokeLogout(t, c, srv.URL)
+
+	// 2. Promote the admin user via direct SQL (the §12.6 spec uses SQL
+	// for this, since the bootstrap admin has no upstream way to be
+	// promoted). Look up the row by username so we don't depend on
+	// register's response shape here.
+	ctx := context.Background()
+	tag, err := h.DB.Exec(ctx,
+		"UPDATE users SET role = 'admin' WHERE username = 'smokeadmin'")
+	if err != nil {
+		t.Fatalf("promote admin: %v", err)
+	}
+	// Exactly one row should be affected — the smokeadmin user we just
+	// registered. A 0 means the username didn't match (test setup bug);
+	// a >1 means a leak from a parallel test (impossible in pgtestdb,
+	// but cheap to guard).
+	if got := tag.RowsAffected(); got != 1 {
+		t.Fatalf("promote admin: expected 1 row affected, got %d", got)
+	}
+	adminUser, err := h.UserRepo.GetByEmail(ctx, "smokeadmin@x.test")
+	if err != nil {
+		t.Fatalf("lookup admin: %v", err)
+	}
+	targetUser, err := h.UserRepo.GetByEmail(ctx, "smoketarget@x.test")
+	if err != nil {
+		t.Fatalf("lookup target: %v", err)
+	}
+
+	// 3. Log in as the admin (cookie jar now holds the admin session).
+	loginBody := `{"identifier":"smokeadmin","password":"Password123!"}`
+	smokeLogin(t, c, srv.URL, loginBody)
+
+	// 4. GET /v1/admin/users should succeed and list both users.
+	listResp, err := c.Get(srv.URL + "/v1/admin/users?limit=10")
+	if err != nil {
+		t.Fatalf("admin/users: %v", err)
+	}
+	t.Cleanup(func() { _ = listResp.Body.Close() })
+	if listResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(listResp.Body)
+		t.Fatalf("admin/users status=%d body=%s", listResp.StatusCode, body)
+	}
+	listBody := decodeMap(t, listResp.Body)
+	users, _ := listBody["data"].([]any)
+	if len(users) < 2 {
+		t.Fatalf("expected at least 2 users in admin list, got %d", len(users))
+	}
+
+	// 5. Impersonate the target.
+	impURL := srv.URL + "/v1/admin/users/" + targetUser.ID.String() + "/impersonate"
+	impResp, err := c.Post(impURL, "application/json", nil)
+	if err != nil {
+		t.Fatalf("impersonate: %v", err)
+	}
+	t.Cleanup(func() { _ = impResp.Body.Close() })
+	if impResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(impResp.Body)
+		t.Fatalf("impersonate status=%d body=%s", impResp.StatusCode, body)
+	}
+	impBody := decodeMap(t, impResp.Body)
+	if impBody["id"] != targetUser.ID.String() {
+		t.Errorf("impersonate returned id=%v, want target %v", impBody["id"], targetUser.ID)
+	}
+	imp, _ := impBody["impersonated_by"].(map[string]any)
+	if imp == nil || imp["id"] != adminUser.ID.String() {
+		t.Errorf("impersonated_by missing or wrong: %+v", impBody)
+	}
+
+	// 6. /v1/auth/me now returns the target with impersonated_by set.
+	meResp1, err := c.Get(srv.URL + "/v1/auth/me")
+	if err != nil {
+		t.Fatalf("/me during impersonation: %v", err)
+	}
+	t.Cleanup(func() { _ = meResp1.Body.Close() })
+	me1 := decodeMap(t, meResp1.Body)
+	if me1["id"] != targetUser.ID.String() {
+		t.Errorf("/me during impersonation should return target, got %v", me1["id"])
+	}
+	if _, ok := me1["impersonated_by"].(map[string]any); !ok {
+		t.Errorf("impersonated_by missing on /me: %+v", me1)
+	}
+
+	// 7. §12.4 dangerous-route guard. Each of these must surface
+	// 403 BLOCKED_DURING_IMPERSONATION while the admin is impersonating.
+	// Inline loop (not subtests): all four assertions share the cookie
+	// jar's mid-flow impersonation state, and t.Run wouldn't add value
+	// since they aren't parallelisable here anyway.
+	guardCases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{"DELETE /v1/users/me", http.MethodDelete, "/v1/users/me", ""},
+		{"POST /v1/auth/logout-all", http.MethodPost, "/v1/auth/logout-all", ""},
+		{
+			"PATCH /v1/users/me/notifications",
+			http.MethodPatch, "/v1/users/me/notifications",
+			`{"direct_messages":false}`,
+		},
+		{
+			"POST /v1/auth/password-reset/request",
+			http.MethodPost, "/v1/auth/password-reset/request",
+			`{"email":"smoketarget@x.test"}`,
+		},
+	}
+	for _, route := range guardCases {
+		req, err := http.NewRequest(route.method, srv.URL+route.path, strings.NewReader(route.body))
+		if err != nil {
+			t.Fatalf("%s: build request: %v", route.name, err)
+		}
+		if route.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", route.name, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s status=%d body=%s, want 403", route.name, resp.StatusCode, body)
+		}
+		if !strings.Contains(string(body), "BLOCKED_DURING_IMPERSONATION") {
+			t.Errorf("%s body should contain BLOCKED_DURING_IMPERSONATION code: %s",
+				route.name, body)
+		}
+	}
+
+	// 8. End impersonation.
+	endResp, err := c.Post(srv.URL+"/v1/admin/impersonate/end", "application/json", nil)
+	if err != nil {
+		t.Fatalf("end impersonate: %v", err)
+	}
+	t.Cleanup(func() { _ = endResp.Body.Close() })
+	if endResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(endResp.Body)
+		t.Fatalf("end impersonate status=%d body=%s", endResp.StatusCode, body)
+	}
+	endBody := decodeMap(t, endResp.Body)
+	if _, ok := endBody["impersonated_by"]; ok {
+		t.Errorf("End response must not include impersonated_by: %+v", endBody)
+	}
+
+	// 9. /v1/auth/me back to the admin.
+	meResp2, err := c.Get(srv.URL + "/v1/auth/me")
+	if err != nil {
+		t.Fatalf("/me after End: %v", err)
+	}
+	t.Cleanup(func() { _ = meResp2.Body.Close() })
+	me2 := decodeMap(t, meResp2.Body)
+	if me2["id"] != adminUser.ID.String() {
+		t.Errorf("/me after End should return admin, got %v", me2["id"])
+	}
+	if _, ok := me2["impersonated_by"]; ok {
+		t.Errorf("/me after End must not include impersonated_by: %+v", me2)
+	}
+
+	// 10. Audit log holds both bookends with actor_id = admin.
+	auditResp, err := c.Get(srv.URL + "/v1/admin/audit?limit=20")
+	if err != nil {
+		t.Fatalf("admin/audit: %v", err)
+	}
+	t.Cleanup(func() { _ = auditResp.Body.Close() })
+	if auditResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(auditResp.Body)
+		t.Fatalf("admin/audit status=%d body=%s", auditResp.StatusCode, body)
+	}
+	auditBody := decodeMap(t, auditResp.Body)
+	entries, _ := auditBody["data"].([]any)
+	seen := map[string]bool{}
+	for _, e := range entries {
+		row, _ := e.(map[string]any)
+		action, _ := row["action"].(string)
+		seen[action] = true
+		if action == "impersonate.started" || action == "impersonate.ended" {
+			if row["actor_id"] != adminUser.ID.String() {
+				t.Errorf("%s actor_id should be the admin (%v), got %v",
+					action, adminUser.ID, row["actor_id"])
+			}
+		}
+	}
+	if !seen["impersonate.started"] || !seen["impersonate.ended"] {
+		t.Errorf("audit log missing the bookend pair: %+v", seen)
+	}
+}
+
+// --- smoke helpers -------------------------------------------------------
+
+func smokeRegister(t *testing.T, c *http.Client, baseURL, body string) {
+	t.Helper()
+	resp, err := c.Post(baseURL+"/v1/auth/register", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		rb, _ := io.ReadAll(resp.Body)
+		t.Fatalf("register status=%d body=%s", resp.StatusCode, rb)
+	}
+}
+
+func smokeLogin(t *testing.T, c *http.Client, baseURL, body string) {
+	t.Helper()
+	resp, err := c.Post(baseURL+"/v1/auth/login", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		rb, _ := io.ReadAll(resp.Body)
+		t.Fatalf("login status=%d body=%s", resp.StatusCode, rb)
+	}
+}
+
+func smokeLogout(t *testing.T, c *http.Client, baseURL string) {
+	t.Helper()
+	resp, err := c.Post(baseURL+"/v1/auth/logout", "application/json", nil)
+	if err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Logout is idempotent and always 204. A non-2xx here means the
+	// session jar is in an unexpected state and the rest of the smoke
+	// flow would run against the wrong session — fail immediately.
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("logout status=%d body=%s", resp.StatusCode, body)
+	}
+}
+
+func decodeMap(t *testing.T, r io.Reader) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.NewDecoder(r).Decode(&m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return m
 }
 
 // truncate returns the first n bytes of b for log-friendly error output.
