@@ -3943,7 +3943,7 @@ const docTemplate = `{
             "properties": {
                 "code": {
                     "type": "string",
-                    "example": "RESOURCE_NOT_FOUND"
+                    "example": "ERROR_CODE"
                 },
                 "fields": {
                     "type": "array",
@@ -3953,11 +3953,11 @@ const docTemplate = `{
                 },
                 "message": {
                     "type": "string",
-                    "example": "user not found"
+                    "example": "human-readable description"
                 },
                 "retry_after_seconds": {
                     "type": "integer",
-                    "example": 30
+                    "example": 0
                 }
             }
         },
@@ -3966,15 +3966,15 @@ const docTemplate = `{
             "properties": {
                 "code": {
                     "type": "string",
-                    "example": "INVALID_FORMAT"
+                    "example": "FIELD_ERROR_CODE"
                 },
                 "field": {
                     "type": "string",
-                    "example": "email"
+                    "example": "field_name"
                 },
                 "message": {
                     "type": "string",
-                    "example": "must be a valid email"
+                    "example": "human-readable field-level reason"
                 }
             }
         },
@@ -4317,7 +4317,7 @@ const docTemplate = `{
             "properties": {
                 "code": {
                     "type": "string",
-                    "example": "RESOURCE_NOT_FOUND"
+                    "example": "ERROR_CODE"
                 },
                 "fields": {
                     "type": "array",
@@ -4327,11 +4327,11 @@ const docTemplate = `{
                 },
                 "message": {
                     "type": "string",
-                    "example": "user not found"
+                    "example": "human-readable description"
                 },
                 "retry_after_seconds": {
                     "type": "integer",
-                    "example": 30
+                    "example": 0
                 }
             }
         },
@@ -4340,15 +4340,15 @@ const docTemplate = `{
             "properties": {
                 "code": {
                     "type": "string",
-                    "example": "INVALID_FORMAT"
+                    "example": "FIELD_ERROR_CODE"
                 },
                 "field": {
                     "type": "string",
-                    "example": "email"
+                    "example": "field_name"
                 },
                 "message": {
                     "type": "string",
-                    "example": "must be a valid email"
+                    "example": "human-readable field-level reason"
                 }
             }
         },
