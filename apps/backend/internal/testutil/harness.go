@@ -449,8 +449,16 @@ func WithRole(s string) AuthClientOpt { return func(o *authClientOpts) { o.role 
 // Returns the *websocket.Conn the test can Read/Write on; on failure
 // fails the test with t.Fatalf. The test is responsible for closing
 // the returned conn.
+//
+// Nil-client guard: an unauth'd test that wants the 401 path should
+// use HTTPClient(t) (which returns a cookie-jar-only client) and dial
+// directly via coder/websocket. Passing nil here would NPE on the
+// transport / jar dereferences below — fail cleanly instead.
 func (h *Harness) WSDial(t *testing.T, c *http.Client) *coderws.Conn {
 	t.Helper()
+	if c == nil {
+		t.Fatalf("Harness.WSDial: nil *http.Client (use HTTPClient(t) for an unauth'd dial)")
+	}
 	wsURL := "ws" + strings.TrimPrefix(h.Server.URL, "http") + "/v1/ws"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

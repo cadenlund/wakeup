@@ -39,8 +39,8 @@ PENDING_EVENTS=(
   "MessageRead"          # not yet published
   "ConversationCreated"  # not yet published
   "ConversationUpdated"  # not yet published
-  "ConvMemberAdded"      # not yet published
-  "ConvMemberRemoved"    # not yet published
+  "ConversationMemberAdded"      # not yet published
+  "ConversationMemberRemoved"    # not yet published
   "PresenceUpdate"       # Phase 9
   "TypingStart"          # has FiresForRecipients + PayloadShape; outsiders/multi-inst TODO
   "TypingStop"           # symmetrical with TypingStart
@@ -97,12 +97,12 @@ done
 echo
 echo "== TestWebSocketLifecycle subtests =="
 LIFECYCLE_REQUIRED=(
-  "upgrade_no_cookie"
-  "upgrade_valid_cookie"
   "simultaneous_connections_same_user"
   "reconnect_no_replay"
 )
 LIFECYCLE_PENDING=(
+  "upgrade_no_cookie"           # stubbed in TestWebSocketLifecycle; covered by TestWSHandler_UnauthenticatedRejected. Graduate to required when the lifecycle subtest body is real (CodeRabbit PR #50).
+  "upgrade_valid_cookie"        # same — covered by TestWSHandler_AuthenticatedDialSucceeds.
   "upgrade_expired_cookie"      # Phase 12 (session expiry tests)
   "upgrade_tampered_cookie"     # Phase 12
   "heartbeat_updates_db"        # Phase 9 (presence)
