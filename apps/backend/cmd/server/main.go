@@ -39,6 +39,7 @@ import (
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
+	presrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/presence"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
@@ -46,6 +47,7 @@ import (
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
+	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 )
@@ -118,6 +120,7 @@ func run() error {
 	convsRepo := convrepo.New(pool)
 	msgsRepo := msgrepo.New(pool)
 	attsRepo := attrepo.New(pool)
+	presRepo := presrepo.New(pool)
 
 	// Pubsub broker (§4.5). Production wires Redis pubsub so events fan
 	// out across replicas; the broker's Close runs on the way down.
@@ -167,6 +170,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("attachment service: %w", err)
 	}
+	presenceSvc, err := presencesvc.New(presencesvc.Config{
+		Repo: presRepo, Broker: broker, Friends: friendSvc, Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("presence service: %w", err)
+	}
 
 	// §4.12 background-job runner. Phase 7.4 registers the attachment
 	// orphan sweeper; later phases add presence / idempotency / session
@@ -179,6 +188,10 @@ func run() error {
 		return fmt.Errorf("attachment orphan sweeper: %w", err)
 	}
 	jobRunner.Register(orphanSweeper)
+	// §9.2 presence decay sweeper: online → away → offline as
+	// last_active_at ages out. Registered against the same runner so
+	// graceful shutdown stops both jobs together.
+	jobRunner.Register(presenceSvc)
 	jobRunner.Start(rootCtx)
 	defer jobRunner.Stop()
 
@@ -206,6 +219,10 @@ func run() error {
 	attachmentHandler, err := httpapi.NewAttachmentHandler(attachmentSvc, authSvc)
 	if err != nil {
 		return fmt.Errorf("attachment handler: %w", err)
+	}
+	presenceHandler, err := httpapi.NewPresenceHandler(presenceSvc, userSvc, authSvc, v)
+	if err != nil {
+		return fmt.Errorf("presence handler: %w", err)
 	}
 
 	// §8 WebSocket realtime: hub + bridge + upgrade handler. The bridge
@@ -242,12 +259,14 @@ func run() error {
 		ConvSvc:             convSvc,
 		MsgSvc:              messageSvc,
 		AttSvc:              attachmentSvc,
+		PresenceSvc:         presenceSvc,
 		UserHandler:         userHandler,
 		AuthHandler:         authHandler,
 		FriendHandler:       friendHandler,
 		ConversationHandler: convHandler,
 		MessageHandler:      messageHandler,
 		AttachmentHandler:   attachmentHandler,
+		PresenceHandler:     presenceHandler,
 		WSHandler:           wsHandler,
 	})
 	if err != nil {
