@@ -55,6 +55,17 @@ WHERE status = 'accepted'
 ORDER BY accepted_at DESC, id DESC
 LIMIT $4;
 
+-- name: ListAllAcceptedFriendIDs :many
+-- Returns the user_id of every accepted friend, unpaginated. Used by
+-- the §9 presence service for fan-out: presence.update fires for
+-- friends only, so we need every friend at once. The friend graph
+-- is bounded by user behavior; realistic upper bound is in the
+-- hundreds.
+SELECT CASE WHEN requester_id = $1 THEN addressee_id ELSE requester_id END AS friend_id
+FROM friendships
+WHERE status = 'accepted'
+  AND (requester_id = $1 OR addressee_id = $1);
+
 -- name: ListPendingByUser :many
 -- Returns pending requests where the user is on either side. Service
 -- layer separates incoming vs outgoing by comparing requester_id.

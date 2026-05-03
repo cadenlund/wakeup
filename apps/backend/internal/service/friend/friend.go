@@ -190,6 +190,20 @@ func (s *Service) ListFriends(ctx context.Context, p ListFriendsParams) (ListFri
 	return ListFriendsResult{Friendships: data, NextCursor: next, HasMore: hasMore}, nil
 }
 
+// ListAcceptedFriendIDs returns every accepted friend's user_id,
+// unpaginated. Used by the §9 presence service to fan out
+// presence.update events to friends only — the §7.2 contract that
+// presence is friends-only requires the full friend list at every
+// publish. The graph is bounded by user behavior (realistic max in
+// the hundreds), so unpaginated is fine for v1.
+func (s *Service) ListAcceptedFriendIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	ids, err := s.friends.ListAllAcceptedFriendIDs(ctx, userID)
+	if err != nil {
+		return nil, apierror.Internal("list accepted friend ids").WithCause(err)
+	}
+	return ids, nil
+}
+
 // ListRequestsResult separates pending requests by direction so the
 // frontend can render incoming and outgoing differently.
 type ListRequestsResult struct {
