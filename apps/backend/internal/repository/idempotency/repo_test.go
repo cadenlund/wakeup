@@ -114,6 +114,139 @@ func TestPut_RoundTripsResponseHeaders(t *testing.T) {
 	}
 }
 
+func TestReserve_FirstCallerWins(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	userID := makeUser(ctx, t, pool)
+
+	hash := hash32("POST /v1/x body")
+	first, ok, err := repo.Reserve(ctx, idempotency.ReserveParams{
+		Key: "rsv", UserID: userID, RequestHash: hash, TTL: time.Hour,
+	})
+	if err != nil || !ok {
+		t.Fatalf("first Reserve: ok=%v err=%v", ok, err)
+	}
+	if first.ResponseStatus != idempotency.PlaceholderStatus {
+		t.Errorf("placeholder status = %d, want %d", first.ResponseStatus, idempotency.PlaceholderStatus)
+	}
+
+	// Second caller: existing row returned, ok=false.
+	existing, ok, err := repo.Reserve(ctx, idempotency.ReserveParams{
+		Key: "rsv", UserID: userID, RequestHash: hash, TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("second Reserve: %v", err)
+	}
+	if ok {
+		t.Errorf("second caller must lose; ok=true")
+	}
+	if existing.Key != first.Key {
+		t.Errorf("existing entry mismatch: %v vs %v", existing.Key, first.Key)
+	}
+}
+
+func TestComplete_ReplacesPlaceholder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	userID := makeUser(ctx, t, pool)
+
+	if _, ok, err := repo.Reserve(ctx, idempotency.ReserveParams{
+		Key: "c", UserID: userID, RequestHash: hash32("body"), TTL: time.Hour,
+	}); err != nil || !ok {
+		t.Fatalf("seed reserve: ok=%v err=%v", ok, err)
+	}
+
+	rows, err := repo.Complete(ctx, idempotency.CompleteParams{
+		Key: "c", UserID: userID,
+		ResponseStatus:  201,
+		ResponseHeaders: map[string][]string{"Content-Type": {"application/json"}},
+		ResponseBody:    []byte(`{"ok":true}`),
+		TTL:             time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("Complete should replace exactly 1 row, got %d", rows)
+	}
+
+	// Confirm: Get returns the completed entry.
+	got, err := repo.Get(ctx, "c", userID)
+	if err != nil {
+		t.Fatalf("Get after Complete: %v", err)
+	}
+	if got.ResponseStatus != 201 {
+		t.Errorf("status = %d, want 201", got.ResponseStatus)
+	}
+	if got.ResponseHeaders["Content-Type"][0] != "application/json" {
+		t.Errorf("headers lost: %+v", got.ResponseHeaders)
+	}
+	if string(got.ResponseBody) != `{"ok":true}` {
+		t.Errorf("body lost: %s", got.ResponseBody)
+	}
+}
+
+func TestComplete_NoOpWhenNotPlaceholder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	userID := makeUser(ctx, t, pool)
+
+	if _, _, err := repo.Reserve(ctx, idempotency.ReserveParams{
+		Key: "x", UserID: userID, RequestHash: hash32("a"), TTL: time.Hour,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.Complete(ctx, idempotency.CompleteParams{
+		Key: "x", UserID: userID, ResponseStatus: 200, ResponseBody: []byte("A"), TTL: time.Hour,
+	}); err != nil {
+		t.Fatalf("first Complete: %v", err)
+	}
+	// Second Complete: row is no longer a placeholder, so 0 rows
+	// affected — protects against double-finalization.
+	rows, err := repo.Complete(ctx, idempotency.CompleteParams{
+		Key: "x", UserID: userID, ResponseStatus: 500, ResponseBody: []byte("B"), TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("second Complete: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("second Complete must be a no-op, rowsAffected = %d", rows)
+	}
+}
+
+func TestDeleteByKey_RemovesPlaceholder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	userID := makeUser(ctx, t, pool)
+
+	if _, _, err := repo.Reserve(ctx, idempotency.ReserveParams{
+		Key: "d", UserID: userID, RequestHash: hash32("a"), TTL: time.Hour,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	rows, err := repo.DeleteByKey(ctx, "d", userID)
+	if err != nil {
+		t.Fatalf("DeleteByKey: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("expected 1 row deleted, got %d", rows)
+	}
+	// After delete, a fresh Reserve should succeed (no stale placeholder).
+	if _, ok, err := repo.Reserve(ctx, idempotency.ReserveParams{
+		Key: "d", UserID: userID, RequestHash: hash32("b"), TTL: time.Hour,
+	}); err != nil || !ok {
+		t.Errorf("post-delete Reserve should succeed: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestPut_ConflictReturnsErrConflict(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

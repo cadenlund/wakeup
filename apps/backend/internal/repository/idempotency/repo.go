@@ -60,6 +60,29 @@ INSERT INTO idempotency_keys (key, user_id, request_hash, response_status, respo
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING key, user_id, request_hash, response_status, response_headers, response_body, created_at, expires_at`
 
+const reserveSQL = `-- name: Reserve :one
+INSERT INTO idempotency_keys (key, user_id, request_hash, response_status, response_body, expires_at)
+VALUES ($1, $2, $3, 0, ''::bytea, $4)
+ON CONFLICT (user_id, key) DO NOTHING
+RETURNING key, user_id, request_hash, response_status, response_headers, response_body, created_at, expires_at`
+
+const completeSQL = `-- name: Complete :execrows
+UPDATE idempotency_keys
+SET response_status  = $3,
+    response_headers = $4,
+    response_body    = $5,
+    expires_at       = $6
+WHERE user_id = $1 AND key = $2 AND response_status = 0`
+
+const deleteByKeySQL = `-- name: DeleteByKey :execrows
+DELETE FROM idempotency_keys WHERE user_id = $1 AND key = $2`
+
+// PlaceholderStatus is the response_status value Reserve writes for an
+// in-flight entry. 0 is not a valid HTTP status, so callers can use
+// `entry.ResponseStatus == PlaceholderStatus` to tell a fresh
+// reservation from a completed cached row.
+const PlaceholderStatus = 0
+
 const deleteExpired = `-- name: DeleteExpired :execrows
 DELETE FROM idempotency_keys WHERE expires_at <= now()`
 
@@ -134,6 +157,93 @@ func (q *Queries) Put(ctx context.Context, p PutParams) (Entry, error) {
 		return Entry{}, fmt.Errorf("idempotency: put: %w", err)
 	}
 	return e, nil
+}
+
+// ReserveParams is the input to Reserve. Mirrors PutParams's required
+// fields except for the response payload (Reserve writes a placeholder
+// status; Complete fills in the real response later).
+type ReserveParams struct {
+	Key         string
+	UserID      uuid.UUID
+	RequestHash []byte
+	TTL         time.Duration
+}
+
+// Reserve attempts to atomically claim (key, userID) by inserting a
+// placeholder row with response_status = PlaceholderStatus. Returns the
+// reserved entry and ok=true on success. If the row already exists the
+// existing entry is fetched and returned with ok=false — callers
+// inspect ResponseStatus to tell a complete-cached entry (real status)
+// from another in-flight reservation (PlaceholderStatus).
+//
+// This is the at-most-once primitive the §4.8 middleware uses so two
+// concurrent retries of the same key can't both run the handler before
+// one cache write loses (CodeRabbit raised this on PR #74).
+func (q *Queries) Reserve(ctx context.Context, p ReserveParams) (Entry, bool, error) {
+	if p.TTL <= 0 {
+		return Entry{}, false, fmt.Errorf("idempotency: ReserveParams.TTL must be > 0, got %s", p.TTL)
+	}
+	expiresAt := time.Now().UTC().Add(p.TTL)
+	e, err := scanRow(q.db.QueryRow(ctx, reserveSQL, p.Key, p.UserID, p.RequestHash, expiresAt))
+	if err == nil {
+		return e, true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Conflict: row already exists. Fetch it so the caller can decide.
+		existing, getErr := q.Get(ctx, p.Key, p.UserID)
+		if getErr != nil {
+			return Entry{}, false, getErr
+		}
+		return existing, false, nil
+	}
+	return Entry{}, false, fmt.Errorf("idempotency: reserve: %w", err)
+}
+
+// CompleteParams is the input to Complete.
+type CompleteParams struct {
+	Key             string
+	UserID          uuid.UUID
+	ResponseStatus  int
+	ResponseHeaders map[string][]string
+	ResponseBody    []byte
+	TTL             time.Duration
+}
+
+// Complete updates an in-flight placeholder with the real response.
+// Returns the underlying rowcount (0 if there was no placeholder to
+// replace, e.g. another writer already completed it). Callers usually
+// log a 0-rowcount as a soft warning rather than an error.
+func (q *Queries) Complete(ctx context.Context, p CompleteParams) (int64, error) {
+	if p.TTL <= 0 {
+		return 0, fmt.Errorf("idempotency: CompleteParams.TTL must be > 0, got %s", p.TTL)
+	}
+	var headerBytes []byte
+	if p.ResponseHeaders != nil {
+		raw, err := json.Marshal(p.ResponseHeaders)
+		if err != nil {
+			return 0, fmt.Errorf("idempotency: encode headers: %w", err)
+		}
+		headerBytes = raw
+	}
+	expiresAt := time.Now().UTC().Add(p.TTL)
+	tag, err := q.db.Exec(ctx, completeSQL,
+		p.UserID, p.Key, p.ResponseStatus, headerBytes, p.ResponseBody, expiresAt,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("idempotency: complete: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteByKey removes the row at (user_id, key). Used by the §4.8 5xx
+// path to clear an in-flight placeholder so client retries aren't
+// blocked by a stale reservation.
+func (q *Queries) DeleteByKey(ctx context.Context, key string, userID uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, deleteByKeySQL, userID, key)
+	if err != nil {
+		return 0, fmt.Errorf("idempotency: delete by key: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // DeleteExpired removes every row whose expires_at is in the past. Returns

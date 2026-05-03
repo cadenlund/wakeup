@@ -366,39 +366,35 @@ func TestIdempotency_ReplayRestoresHeaders(t *testing.T) {
 	}
 }
 
-// Concurrent writers race: pre-seed an entry directly via the repo, then
-// let the middleware miss-Get-then-Put-conflict path execute. We assert
-// the handler still ran (as PR #74's documented limitation states) and
-// the in-flight response wasn't corrupted by the cache write failure.
-func TestIdempotency_PutConflictDoesNotFailRequest(t *testing.T) {
+// Atomic reservation: the second concurrent request with the same
+// (user_id, key) must NOT run the handler. Reserve loses the race,
+// finds the in-flight placeholder, and surfaces 422 IDEMPOTENCY_KEY_REUSED
+// — which is the contract for "another request is currently processing
+// this key." Without the reservation primitive, both requests would have
+// run handlers and produced duplicate side effects (the original race
+// CodeRabbit raised on PR #74).
+func TestIdempotency_ReservationBlocksConcurrentHandler(t *testing.T) {
 	t.Parallel()
 	f := newIdemFixture(t)
 	uid := f.makeIdemUser(t)
 
-	// Pre-seed an entry directly via the repo so the next Put trips
-	// ErrConflict — but, crucially, the middleware's Get won't see it
-	// because we wrap the repo with raceStore (returns ErrNotFound for
-	// every Get). Real-world equivalent: two requests both miss Get and
-	// race to Put.
-	if _, err := f.repo.Put(context.Background(), idemrepo.PutParams{
-		Key: "race-key", UserID: uid,
-		RequestHash:    requestHashHelper("POST", "/v1/x", []byte(`{"a":1}`)),
-		ResponseStatus: http.StatusCreated,
-		ResponseBody:   []byte(`{"first":true}`),
-		TTL:            time.Hour,
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
+	// Pre-seed an in-flight placeholder by calling Reserve directly —
+	// equivalent to "another goroutine just reserved 100ms ago and is
+	// running the handler". The next request through the middleware
+	// will trip the reservation conflict path.
+	hash := requestHashHelper(http.MethodPost, "/v1/x", []byte(`{"a":1}`))
+	if _, ok, err := f.repo.Reserve(context.Background(), idemrepo.ReserveParams{
+		Key: "race-key", UserID: uid, RequestHash: hash, TTL: time.Hour,
+	}); err != nil || !ok {
+		t.Fatalf("seed reservation: ok=%v err=%v", ok, err)
 	}
 
-	racing := &raceStore{base: f.repo}
 	called := 0
-	h := mw.Idempotency(mw.IdempotencyConfig{
-		Store: racing, WriteError: fakeWriteError,
-	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		called++
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"second":true}`))
-	}))
+	})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{"a":1}`)).
@@ -406,28 +402,43 @@ func TestIdempotency_PutConflictDoesNotFailRequest(t *testing.T) {
 	req.Header.Set(mw.IdempotencyKeyHeader, "race-key")
 	h.ServeHTTP(rec, req)
 
-	if called != 1 {
-		t.Errorf("handler should have run despite race, calls = %d", called)
+	if called != 0 {
+		t.Errorf("handler MUST NOT run when another reservation is in flight, calls = %d", called)
 	}
-	if rec.Code != http.StatusCreated {
-		t.Errorf("status = %d, want 201", rec.Code)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422", rec.Code)
 	}
-	if got := rec.Header().Get(mw.IdempotentReplayHeader); got != "false" {
-		t.Errorf("racing request is fresh, Idempotent-Replay = %q, want false", got)
+	if !strings.Contains(rec.Body.String(), string(apierror.CodeIdempotencyKeyReused)) {
+		t.Errorf("body should contain IDEMPOTENCY_KEY_REUSED, got %s", rec.Body.String())
 	}
 }
 
-// raceStore wraps a real repo: forces Get to miss so the middleware
-// always falls into the Put path. Used to deterministically exercise
-// the §4.8 race window without spinning up two goroutines.
-type raceStore struct{ base *idemrepo.Queries }
+// 5xx path: the placeholder must be removed so a client retry isn't
+// blocked by a stale in-flight reservation. (§4.8 says don't cache 5xx.)
+func TestIdempotency_5xxClearsPlaceholder(t *testing.T) {
+	t.Parallel()
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
+	called := 0
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
+		called++
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("transient"))
+	})
 
-func (r *raceStore) Get(_ context.Context, _ string, _ uuid.UUID) (idemrepo.Entry, error) {
-	return idemrepo.Entry{}, idemrepo.ErrNotFound
-}
-
-func (r *raceStore) Put(ctx context.Context, p idemrepo.PutParams) (idemrepo.Entry, error) {
-	return r.base.Put(ctx, p)
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{}`)).
+			WithContext(ctxWithUser(uid))
+		req.Header.Set(mw.IdempotencyKeyHeader, "key-5xx-clears")
+		h.ServeHTTP(rec, req)
+	}
+	if called != 2 {
+		t.Errorf("5xx must NOT block retries via stale placeholder; downstream calls = %d, want 2", called)
+	}
+	if n := f.countEntries(t, uid); n != 0 {
+		t.Errorf("placeholder should be cleared on 5xx; rows = %d", n)
+	}
 }
 
 // captureWriter must give the handler its OWN header map, not the

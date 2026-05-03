@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -44,9 +43,18 @@ const IdempotencyTTL = 24 * time.Hour
 // middleware needs. Defining the interface here lets tests stub without
 // pulling in pgxpool, and keeps the middleware package free of a
 // repository import beyond the type alias for Entry.
+//
+// The middleware uses Reserve / Complete (the atomic at-most-once
+// primitive) for the cache-miss path; Get is still used to read an
+// already-completed entry and decide replay vs hash-mismatch. DeleteByKey
+// clears the in-flight reservation when the handler produces a 5xx
+// (which §4.8 says we don't cache, so client retry shouldn't be blocked
+// by a stale placeholder).
 type IdempotencyStore interface {
 	Get(ctx context.Context, key string, userID uuid.UUID) (idemrepo.Entry, error)
-	Put(ctx context.Context, p idemrepo.PutParams) (idemrepo.Entry, error)
+	Reserve(ctx context.Context, p idemrepo.ReserveParams) (idemrepo.Entry, bool, error)
+	Complete(ctx context.Context, p idemrepo.CompleteParams) (int64, error)
+	DeleteByKey(ctx context.Context, key string, userID uuid.UUID) (int64, error)
 }
 
 // IdempotencyConfig packages the dependencies. Logger defaults to
@@ -62,15 +70,14 @@ type IdempotencyConfig struct {
 // same request with the same Idempotency-Key header gets the same
 // response back without the handler being re-invoked.
 //
-// Concurrency caveat: this implementation matches the §4.8 algorithm
-// literally — Get-then-Put-on-miss with ErrConflict on the way out.
-// Two truly concurrent requests with the same (user_id, key) can both
-// see Get-miss and both run the handler before one Put loses; the
-// loser's cache write fails but its handler's side effects already
-// landed. For at-most-once *handler execution* (vs at-most-once
-// *response delivery*, which we do guarantee for retries) we'd need
-// an atomic reservation flow — see PR #74 review thread for the
-// followup design.
+// Concurrency: at-most-once handler execution is guaranteed via an
+// atomic reservation pattern. Reserve inserts a placeholder row before
+// next.ServeHTTP runs; if a concurrent retry beats us to it the second
+// request surfaces 422 IDEMPOTENCY_KEY_REUSED rather than re-running
+// the handler. Once the winning handler returns, Complete replaces the
+// placeholder with the real (status, headers, body); 5xx responses
+// drop the placeholder entirely (§4.8 says don't cache 5xx, and a
+// stale placeholder would block legitimate retries).
 //
 // Algorithm (§4.8):
 //
@@ -161,24 +168,47 @@ func Idempotency(cfg IdempotencyConfig) func(http.Handler) http.Handler {
 			r.Body = io.NopCloser(bytes.NewReader(body))
 
 			hash := requestHash(r.Method, r.URL.Path, body)
-			entry, getErr := cfg.Store.Get(r.Context(), key, user.ID)
-			switch {
-			case getErr == nil:
+			// Atomic reservation: try to claim (key, user_id) by
+			// inserting a placeholder row. The placeholder's
+			// ResponseStatus = idemrepo.PlaceholderStatus until Complete
+			// fills in the real response; Reserve returns ok=false with
+			// the existing row if another request already claimed.
+			//
+			// This is the at-most-once primitive that prevents two
+			// concurrent retries of the same key from both running the
+			// handler.
+			entry, reserved, reserveErr := cfg.Store.Reserve(r.Context(), idemrepo.ReserveParams{
+				Key: key, UserID: user.ID, RequestHash: hash, TTL: IdempotencyTTL,
+			})
+			if reserveErr != nil {
+				cfg.WriteError(w, r, apierror.Internal("idempotency reserve").WithCause(reserveErr))
+				return
+			}
+			if !reserved {
+				// Existing row. Three cases:
+				//   1. Real cached response, hash matches → replay.
+				//   2. Real cached response, hash differs → 422 reused.
+				//   3. Placeholder (in-flight by another request) →
+				//      surface as 422 IDEMPOTENCY_KEY_REUSED. Treating it
+				//      as a hash mismatch is the safest signal: clients
+				//      should retry once the in-flight request settles
+				//      (TTL is 24h; the placeholder will be replaced the
+				//      moment Complete runs in the other goroutine).
+				if entry.ResponseStatus == idemrepo.PlaceholderStatus {
+					logger.InfoContext(r.Context(), "idempotency: key in flight on another request",
+						slog.String("key", key),
+					)
+					cfg.WriteError(w, r, apierror.IdempotencyKeyReused())
+					return
+				}
 				if !bytes.Equal(entry.RequestHash, hash) {
 					cfg.WriteError(w, r, apierror.IdempotencyKeyReused())
 					return
 				}
 				replayCached(r.Context(), w, entry, logger)
 				return
-
-			case errors.Is(getErr, idemrepo.ErrNotFound):
-				// First-time request — fall through to invoke + cache.
-
-			default:
-				cfg.WriteError(w, r, apierror.Internal("idempotency lookup").WithCause(getErr))
-				return
 			}
-
+			// We own the reservation. Run the handler exactly once.
 			rec := &captureWriter{ResponseWriter: w}
 			next.ServeHTTP(rec, r)
 
@@ -194,46 +224,38 @@ func Idempotency(cfg IdempotencyConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Only cache 2xx and 4xx responses. 5xx are often transient
-			// — caching them would deny the client a retry. (§4.8 note.)
+			// 5xx responses are not cached — clients should be able to
+			// retry without hitting a stale 500 (§4.8). Drop the
+			// placeholder so the next attempt isn't blocked by an
+			// in-flight reservation.
 			if rec.status >= 500 {
+				if _, delErr := cfg.Store.DeleteByKey(r.Context(), key, user.ID); delErr != nil {
+					logger.WarnContext(r.Context(), "idempotency: clear placeholder on 5xx",
+						slog.String("error", delErr.Error()),
+					)
+				}
 				return
 			}
-			// Copy the captured headers map so a future caller mutation
-			// of rec doesn't bleed into the cached entry. Strip the
-			// Idempotent-Replay header — replay sets that itself based
-			// on whether it was a fresh hit or a cache replay.
+			// Replace the placeholder with the real response. Headers
+			// snapshot strips Idempotent-Replay (replay sets that
+			// itself); body coerced from nil→empty so the schema's
+			// NOT NULL response_body is satisfied.
 			snapshot := snapshotHeaders(rec.Header())
-			// bytes.Buffer.Bytes() returns nil when nothing was written;
-			// the schema's response_body is NOT NULL, so coerce empty
-			// payloads to []byte{} so handlers that produce a status-only
-			// response (e.g. 204 No Content) still cache cleanly.
 			cachedBody := rec.body.Bytes()
 			if cachedBody == nil {
 				cachedBody = []byte{}
 			}
-			if _, putErr := cfg.Store.Put(r.Context(), idemrepo.PutParams{
-				Key: key, UserID: user.ID, RequestHash: hash,
+			if rows, completeErr := cfg.Store.Complete(r.Context(), idemrepo.CompleteParams{
+				Key: key, UserID: user.ID,
 				ResponseStatus: rec.status, ResponseHeaders: snapshot,
-				ResponseBody: cachedBody,
-				TTL:          IdempotencyTTL,
-			}); putErr != nil {
-				if errors.Is(putErr, idemrepo.ErrConflict) {
-					// Concurrent insert: another request with the same
-					// (key, user_id) wrote first. Their entry is now
-					// authoritative — we don't overwrite it with ours,
-					// and we don't fail the current request because the
-					// handler already produced a real response on the
-					// wire. Log so an unexpectedly hot key surfaces.
-					logger.InfoContext(r.Context(), "idempotency: concurrent insert raced",
-						slog.String("key", key),
-					)
-					return
-				}
-				// Other cache failures are logged but never fail the
-				// request — the handler already produced a real response.
-				logger.WarnContext(r.Context(), "idempotency: put",
-					slog.String("error", putErr.Error()),
+				ResponseBody: cachedBody, TTL: IdempotencyTTL,
+			}); completeErr != nil {
+				logger.WarnContext(r.Context(), "idempotency: complete",
+					slog.String("error", completeErr.Error()),
+				)
+			} else if rows == 0 {
+				logger.InfoContext(r.Context(), "idempotency: placeholder vanished before complete",
+					slog.String("key", key),
 				)
 			}
 		})
