@@ -28,6 +28,7 @@ import (
 	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
+	roomsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/room"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 
 	// Importing the generated docs package as a blank registers the
@@ -55,6 +56,7 @@ type routerDeps struct {
 	MsgSvc              *msgsvc.Service
 	AttSvc              *attsvc.Service
 	PresenceSvc         *presencesvc.Service
+	RoomSvc             *roomsvc.Service
 	UserHandler         *httpapi.UserHandler
 	AuthHandler         *httpapi.AuthHandler
 	FriendHandler       *httpapi.FriendHandler
@@ -62,6 +64,7 @@ type routerDeps struct {
 	MessageHandler      *httpapi.MessageHandler
 	AttachmentHandler   *httpapi.AttachmentHandler
 	PresenceHandler     *httpapi.PresenceHandler
+	RoomHandler         *httpapi.RoomHandler
 	WSHandler           *wshandler.Handler
 
 	// Rate-limit tier overrides. Zero values fall back to the
@@ -108,8 +111,8 @@ func resolveTier(override, fallback rateLimitTier) rateLimitTier {
 func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
-		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil ||
-		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.WSHandler == nil {
+		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil || d.RoomSvc == nil ||
+		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.WSHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
 
@@ -197,6 +200,8 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Delete("/v1/messages/{id}", d.MessageHandler.Delete)
 				r.Post("/v1/attachments", d.AttachmentHandler.Upload)
 				r.Post("/v1/presence/status", d.PresenceHandler.SetStatus)
+				r.Post("/v1/conversations/{id}/room/join", d.RoomHandler.Join)
+				r.Post("/v1/conversations/{id}/room/leave", d.RoomHandler.Leave)
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RateLimit(mw.RateLimitConfig{
@@ -217,6 +222,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Get("/v1/attachments/{id}", d.AttachmentHandler.Get)
 				r.Get("/v1/presence/friends", d.PresenceHandler.ListFriendsPresence)
 				r.Get("/v1/widget/friends", d.PresenceHandler.WidgetFriends)
+				r.Get("/v1/conversations/{id}/room", d.RoomHandler.Get)
 				r.Get("/v1/ws", d.WSHandler.Upgrade)
 			})
 		})

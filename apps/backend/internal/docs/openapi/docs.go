@@ -1462,6 +1462,239 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/conversations/{id}/room": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns the current participant list (with ` + "`" + `joined_at` + "`" + ` and ` + "`" + `video` + "`" + ` flags) plus ` + "`" + `started_at` + "`" + ` for the conversation's persistent room (§10.3). Membership-gated; non-members get 404.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rooms"
+                ],
+                "summary": "Get a conversation's room state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Current participants + started_at",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.RoomStateResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversations/{id}/room/join": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Issues a LiveKit JWT scoped to this conversation's persistent room (§10.3 — ` + "`" + `room_id == conversation_id` + "`" + `). The caller must be a member; non-members get 404 (no enumeration leak). Token TTL is 10 minutes; LiveKit auto-refreshes during the connection. The ` + "`" + `video` + "`" + ` flag is a UI hint baked into the JWT metadata so other participants can render the camera-on indicator — token publish permissions are identical regardless.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rooms"
+                ],
+                "summary": "Join a conversation's room",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Join hints",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.JoinRoomRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "LiveKit connection details",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.JoinRoomResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON or id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversations/{id}/room/leave": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Best-effort cleanup — the LiveKit ` + "`" + `participant_left` + "`" + ` webhook is the source of truth for the participant set, so this endpoint exists primarily to give the client a stable place to record an explicit leave intent. Membership is still checked so non-members can't poke at room state.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rooms"
+                ],
+                "summary": "Leave a conversation's room",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/friends": {
             "get": {
                 "security": [
@@ -3448,6 +3681,40 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.JoinRoomRequest": {
+            "type": "object",
+            "properties": {
+                "video": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
+        "internal_handler_http.JoinRoomResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:52:55.412Z"
+                },
+                "livekit_token": {
+                    "type": "string",
+                    "example": "eyJhbGciOi..."
+                },
+                "livekit_url": {
+                    "type": "string",
+                    "example": "ws://localhost:7880"
+                },
+                "room_id": {
+                    "type": "string",
+                    "example": "conv:0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "video": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
         "internal_handler_http.LoginRequest": {
             "type": "object",
             "required": [
@@ -3735,6 +4002,38 @@ const docTemplate = `{
             "properties": {
                 "user": {
                     "$ref": "#/definitions/internal_handler_http.MeResponse"
+                }
+            }
+        },
+        "internal_handler_http.RoomParticipantRow": {
+            "type": "object",
+            "properties": {
+                "joined_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "user_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "video": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
+        "internal_handler_http.RoomStateResponse": {
+            "type": "object",
+            "properties": {
+                "participants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.RoomParticipantRow"
+                    }
+                },
+                "started_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
                 }
             }
         },
