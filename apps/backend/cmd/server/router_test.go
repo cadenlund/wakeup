@@ -114,6 +114,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		Redis:                 h.Redis,
 		Sessions:              h.Sessions,
 		Limiter:               ratelimit.New(h.Redis),
+		IdempotencyRepo:       h.IdempotencyRepo,
 		UserSvc:               h.UserSvc,
 		AuthSvc:               h.AuthSvc,
 		NotifPrefSvc:          h.NotifPrefSvc,

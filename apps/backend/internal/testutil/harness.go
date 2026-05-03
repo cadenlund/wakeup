@@ -40,6 +40,7 @@ import (
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	devicerepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/devicetoken"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
+	idemrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/idempotency"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
@@ -101,6 +102,7 @@ type Harness struct {
 	MsgRepo         *msgrepo.Queries
 	AttRepo         *attrepo.Queries
 	DeviceRepo      *devicerepo.Queries
+	IdempotencyRepo *idemrepo.Queries
 	NotifPrefSvc    *notifprefsvc.Service
 	NotificationSvc *notifsvc.Service
 	AuthSvc         *auth.Service
@@ -160,6 +162,7 @@ func New(t *testing.T) *Harness {
 	presences := presrepo.New(pool)
 	devices := devicerepo.New(pool)
 	audits := auditrepo.New(pool)
+	idemKeys := idemrepo.New(pool)
 	sm := session.New(pool)
 
 	broker := pubsub.NewInProc(pubsub.NewRegistry())
@@ -386,6 +389,7 @@ func New(t *testing.T) *Harness {
 		DeviceSvc:       deviceSvc,
 		AdminSvc:        adminSvc,
 		AuditRepo:       audits,
+		IdempotencyRepo: idemKeys,
 		Broker:          broker,
 		WSHub:           wsHub,
 		WSBridge:        wsBridge,
