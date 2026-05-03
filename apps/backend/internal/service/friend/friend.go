@@ -18,6 +18,7 @@ package friend
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -25,20 +26,41 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	"github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 )
+
+// PresenceLister is the slice of presence.Service this package needs to
+// gate the §11.5 friend-request push on a recipient with no live WS.
+type PresenceLister interface {
+	ListForUsers(ctx context.Context, ids []uuid.UUID) ([]domain.PresenceState, error)
+}
+
+// OfflinePusher is the slice of notification.Service this package needs.
+// Same shape as notification.Service.SendOfflinePush.
+type OfflinePusher interface {
+	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification) error
+}
 
 // Service composes the friendship + user repositories. Goroutine-safe.
 type Service struct {
-	friends *friendrepo.Queries
-	users   *userrepo.Queries
+	friends       *friendrepo.Queries
+	users         *userrepo.Queries
+	presence      PresenceLister
+	notifications OfflinePusher
+	logger        *slog.Logger
 }
 
-// Config builds the service.
+// Config builds the service. Presence + Notifications are optional —
+// when either is nil, the §11.5 offline-push fan-out becomes a no-op.
 type Config struct {
-	Friends *friendrepo.Queries
-	Users   *userrepo.Queries
+	Friends       *friendrepo.Queries
+	Users         *userrepo.Queries
+	Presence      PresenceLister
+	Notifications OfflinePusher
+	Logger        *slog.Logger
 }
 
 // New constructs the service. Returns an error when any dependency is missing.
@@ -49,7 +71,17 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Users == nil {
 		return nil, errors.New("friend: Config.Users is required")
 	}
-	return &Service{friends: cfg.Friends, users: cfg.Users}, nil
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Service{
+		friends:       cfg.Friends,
+		users:         cfg.Users,
+		presence:      cfg.Presence,
+		notifications: cfg.Notifications,
+		logger:        logger,
+	}, nil
 }
 
 // SendRequest creates a pending friendship from `from` to the user with
@@ -92,7 +124,45 @@ func (s *Service) SendRequest(ctx context.Context, from uuid.UUID, toUsername st
 		}
 		return domain.Friendship{}, apierror.Internal("create friend request").WithCause(err)
 	}
+	s.maybePushFriendRequest(ctx, created)
 	return created, nil
+}
+
+// maybePushFriendRequest sends an Expo push to the addressee when they
+// don't have a live WS connection. Push errors are logged at warn level
+// and never bubble up — push is a best-effort side channel and a
+// transient outage mustn't undo a successful friend request.
+func (s *Service) maybePushFriendRequest(ctx context.Context, f domain.Friendship) {
+	if s.presence == nil || s.notifications == nil {
+		return
+	}
+	presences, err := s.presence.ListForUsers(ctx, []uuid.UUID{f.AddresseeID})
+	if err != nil {
+		s.logger.Warn("friend: offline-push: list presence",
+			slog.String("addressee_id", f.AddresseeID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	for _, ps := range presences {
+		if ps.Status == domain.PresenceOnline || ps.Status == domain.PresenceAway {
+			return
+		}
+	}
+	payload := pushnotif.Notification{
+		Title: "Friend request",
+		Body:  "Someone sent you a friend request",
+		Data: map[string]any{
+			"type":          "friend_request",
+			"friendship_id": f.ID.String(),
+		},
+	}
+	if err := s.notifications.SendOfflinePush(ctx, f.AddresseeID, notificationpref.CategoryFriendRequests, payload); err != nil {
+		s.logger.Warn("friend: offline-push: send",
+			slog.String("addressee_id", f.AddresseeID.String()),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // AcceptRequest transitions a pending row to accepted.

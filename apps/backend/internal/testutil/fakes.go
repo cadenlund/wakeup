@@ -111,6 +111,16 @@ func (p *FakePusher) Reset() {
 	p.Sent = nil
 }
 
+// Snapshot returns a copy of the captured pushes for assertions. Lets
+// tests read p.Sent without racing the service goroutine that writes it.
+func (p *FakePusher) Snapshot() []FakePush {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]FakePush, len(p.Sent))
+	copy(out, p.Sent)
+	return out
+}
+
 // FakeObjectStore is an in-memory bucket. Put writes; PresignGet returns a
 // fake URL whose path is the storage key (so handler tests can detect which
 // key was presigned without actually fetching anything). Delete removes the

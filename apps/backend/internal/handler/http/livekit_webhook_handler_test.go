@@ -117,7 +117,13 @@ func drainAll(t *testing.T, ch <-chan pubsub.Message, d time.Duration) []wsproto
 func newWebhookHandler(t *testing.T, h *testutil.Harness) *httpapi.LiveKitWebhookHandler {
 	t.Helper()
 	keyProvider := auth.NewSimpleKeyProvider(lkAPIKey, lkAPISecret)
-	wh, err := httpapi.NewLiveKitWebhookHandler(h.RoomSvc, h.Broker, keyProvider, nil)
+	wh, err := httpapi.NewLiveKitWebhookHandler(h.RoomSvc, h.Broker, keyProvider, nil,
+		httpapi.LiveKitWebhookHandlerConfig{
+			Convs:         h.ConvRepo,
+			Presence:      h.PresenceSvc,
+			Notifications: h.NotificationSvc,
+		},
+	)
 	if err != nil {
 		t.Fatalf("NewLiveKitWebhookHandler: %v", err)
 	}
@@ -369,7 +375,7 @@ func TestWebhook_UnknownRoomNoOp(t *testing.T) {
 
 func TestNewLiveKitWebhookHandler_RejectsBadConfig(t *testing.T) {
 	t.Parallel()
-	if _, err := httpapi.NewLiveKitWebhookHandler(nil, nil, nil, nil); err == nil {
+	if _, err := httpapi.NewLiveKitWebhookHandler(nil, nil, nil, nil, httpapi.LiveKitWebhookHandlerConfig{}); err == nil {
 		t.Error("nil deps should error")
 	}
 }

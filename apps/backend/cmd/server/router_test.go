@@ -87,6 +87,11 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		h.RoomSvc, h.Broker,
 		lkauth.NewSimpleKeyProvider(testutil.LiveKitDevAPIKey, testutil.LiveKitDevAPISecret),
 		nil,
+		httpapi.LiveKitWebhookHandlerConfig{
+			Convs:         h.ConvRepo,
+			Presence:      h.PresenceSvc,
+			Notifications: h.NotificationSvc,
+		},
 	)
 	if err != nil {
 		t.Fatalf("livekit webhook handler: %v", err)

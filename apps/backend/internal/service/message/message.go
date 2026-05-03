@@ -25,8 +25,10 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
+	"github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/wsproto"
 )
 
@@ -34,24 +36,47 @@ import (
 // guard avoids hitting the DB on a known-bad input.
 const MaxBodyLen = 10000
 
+// PresenceLister is the slice of presence.Service this package needs to
+// decide whether a recipient is "live" (connected via WS) or offline (push
+// candidate). Defining the interface here keeps the message package free
+// of a hard dep on the presence service.
+type PresenceLister interface {
+	ListForUsers(ctx context.Context, ids []uuid.UUID) ([]domain.PresenceState, error)
+}
+
+// OfflinePusher is the slice of notification.Service this package needs.
+// Same shape as notification.Service.SendOfflinePush so the harness wires
+// the real service in directly; tests can stub.
+type OfflinePusher interface {
+	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification) error
+}
+
 // Service is the message service.
 type Service struct {
-	pool   *pgxpool.Pool // for the Send transaction
-	msgs   *msgrepo.Queries
-	convs  *convrepo.Queries
-	broker pubsub.Broker
-	logger *slog.Logger
+	pool          *pgxpool.Pool // for the Send transaction
+	msgs          *msgrepo.Queries
+	convs         *convrepo.Queries
+	broker        pubsub.Broker
+	presence      PresenceLister
+	notifications OfflinePusher
+	logger        *slog.Logger
 }
 
 // Config builds the service. Broker may be nil — in that case Send /
 // Edit / Delete still succeed; pubsub publish becomes a no-op (useful
 // in tests that don't care about WS fan-out).
+//
+// Presence + Notifications are also optional: when either is nil, the
+// §11.5 offline-push fan-out becomes a no-op. Production wires both;
+// repo-level tests skip them.
 type Config struct {
-	Pool   *pgxpool.Pool
-	Msgs   *msgrepo.Queries
-	Convs  *convrepo.Queries
-	Broker pubsub.Broker
-	Logger *slog.Logger
+	Pool          *pgxpool.Pool
+	Msgs          *msgrepo.Queries
+	Convs         *convrepo.Queries
+	Broker        pubsub.Broker
+	Presence      PresenceLister
+	Notifications OfflinePusher
+	Logger        *slog.Logger
 }
 
 // New constructs the service.
@@ -71,7 +96,10 @@ func New(cfg Config) (*Service, error) {
 	}
 	return &Service{
 		pool: cfg.Pool, msgs: cfg.Msgs, convs: cfg.Convs,
-		broker: cfg.Broker, logger: logger,
+		broker:        cfg.Broker,
+		presence:      cfg.Presence,
+		notifications: cfg.Notifications,
+		logger:        logger,
 	}, nil
 }
 
@@ -159,7 +187,97 @@ func (s *Service) Send(ctx context.Context, p SendParams) (SendResult, error) {
 	}
 
 	s.publishMessageEvent(ctx, wsproto.EventMessageNew, created)
+	s.fanOutOfflinePush(ctx, p.ConversationID, created, p.Body)
 	return SendResult{Message: created, Attachments: append([]uuid.UUID(nil), p.AttachmentIDs...)}, nil
+}
+
+// fanOutOfflinePush sends an Expo push to every conversation member who
+// (a) isn't the sender and (b) doesn't have a live WS connection
+// (presence != online and != away). Category routes by conversation
+// type per §11.5: direct → direct_messages, group → group_messages.
+//
+// Errors are logged at warn level and never bubble up — push is a
+// best-effort side channel; a Redis or Expo blip mustn't undo a
+// successful Send.
+func (s *Service) fanOutOfflinePush(ctx context.Context, convID uuid.UUID, created domain.Message, originalBody string) {
+	if s.presence == nil || s.notifications == nil {
+		return
+	}
+	conv, err := s.convs.GetConversation(ctx, convID)
+	if err != nil {
+		s.logger.Warn("message: offline-push: get conversation",
+			slog.String("conversation_id", convID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	members, err := s.convs.ListMembers(ctx, convID)
+	if err != nil {
+		s.logger.Warn("message: offline-push: list members",
+			slog.String("conversation_id", convID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	recipients := make([]uuid.UUID, 0, len(members))
+	for _, m := range members {
+		if m.UserID != created.SenderID {
+			recipients = append(recipients, m.UserID)
+		}
+	}
+	if len(recipients) == 0 {
+		return
+	}
+	presences, err := s.presence.ListForUsers(ctx, recipients)
+	if err != nil {
+		s.logger.Warn("message: offline-push: list presence",
+			slog.String("conversation_id", convID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	category := notificationpref.CategoryDirectMessages
+	if conv.Type == domain.ConversationGroup {
+		category = notificationpref.CategoryGroupMessages
+	}
+	payload := pushnotif.Notification{
+		Title: "New message",
+		Body:  bodyPreview(originalBody),
+		Data: map[string]any{
+			"type":            "message",
+			"conversation_id": convID.String(),
+			"message_id":      created.ID.String(),
+		},
+	}
+	for _, ps := range presences {
+		if ps.Status == domain.PresenceOnline || ps.Status == domain.PresenceAway {
+			continue
+		}
+		if err := s.notifications.SendOfflinePush(ctx, ps.UserID, category, payload); err != nil {
+			s.logger.Warn("message: offline-push: send",
+				slog.String("recipient_id", ps.UserID.String()),
+				slog.String("category", string(category)),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+}
+
+// bodyPreview returns the first ~100 runes of body, falling back to a
+// generic "You have a new message" when body is empty (attachment-only
+// messages). Push payload Body is shown in the OS toast — keep it short.
+func bodyPreview(body string) string {
+	const maxRunes = 100
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return "You have a new message"
+	}
+	runes := []rune(trimmed)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return string(runes)
 }
 
 // EditParams is the input to Edit.

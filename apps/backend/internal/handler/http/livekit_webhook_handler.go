@@ -15,7 +15,10 @@ import (
 	"github.com/livekit/protocol/webhook"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
+	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
+	"github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	roomsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/room"
 	"github.com/cadenlund/wakeup/apps/backend/internal/wsproto"
 )
@@ -32,15 +35,47 @@ const (
 	livekitEventTrackUnpublished  = "track_unpublished"
 )
 
+// ConvMemberLister is the slice of conversation.Queries this package
+// needs to fetch a room's member list for the §11.5 room.started push
+// fan-out. Local interface so tests can stub.
+type ConvMemberLister interface {
+	ListMembers(ctx context.Context, conversationID uuid.UUID) ([]domain.ConversationMember, error)
+}
+
+// PresenceLister is the slice of presence.Service this package needs to
+// gate offline pushes on a "no live WS connection" check.
+type PresenceLister interface {
+	ListForUsers(ctx context.Context, ids []uuid.UUID) ([]domain.PresenceState, error)
+}
+
+// OfflinePusher is the slice of notification.Service this package needs.
+type OfflinePusher interface {
+	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification) error
+}
+
 // LiveKitWebhookHandler is the §10.4 unauthenticated POST
 // /webhooks/livekit endpoint. Signature-verified per §10.3 via the
 // LiveKit-provided webhook.ReceiveWebhookEvent helper, which checks
 // the HMAC Authorization header against the configured KeyProvider.
 type LiveKitWebhookHandler struct {
-	rooms       *roomsvc.Service
-	broker      pubsub.Broker
-	keyProvider auth.KeyProvider
-	logger      *slog.Logger
+	rooms         *roomsvc.Service
+	broker        pubsub.Broker
+	keyProvider   auth.KeyProvider
+	convs         ConvMemberLister
+	presence      PresenceLister
+	notifications OfflinePusher
+	logger        *slog.Logger
+}
+
+// LiveKitWebhookHandlerConfig packages the optional deps so callers
+// don't need to keep widening the constructor as later phases add
+// more pieces. Convs/Presence/Notifications are all optional — when
+// nil, the §11.5 push fan-out is a no-op (the handler still updates
+// Redis state and broadcasts WS events).
+type LiveKitWebhookHandlerConfig struct {
+	Convs         ConvMemberLister
+	Presence      PresenceLister
+	Notifications OfflinePusher
 }
 
 // NewLiveKitWebhookHandler wires the handler.
@@ -49,6 +84,7 @@ func NewLiveKitWebhookHandler(
 	broker pubsub.Broker,
 	keyProvider auth.KeyProvider,
 	logger *slog.Logger,
+	opts LiveKitWebhookHandlerConfig,
 ) (*LiveKitWebhookHandler, error) {
 	if rooms == nil {
 		return nil, errors.New("httpapi: LiveKitWebhookHandler requires non-nil room service")
@@ -64,7 +100,11 @@ func NewLiveKitWebhookHandler(
 	}
 	return &LiveKitWebhookHandler{
 		rooms: rooms, broker: broker,
-		keyProvider: keyProvider, logger: logger,
+		keyProvider:   keyProvider,
+		convs:         opts.Convs,
+		presence:      opts.Presence,
+		notifications: opts.Notifications,
+		logger:        logger,
 	}, nil
 }
 
@@ -146,13 +186,63 @@ func (h *LiveKitWebhookHandler) handleRoomStarted(ctx context.Context, convID uu
 	h.publish(ctx, convID, wsproto.EventRoomStarted, wsproto.RoomStartedPayload{
 		ConversationID: convID,
 	})
-	// TODO(11.5): trigger room.started push notifications here. Per
-	// §10.7 the flow is: fetch conversation members → for each
-	// member who is offline AND has notification_preferences.calls
-	// = true, call notification.SendOfflinePush(category="calls").
-	// Wired in Phase 11.5 once the push service ships; landed as a
-	// stub in 10.7 so the dependency is visible at the call site.
+	h.fanOutRoomStartedPush(ctx, convID)
 	return nil
+}
+
+// fanOutRoomStartedPush is the §11.5 push trigger for room.started.
+// For every conversation member that doesn't currently have a live WS
+// connection, send an Expo push under the `calls` category — the
+// notificationpref.ShouldNotify gate (inside notification.Service)
+// suppresses delivery for users who toggled calls off. Errors are
+// logged and never returned: a webhook ack must not depend on push
+// success.
+func (h *LiveKitWebhookHandler) fanOutRoomStartedPush(ctx context.Context, convID uuid.UUID) {
+	if h.convs == nil || h.presence == nil || h.notifications == nil {
+		return
+	}
+	members, err := h.convs.ListMembers(ctx, convID)
+	if err != nil {
+		h.logger.Warn("livekit webhook: room_started push: list members",
+			slog.String("conversation_id", convID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	if len(members) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(members))
+	for _, m := range members {
+		ids = append(ids, m.UserID)
+	}
+	presences, err := h.presence.ListForUsers(ctx, ids)
+	if err != nil {
+		h.logger.Warn("livekit webhook: room_started push: list presence",
+			slog.String("conversation_id", convID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	payload := pushnotif.Notification{
+		Title: "Incoming call",
+		Body:  "Someone is calling",
+		Data: map[string]any{
+			"type":            "call",
+			"conversation_id": convID.String(),
+		},
+	}
+	for _, ps := range presences {
+		if ps.Status == domain.PresenceOnline || ps.Status == domain.PresenceAway {
+			continue
+		}
+		if err := h.notifications.SendOfflinePush(ctx, ps.UserID, notificationpref.CategoryCalls, payload); err != nil {
+			h.logger.Warn("livekit webhook: room_started push: send",
+				slog.String("recipient_id", ps.UserID.String()),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
 }
 
 func (h *LiveKitWebhookHandler) handleRoomFinished(ctx context.Context, convID uuid.UUID) error {

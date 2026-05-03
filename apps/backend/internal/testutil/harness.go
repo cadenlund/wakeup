@@ -49,6 +49,7 @@ import (
 	devicesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/device"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
+	notifsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notification"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
 	roomsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/room"
@@ -89,25 +90,26 @@ type Harness struct {
 	// Services + repos exposed for tests that want to bypass HTTP. Tests
 	// drive flows either via the wired router (the realistic path) or via
 	// these direct handles when they need to fast-forward fixture state.
-	Sessions     *scs.SessionManager
-	UserRepo     *userrepo.Queries
-	ResetsRepo   *passwordreset.Queries
-	FriendRepo   *friendrepo.Queries
-	ConvRepo     *convrepo.Queries
-	MsgRepo      *msgrepo.Queries
-	AttRepo      *attrepo.Queries
-	DeviceRepo   *devicerepo.Queries
-	NotifPrefSvc *notifprefsvc.Service
-	AuthSvc      *auth.Service
-	UserSvc      *usersvc.Service
-	FriendSvc    *friendsvc.Service
-	ConvSvc      *convsvc.Service
-	MsgSvc       *msgsvc.Service
-	AttSvc       *attsvc.Service
-	PresenceSvc  *presencesvc.Service
-	RoomSvc      *roomsvc.Service
-	DeviceSvc    *devicesvc.Service
-	Broker       pubsub.Broker
+	Sessions        *scs.SessionManager
+	UserRepo        *userrepo.Queries
+	ResetsRepo      *passwordreset.Queries
+	FriendRepo      *friendrepo.Queries
+	ConvRepo        *convrepo.Queries
+	MsgRepo         *msgrepo.Queries
+	AttRepo         *attrepo.Queries
+	DeviceRepo      *devicerepo.Queries
+	NotifPrefSvc    *notifprefsvc.Service
+	NotificationSvc *notifsvc.Service
+	AuthSvc         *auth.Service
+	UserSvc         *usersvc.Service
+	FriendSvc       *friendsvc.Service
+	ConvSvc         *convsvc.Service
+	MsgSvc          *msgsvc.Service
+	AttSvc          *attsvc.Service
+	PresenceSvc     *presencesvc.Service
+	RoomSvc         *roomsvc.Service
+	DeviceSvc       *devicesvc.Service
+	Broker          pubsub.Broker
 
 	// WS plumbing surfaced for handler-level tests that want to assert
 	// pubsub fan-out into a connected client without re-constructing
@@ -190,16 +192,43 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build user service: %v", err)
 	}
-	friendSvc, err := friendsvc.New(friendsvc.Config{Friends: friends, Users: users})
-	if err != nil {
-		t.Fatalf("Harness: build friend service: %v", err)
-	}
 	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users})
 	if err != nil {
 		t.Fatalf("Harness: build conversation service: %v", err)
 	}
+	// presenceSvc → friendSvc → messageSvc construction is ordered so
+	// the §11.5 push wiring sees real concrete deps. presenceSvc takes a
+	// FriendLister via a lazy adapter so we can build it before friendSvc;
+	// friendSvc gets presence + notifications post-build.
+	pusher := &FakePusher{}
+	deviceSvc, err := devicesvc.New(devicesvc.Config{Devices: devices})
+	if err != nil {
+		t.Fatalf("Harness: build device service: %v", err)
+	}
+	notificationSvc, err := notifsvc.New(notifsvc.Config{
+		Prefs: notifSvc, Devices: devices, Pusher: pusher,
+	})
+	if err != nil {
+		t.Fatalf("Harness: build notification service: %v", err)
+	}
+	friendListRef := &harnessLazyFriendList{}
+	presenceSvc, err := presencesvc.New(presencesvc.Config{
+		Repo: presences, Broker: broker, Friends: friendListRef,
+	})
+	if err != nil {
+		t.Fatalf("Harness: build presence service: %v", err)
+	}
+	friendSvc, err := friendsvc.New(friendsvc.Config{
+		Friends: friends, Users: users,
+		Presence: presenceSvc, Notifications: notificationSvc,
+	})
+	if err != nil {
+		t.Fatalf("Harness: build friend service: %v", err)
+	}
+	friendListRef.inner = friendSvc
 	msgSvc, err := msgsvc.New(msgsvc.Config{
 		Pool: pool, Msgs: msgs, Convs: convs, Broker: broker,
+		Presence: presenceSvc, Notifications: notificationSvc,
 	})
 	if err != nil {
 		t.Fatalf("Harness: build message service: %v", err)
@@ -207,12 +236,6 @@ func New(t *testing.T) *Harness {
 	attSvc, err := attsvc.New(attsvc.Config{Repo: atts, Storage: objStore})
 	if err != nil {
 		t.Fatalf("Harness: build attachment service: %v", err)
-	}
-	presenceSvc, err := presencesvc.New(presencesvc.Config{
-		Repo: presences, Broker: broker, Friends: friendSvc,
-	})
-	if err != nil {
-		t.Fatalf("Harness: build presence service: %v", err)
 	}
 	// Match the dev keys that StartLiveKit's container ships with so
 	// the §12.8.4 e2e test's HTTP-issued tokens are accepted by a
@@ -227,11 +250,6 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build room service: %v", err)
 	}
-	deviceSvc, err := devicesvc.New(devicesvc.Config{Devices: devices})
-	if err != nil {
-		t.Fatalf("Harness: build device service: %v", err)
-	}
-
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
 	if err != nil {
@@ -310,40 +328,57 @@ func New(t *testing.T) *Harness {
 	}
 
 	return &Harness{
-		Server:       server,
-		Router:       router,
-		DB:           pool,
-		Redis:        redisClient,
-		Mailer:       mailer,
-		Pusher:       &FakePusher{},
-		Storage:      NewFakeObjectStore(),
-		Sentry:       &SentryRecorder{},
-		Cfg:          defaultTestConfig(),
-		ObjStore:     objStore,
-		BucketName:   bucket,
-		Sessions:     sm,
-		UserRepo:     users,
-		ResetsRepo:   resets,
-		FriendRepo:   friends,
-		ConvRepo:     convs,
-		MsgRepo:      msgs,
-		AttRepo:      atts,
-		DeviceRepo:   devices,
-		NotifPrefSvc: notifSvc,
-		AuthSvc:      authSvc,
-		UserSvc:      userSvc,
-		FriendSvc:    friendSvc,
-		ConvSvc:      convSvc,
-		MsgSvc:       msgSvc,
-		AttSvc:       attSvc,
-		PresenceSvc:  presenceSvc,
-		RoomSvc:      roomSvc,
-		DeviceSvc:    deviceSvc,
-		Broker:       broker,
-		WSHub:        wsHub,
-		WSBridge:     wsBridge,
-		serverURL:    srvURL,
+		Server:          server,
+		Router:          router,
+		DB:              pool,
+		Redis:           redisClient,
+		Mailer:          mailer,
+		Pusher:          pusher,
+		Storage:         NewFakeObjectStore(),
+		Sentry:          &SentryRecorder{},
+		Cfg:             defaultTestConfig(),
+		ObjStore:        objStore,
+		BucketName:      bucket,
+		Sessions:        sm,
+		UserRepo:        users,
+		ResetsRepo:      resets,
+		FriendRepo:      friends,
+		ConvRepo:        convs,
+		MsgRepo:         msgs,
+		AttRepo:         atts,
+		DeviceRepo:      devices,
+		NotifPrefSvc:    notifSvc,
+		NotificationSvc: notificationSvc,
+		AuthSvc:         authSvc,
+		UserSvc:         userSvc,
+		FriendSvc:       friendSvc,
+		ConvSvc:         convSvc,
+		MsgSvc:          msgSvc,
+		AttSvc:          attSvc,
+		PresenceSvc:     presenceSvc,
+		RoomSvc:         roomSvc,
+		DeviceSvc:       deviceSvc,
+		Broker:          broker,
+		WSHub:           wsHub,
+		WSBridge:        wsBridge,
+		serverURL:       srvURL,
 	}
+}
+
+// harnessLazyFriendList breaks the friend↔presence construction cycle
+// in the harness, mirroring the same adapter in cmd/server/main.go.
+// presence.Service requires a FriendLister at New time, but friend.Service
+// (post-§11.5) takes presence as a dep; the indirection lets us build
+// presence first, then friend, then assign the inner pointer.
+type harnessLazyFriendList struct {
+	inner *friendsvc.Service
+}
+
+func (l *harnessLazyFriendList) ListAcceptedFriendIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	if l.inner == nil {
+		return nil, nil
+	}
+	return l.inner.ListAcceptedFriendIDs(ctx, userID)
 }
 
 // perTestBucket builds a unique, S3-bucket-name-legal bucket id for the
