@@ -285,3 +285,67 @@ func TestCascadeDeleteWithUser(t *testing.T) {
 		t.Fatalf("ON DELETE CASCADE didn't fire: %d rows remain", count)
 	}
 }
+
+// WithTx returns a Queries bound to a tx; reads inside the tx see
+// uncommitted writes, and a Rollback drops them.
+func TestWithTx_RollsBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := devicetoken.New(pool)
+	uid := makeUser(ctx, t, pool)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	txRepo := repo.WithTx(tx)
+	_, err = txRepo.Register(ctx, uid, "ExponentPushToken[tx]", domain.DeviceIOS)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Register in tx: %v", err)
+	}
+	rows, err := txRepo.ListByUser(ctx, uid)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("ListByUser inside tx: %v", err)
+	}
+	if len(rows) != 1 {
+		_ = tx.Rollback(ctx)
+		t.Errorf("ListByUser in tx returned %d, want 1", len(rows))
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	post, err := repo.ListByUser(ctx, uid)
+	if err != nil {
+		t.Fatalf("ListByUser post-rollback: %v", err)
+	}
+	if len(post) != 0 {
+		t.Errorf("after Rollback, ListByUser = %d, want 0", len(post))
+	}
+}
+
+// Closed-pool sweep — every public method surfaces the wrapped error.
+func TestRepo_DBClosedErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := devicetoken.New(pool)
+	uid := makeUser(ctx, t, pool)
+	tok, err := repo.Register(ctx, uid, "ExponentPushToken[seed]", domain.DeviceIOS)
+	if err != nil {
+		t.Fatalf("seed Register: %v", err)
+	}
+	pool.Close()
+
+	if _, err := repo.Register(ctx, uid, "x", domain.DeviceIOS); err == nil {
+		t.Error("Register: want error")
+	}
+	if err := repo.Delete(ctx, tok.ID, uid); err == nil {
+		t.Error("Delete: want error")
+	}
+	if _, err := repo.ListByUser(ctx, uid); err == nil {
+		t.Error("ListByUser: want error")
+	}
+}

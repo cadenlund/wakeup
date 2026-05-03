@@ -129,3 +129,63 @@ func TestDeleteExpiredAndUsed_RemovesBoth(t *testing.T) {
 		t.Errorf("live row should still be reachable: %v", err)
 	}
 }
+
+// WithTx returns a Queries bound to a tx; the returned instance reads
+// its own writes and a Rollback drops them.
+func TestWithTx_RollsBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := passwordreset.New(pool)
+	uid := makeUser(ctx, t, pool)
+	tokenHash := hash("tx-token")
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	txRepo := repo.WithTx(tx)
+	if err := txRepo.Create(ctx, tokenHash, uid, time.Now().UTC().Add(time.Hour)); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Create in tx: %v", err)
+	}
+	// Read inside the tx — proves the binding is genuinely tx-scoped.
+	if _, err := txRepo.Get(ctx, tokenHash); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Get inside tx: %v", err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if _, err := repo.Get(ctx, tokenHash); !errors.Is(err, passwordreset.ErrNotFound) {
+		t.Errorf("after Rollback, Get = %v, want ErrNotFound", err)
+	}
+}
+
+// Closed-pool sweep — every public method's wrapped error path
+// surfaces a non-nil error.
+func TestRepo_DBClosedErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := passwordreset.New(pool)
+	uid := makeUser(ctx, t, pool)
+	pool.Close()
+
+	tokenHash := hash("closed-token")
+	expires := time.Now().UTC().Add(time.Hour)
+	if err := repo.Create(ctx, tokenHash, uid, expires); err == nil {
+		t.Error("Create: want error")
+	}
+	if _, err := repo.Get(ctx, tokenHash); err == nil {
+		t.Error("Get: want error")
+	} else if errors.Is(err, passwordreset.ErrNotFound) {
+		t.Errorf("Get returned ErrNotFound on closed pool: %v", err)
+	}
+	if err := repo.MarkUsed(ctx, tokenHash); err == nil {
+		t.Error("MarkUsed: want error")
+	}
+	if _, err := repo.DeleteExpiredAndUsed(ctx); err == nil {
+		t.Error("DeleteExpiredAndUsed: want error")
+	}
+}

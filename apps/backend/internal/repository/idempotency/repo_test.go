@@ -437,3 +437,103 @@ func TestSetUpdatedAtTrigger_AdvancesOnUpdate(t *testing.T) {
 		t.Fatalf("trigger did not advance updated_at: before=%v after=%v", before, after)
 	}
 }
+
+// WithTx returns a Queries bound to a tx; reads inside see uncommitted
+// writes; rollback drops them.
+func TestWithTx_RollsBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	uid := makeUser(ctx, t, pool)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	txRepo := repo.WithTx(tx)
+	if _, err := txRepo.Put(ctx, idempotency.PutParams{
+		Key: "k1", UserID: uid, RequestHash: hash32("body"),
+		ResponseStatus: 200, ResponseBody: []byte("ok"),
+		TTL: time.Hour,
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Put in tx: %v", err)
+	}
+	if _, err := txRepo.Get(ctx, "k1", uid); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Get inside tx: %v", err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if _, err := repo.Get(ctx, "k1", uid); !errors.Is(err, idempotency.ErrNotFound) {
+		t.Errorf("after Rollback, Get = %v, want ErrNotFound", err)
+	}
+}
+
+// Closed-pool sweep — every public method's wrapped error path
+// returns a non-nil error.
+func TestRepo_DBClosedErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	uid := makeUser(ctx, t, pool)
+	pool.Close()
+
+	if _, err := repo.Get(ctx, "k", uid); err == nil {
+		t.Error("Get: want error")
+	} else if errors.Is(err, idempotency.ErrNotFound) {
+		t.Errorf("Get returned ErrNotFound on closed pool: %v", err)
+	}
+	if _, err := repo.Put(ctx, idempotency.PutParams{
+		Key: "k", UserID: uid, RequestHash: hash32("b"),
+		ResponseStatus: 200, ResponseBody: []byte{}, TTL: time.Hour,
+	}); err == nil {
+		t.Error("Put: want error")
+	}
+	if _, _, err := repo.Reserve(ctx, idempotency.ReserveParams{
+		Key: "k", UserID: uid, RequestHash: hash32("b"), TTL: time.Hour,
+	}); err == nil {
+		t.Error("Reserve: want error")
+	}
+	if _, err := repo.Complete(ctx, idempotency.CompleteParams{
+		Key: "k", UserID: uid, ResponseStatus: 200, ResponseBody: []byte{}, TTL: time.Hour,
+	}); err == nil {
+		t.Error("Complete: want error")
+	}
+	if _, err := repo.DeleteByKey(ctx, "k", uid); err == nil {
+		t.Error("DeleteByKey: want error")
+	}
+	if _, err := repo.DeleteExpired(ctx); err == nil {
+		t.Error("DeleteExpired: want error")
+	}
+}
+
+// TTL ≤ 0 fails fast on every method that takes one. Single sweep so
+// future TTL-bearing methods get caught here.
+func TestTTLValidation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	uid := makeUser(ctx, t, pool)
+
+	if _, err := repo.Put(ctx, idempotency.PutParams{
+		Key: "k", UserID: uid, RequestHash: hash32("b"),
+		ResponseStatus: 200, ResponseBody: []byte{}, TTL: 0,
+	}); err == nil {
+		t.Error("Put with TTL=0: want error")
+	}
+	if _, _, err := repo.Reserve(ctx, idempotency.ReserveParams{
+		Key: "k", UserID: uid, RequestHash: hash32("b"), TTL: -time.Second,
+	}); err == nil {
+		t.Error("Reserve with TTL<0: want error")
+	}
+	if _, err := repo.Complete(ctx, idempotency.CompleteParams{
+		Key: "k", UserID: uid, ResponseStatus: 200, ResponseBody: []byte{}, TTL: 0,
+	}); err == nil {
+		t.Error("Complete with TTL=0: want error")
+	}
+}

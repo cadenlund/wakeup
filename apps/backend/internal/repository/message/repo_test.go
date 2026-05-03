@@ -504,3 +504,93 @@ func TestMessage_IsEditedHelper(t *testing.T) {
 		t.Error("EditedAt non-nil should report edited")
 	}
 }
+
+// WithTx returns a Queries bound to the supplied tx. Reads inside the
+// tx see uncommitted writes; rollback drops them.
+func TestWithTx_RollsBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := message.New(pool)
+	a := makeUser(ctx, t, pool)
+	b := makeUser(ctx, t, pool)
+	cid := makeDirect(ctx, t, pool, a, b)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	txRepo := repo.WithTx(tx)
+	created, err := txRepo.Create(ctx, message.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), ConversationID: cid, SenderID: a, Body: "tx",
+	})
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Create in tx: %v", err)
+	}
+	if _, err := txRepo.GetByID(ctx, created.ID); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("GetByID inside tx: %v", err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if _, err := repo.GetByID(ctx, created.ID); !errors.Is(err, message.ErrNotFound) {
+		t.Errorf("after Rollback, GetByID = %v, want ErrNotFound", err)
+	}
+}
+
+// Closed-pool sweep — every public method returns a non-nil error.
+func TestRepo_DBClosedErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := message.New(pool)
+	a := makeUser(ctx, t, pool)
+	b := makeUser(ctx, t, pool)
+	cid := makeDirect(ctx, t, pool, a, b)
+	created, err := repo.Create(ctx, message.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), ConversationID: cid, SenderID: a, Body: "seed",
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	pool.Close()
+
+	if _, err := repo.Create(ctx, message.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), ConversationID: cid, SenderID: a, Body: "x",
+	}); err == nil {
+		t.Error("Create: want error")
+	}
+	if _, err := repo.GetByID(ctx, created.ID); err == nil {
+		t.Error("GetByID: want error")
+	} else if errors.Is(err, message.ErrNotFound) {
+		t.Errorf("GetByID returned ErrNotFound on closed pool: %v", err)
+	}
+	if _, err := repo.GetByIDIncludingDeleted(ctx, created.ID); err == nil {
+		t.Error("GetByIDIncludingDeleted: want error")
+	}
+	if _, err := repo.UpdateBody(ctx, created.ID, "x"); err == nil {
+		t.Error("UpdateBody: want error")
+	}
+	if err := repo.SoftDelete(ctx, created.ID); err == nil {
+		t.Error("SoftDelete: want error")
+	}
+	if _, err := repo.ListByConversation(ctx, message.ListByConversationParams{
+		ConversationID: cid, Limit: 10,
+	}); err == nil {
+		t.Error("ListByConversation: want error")
+	}
+	if err := repo.AddAttachment(ctx, created.ID, uuid.New()); err == nil {
+		t.Error("AddAttachment: want error")
+	}
+	if _, err := repo.ListAttachmentsForMessage(ctx, created.ID); err == nil {
+		t.Error("ListAttachmentsForMessage: want error")
+	}
+	if err := repo.MarkRead(ctx, created.ID, b); err == nil {
+		t.Error("MarkRead: want error")
+	}
+	if _, err := repo.ListReadsForMessage(ctx, created.ID); err == nil {
+		t.Error("ListReadsForMessage: want error")
+	}
+}
