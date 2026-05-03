@@ -170,8 +170,14 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 			}, httpapi.WriteError))
 			r.Post("/v1/auth/register", d.AuthHandler.Register)
 			r.Post("/v1/auth/login", d.AuthHandler.Login)
-			r.Post("/v1/auth/password-reset/request", d.AuthHandler.RequestPasswordReset)
-			r.Post("/v1/auth/password-reset/confirm", d.AuthHandler.ConfirmPasswordReset)
+			// §12.4: password-reset is dangerous during impersonation
+			// (could lock the impersonated user out). The guard fires
+			// only when the session has impersonating_user_id set; an
+			// anonymous reset request still goes through.
+			r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
+				Post("/v1/auth/password-reset/request", d.AuthHandler.RequestPasswordReset)
+			r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
+				Post("/v1/auth/password-reset/confirm", d.AuthHandler.ConfirmPasswordReset)
 			// Logout is idempotent (handler returns 204 even with no
 			// active session), so it sits OUTSIDE RequireAuth so a
 			// stale-cookie client can still drop their session cleanly.
@@ -190,11 +196,16 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 					Limit: writesTier.Limit, Window: writesTier.Window,
 					Logger: d.Logger,
 				}, httpapi.WriteError))
-				r.Post("/v1/auth/logout-all", d.AuthHandler.LogoutAll)
+				// §12.4 routes that an impersonating admin must NOT be
+				// able to invoke against the target user.
+				r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
+					Post("/v1/auth/logout-all", d.AuthHandler.LogoutAll)
 				r.Patch("/v1/users/me", d.UserHandler.UpdateMe)
-				r.Delete("/v1/users/me", d.UserHandler.DeleteMe)
+				r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
+					Delete("/v1/users/me", d.UserHandler.DeleteMe)
 				r.Post("/v1/users/me/avatar", d.UserHandler.UploadAvatar)
-				r.Patch("/v1/users/me/notifications", d.UserHandler.UpdateNotifications)
+				r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
+					Patch("/v1/users/me/notifications", d.UserHandler.UpdateNotifications)
 				r.Post("/v1/friends/requests", d.FriendHandler.SendRequest)
 				r.Post("/v1/friends/requests/{id}/accept", d.FriendHandler.AcceptRequest)
 				r.Post("/v1/friends/requests/{id}/decline", d.FriendHandler.DeclineRequest)
