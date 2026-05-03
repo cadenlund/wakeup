@@ -365,6 +365,25 @@ func TestNew_RejectsBadConfig(t *testing.T) {
 	}
 }
 
+func TestNew_RejectsNegativeDurations(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewTestDB(t)
+	repo := presrepo.New(pool)
+	friends := &fakeFriends{byUser: map[uuid.UUID][]uuid.UUID{}}
+	for _, tc := range []struct {
+		name string
+		cfg  presence.Config
+	}{
+		{"OnlineCutoff", presence.Config{Repo: repo, Friends: friends, OnlineCutoff: -1 * time.Second}},
+		{"AwayCutoff", presence.Config{Repo: repo, Friends: friends, AwayCutoff: -1 * time.Second}},
+		{"SweepInterval", presence.Config{Repo: repo, Friends: friends, SweepInterval: -1 * time.Second}},
+	} {
+		if _, err := presence.New(tc.cfg); err == nil {
+			t.Errorf("negative %s should error (CodeRabbit PR #52 fail-fast)", tc.name)
+		}
+	}
+}
+
 // --- Friend lookup error path on publish -----------------------------
 
 // Friend lookup failure on publish should not block the state change

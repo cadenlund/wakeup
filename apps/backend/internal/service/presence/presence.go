@@ -63,7 +63,10 @@ type Config struct {
 	Now func() time.Time
 }
 
-// New constructs the service.
+// New constructs the service. Negative duration fields are rejected
+// (instead of silently defaulting) so a config typo surfaces at
+// startup rather than as surprising prod behavior. (CodeRabbit PR #52
+// — same pattern PR #45 settled on for the orphan sweeper.)
 func New(cfg Config) (*Service, error) {
 	if cfg.Repo == nil {
 		return nil, errors.New("presence: Config.Repo is required")
@@ -71,20 +74,29 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Friends == nil {
 		return nil, errors.New("presence: Config.Friends is required")
 	}
+	if cfg.OnlineCutoff < 0 {
+		return nil, fmt.Errorf("presence: Config.OnlineCutoff must be >= 0, got %v", cfg.OnlineCutoff)
+	}
+	if cfg.AwayCutoff < 0 {
+		return nil, fmt.Errorf("presence: Config.AwayCutoff must be >= 0, got %v", cfg.AwayCutoff)
+	}
+	if cfg.SweepInterval < 0 {
+		return nil, fmt.Errorf("presence: Config.SweepInterval must be >= 0, got %v", cfg.SweepInterval)
+	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 	online := cfg.OnlineCutoff
-	if online <= 0 {
+	if online == 0 {
 		online = DefaultOnlineCutoff
 	}
 	away := cfg.AwayCutoff
-	if away <= 0 {
+	if away == 0 {
 		away = DefaultAwayCutoff
 	}
 	sweep := cfg.SweepInterval
-	if sweep <= 0 {
+	if sweep == 0 {
 		sweep = DefaultSweepInterval
 	}
 	now := cfg.Now
@@ -217,16 +229,31 @@ func (s *Service) ListFriends(ctx context.Context, userID uuid.UUID) ([]domain.P
 	return s.ListForUsers(ctx, friends)
 }
 
+// publishTimeout caps the per-publish work (friend lookup + every
+// per-friend Publish). Bounded so a stuck pubsub backend doesn't pin
+// a goroutine forever, but generous enough to absorb a slow Redis on
+// a busy node.
+const publishTimeout = 5 * time.Second
+
 // publish sends a presence.update to every friend's user channel
 // (§7.2: friends only, never echoed back to the source). Uses the
 // FriendLister to enumerate friends — non-fatal if it fails (we
 // already persisted the change; the user may be without WS at the
 // moment).
-func (s *Service) publish(ctx context.Context, state domain.PresenceState) {
+//
+// Detached context: the caller's ctx may be a request scope (HTTP or
+// WS) that gets cancelled the moment the user's client disconnects.
+// We've already committed the state change to Postgres at this point
+// — the fan-out has to follow through regardless. Use a fresh
+// background context with a bounded timeout so cancellation can't
+// strand the publish. (CodeRabbit PR #52.)
+func (s *Service) publish(_ context.Context, state domain.PresenceState) {
 	if s.broker == nil {
 		return
 	}
-	friends, err := s.friends.ListAcceptedFriendIDs(ctx, state.UserID)
+	pubCtx, cancel := context.WithTimeout(context.Background(), publishTimeout)
+	defer cancel()
+	friends, err := s.friends.ListAcceptedFriendIDs(pubCtx, state.UserID)
 	if err != nil {
 		s.logger.Warn("presence: list friends for fan-out failed",
 			slog.String("user_id", state.UserID.String()),
@@ -248,7 +275,7 @@ func (s *Service) publish(ctx context.Context, state domain.PresenceState) {
 	}
 	for _, friendID := range friends {
 		channel := fmt.Sprintf("user:%s:events", friendID)
-		if err := s.broker.Publish(ctx, channel, encoded); err != nil {
+		if err := s.broker.Publish(pubCtx, channel, encoded); err != nil {
 			s.logger.Warn("presence: publish",
 				slog.String("channel", channel),
 				slog.String("error", err.Error()),
