@@ -604,6 +604,18 @@ func TestWithTx_RollsBack(t *testing.T) {
 		_ = tx.Rollback(ctx)
 		t.Fatalf("Create in tx: %v", err)
 	}
+	// txRepo reads its own writes inside the open transaction —
+	// proves WithTx is genuinely tx-scoped, not just a no-op that
+	// happens to look correct because of the rollback below.
+	got, err := txRepo.GetConversation(ctx, created.ID)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Get inside tx: %v", err)
+	}
+	if got.ID != created.ID {
+		_ = tx.Rollback(ctx)
+		t.Errorf("Get inside tx returned %s, want %s", got.ID, created.ID)
+	}
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}

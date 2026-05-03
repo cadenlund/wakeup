@@ -12,6 +12,7 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
@@ -771,8 +772,9 @@ func TestMarkRead_NonMemberReturnsNotFound(t *testing.T) {
 
 // List pagination: 3 conversations, request limit=2 → page 1 has
 // HasMore=true with a cursor, page 2 walks the cursor and returns
-// the remaining row. Covers the pagination cursor closure that
-// wasn't exercised by the limit=10 List tests.
+// the remaining row with HasMore=false. Covers both the over-fetch
+// branch and the terminal-page branch, plus asserts the two pages
+// don't overlap.
 func TestList_PaginatesPastLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -797,6 +799,32 @@ func TestList_PaginatesPastLimit(t *testing.T) {
 	}
 	if !first.HasMore || first.NextCursor == nil {
 		t.Fatalf("page 1 expected HasMore=true with cursor, got hasMore=%v cursor=%v", first.HasMore, first.NextCursor)
+	}
+
+	cursor, err := pagination.Decode(*first.NextCursor)
+	if err != nil {
+		t.Fatalf("decode page 1 cursor: %v", err)
+	}
+	second, err := st.svc.List(ctx, conversation.ListParams{
+		UserID: a.ID, Limit: 2, Cursor: cursor,
+	})
+	if err != nil {
+		t.Fatalf("List page 2: %v", err)
+	}
+	if len(second.Conversations) != 1 {
+		t.Errorf("page 2 len = %d, want 1", len(second.Conversations))
+	}
+	if second.HasMore || second.NextCursor != nil {
+		t.Errorf("page 2 expected terminal pagination, got hasMore=%v cursor=%v", second.HasMore, second.NextCursor)
+	}
+	pageOne := map[uuid.UUID]struct{}{}
+	for _, c := range first.Conversations {
+		pageOne[c.ID] = struct{}{}
+	}
+	for _, c := range second.Conversations {
+		if _, dup := pageOne[c.ID]; dup {
+			t.Errorf("conversation %s appeared on both pages", c.ID)
+		}
 	}
 }
 
