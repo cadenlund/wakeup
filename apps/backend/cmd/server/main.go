@@ -33,6 +33,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/job"
 	"github.com/cadenlund/wakeup/apps/backend/internal/log"
 	"github.com/cadenlund/wakeup/apps/backend/internal/mailer"
+	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
@@ -42,6 +43,7 @@ import (
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	devicerepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/devicetoken"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
+	idemrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/idempotency"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
@@ -154,6 +156,7 @@ func run() error {
 	presRepo := presrepo.New(pool)
 	devicesRepo := devicerepo.New(pool)
 	auditsRepo := auditrepo.New(pool)
+	idemKeysRepo := idemrepo.New(pool)
 
 	// Pubsub broker (§4.5). Production wires Redis pubsub so events fan
 	// out across replicas; the broker's Close runs on the way down.
@@ -259,6 +262,15 @@ func run() error {
 	// last_active_at ages out. Registered against the same runner so
 	// graceful shutdown stops both jobs together.
 	jobRunner.Register(presenceSvc)
+	// §4.8 idempotency sweeper: drops expired idempotency_keys rows
+	// every hour so the cache table doesn't grow unbounded.
+	idempotencySweeper, err := mw.NewIdempotencySweeper(mw.IdempotencySweeperConfig{
+		Repo: idemKeysRepo, Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("idempotency sweeper: %w", err)
+	}
+	jobRunner.Register(idempotencySweeper)
 	jobRunner.Start(rootCtx)
 	defer jobRunner.Stop()
 
@@ -344,6 +356,7 @@ func run() error {
 		Redis:                 redisClient,
 		Sessions:              sessions,
 		Limiter:               limiter,
+		IdempotencyRepo:       idemKeysRepo,
 		UserSvc:               userSvc,
 		AuthSvc:               authSvc,
 		NotifPrefSvc:          notifPrefSvc,

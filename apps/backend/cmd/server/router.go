@@ -51,6 +51,7 @@ type routerDeps struct {
 	Sessions              *scs.SessionManager
 	Limiter               *ratelimit.Limiter
 	Sentry                mw.Capturer // optional — nil disables Sentry capture in dev
+	IdempotencyRepo       mw.IdempotencyStore
 	UserSvc               *usersvc.Service
 	AuthSvc               *auth.Service
 	NotifPrefSvc          *notifprefsvc.Service
@@ -119,7 +120,7 @@ func resolveTier(override, fallback rateLimitTier) rateLimitTier {
 func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
-		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil || d.RoomSvc == nil || d.DeviceSvc == nil || d.AdminSvc == nil ||
+		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil || d.RoomSvc == nil || d.DeviceSvc == nil || d.AdminSvc == nil || d.IdempotencyRepo == nil ||
 		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.DeviceHandler == nil || d.AdminHandler == nil || d.LiveKitWebhookHandler == nil || d.WSHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
@@ -202,6 +203,15 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 					Limit: writesTier.Limit, Window: writesTier.Window,
 					Logger: d.Logger,
 				}, httpapi.WriteError))
+				// §4.8 idempotency. Sits AFTER RequireAuth (above) so
+				// user_id is in context — keys are scoped per user. POST
+				// /webhooks/livekit is mounted OUTSIDE this group so
+				// LiveKit retries are handled at the application layer
+				// via the SADD's `added > 0` guard, not the middleware.
+				r.Use(mw.Idempotency(mw.IdempotencyConfig{
+					Store: d.IdempotencyRepo, WriteError: httpapi.WriteError,
+					Logger: d.Logger,
+				}))
 				// §12.4 routes that an impersonating admin must NOT be
 				// able to invoke against the target user.
 				r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
