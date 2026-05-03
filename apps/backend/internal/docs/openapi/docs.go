@@ -15,6 +15,156 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/v1/attachments": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Accepts a multipart form with a single ` + "`" + `file` + "`" + ` field. Max 50 MiB; the server detects the MIME from the first 512 bytes (§9.2) — the client-supplied content-type and filename extension are ignored for type-checking purposes. Allowed types: image/png, image/jpeg, image/gif, image/webp, application/pdf, text/plain. The response includes a 5-minute presigned URL so the uploader can render the attachment without a follow-up GET.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "attachments"
+                ],
+                "summary": "Upload an attachment",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Attachment file (max 50 MiB)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created attachment with presigned URL",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AttachmentResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed multipart / missing file",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Attachment exceeds 50 MiB cap",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Disallowed content-type or empty filename",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/attachments/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns metadata + a 5-minute presigned download URL. Membership-gated per §9.3 — the caller must be a member of a conversation containing a message linked to this attachment, OR the uploader of an attachment that has not yet been linked to any message. Any failure (missing or unauthorized) returns 404 — never 403, never leaks existence.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "attachments"
+                ],
+                "summary": "Get attachment with presigned URL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Attachment id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Attachment with presigned URL",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AttachmentResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Attachment not found or caller not authorized (no enumeration)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/auth/login": {
             "post": {
                 "description": "Verifies credentials and binds a session cookie. Same generic 401 for any failure path (no enumeration).",
@@ -2799,6 +2949,35 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/internal_handler_http.ConversationMemberRow"
                     }
+                }
+            }
+        },
+        "internal_handler_http.AttachmentResponse": {
+            "type": "object",
+            "properties": {
+                "content_type": {
+                    "type": "string",
+                    "example": "application/pdf"
+                },
+                "expires_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:47:55.412Z"
+                },
+                "filename": {
+                    "type": "string",
+                    "example": "report.pdf"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "size_bytes": {
+                    "type": "integer",
+                    "example": 42313
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://wakeup-prod-media.s3.amazonaws.com/attachments/0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c?X-Amz-..."
                 }
             }
         },

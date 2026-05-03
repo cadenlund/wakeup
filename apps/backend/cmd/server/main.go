@@ -31,12 +31,14 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
+	attrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/attachment"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
@@ -113,6 +115,7 @@ func run() error {
 	friendsRepo := friendrepo.New(pool)
 	convsRepo := convrepo.New(pool)
 	msgsRepo := msgrepo.New(pool)
+	attsRepo := attrepo.New(pool)
 
 	// Pubsub broker (§4.5). Production wires Redis pubsub so events fan
 	// out across replicas; the broker's Close runs on the way down.
@@ -156,6 +159,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("message service: %w", err)
 	}
+	attachmentSvc, err := attsvc.New(attsvc.Config{
+		Repo: attsRepo, Storage: objStore, Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("attachment service: %w", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -178,6 +187,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("message handler: %w", err)
 	}
+	attachmentHandler, err := httpapi.NewAttachmentHandler(attachmentSvc, authSvc)
+	if err != nil {
+		return fmt.Errorf("attachment handler: %w", err)
+	}
 
 	router, err := buildRouter(routerDeps{
 		Cfg:                 cfg,
@@ -192,11 +205,13 @@ func run() error {
 		FriendSvc:           friendSvc,
 		ConvSvc:             convSvc,
 		MsgSvc:              messageSvc,
+		AttSvc:              attachmentSvc,
 		UserHandler:         userHandler,
 		AuthHandler:         authHandler,
 		FriendHandler:       friendHandler,
 		ConversationHandler: convHandler,
 		MessageHandler:      messageHandler,
+		AttachmentHandler:   attachmentHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("router: %w", err)
