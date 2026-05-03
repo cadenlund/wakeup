@@ -36,6 +36,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	attrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/attachment"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
+	devicerepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/devicetoken"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
@@ -45,6 +46,7 @@ import (
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
+	devicesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/device"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
@@ -94,6 +96,7 @@ type Harness struct {
 	ConvRepo     *convrepo.Queries
 	MsgRepo      *msgrepo.Queries
 	AttRepo      *attrepo.Queries
+	DeviceRepo   *devicerepo.Queries
 	NotifPrefSvc *notifprefsvc.Service
 	AuthSvc      *auth.Service
 	UserSvc      *usersvc.Service
@@ -103,6 +106,7 @@ type Harness struct {
 	AttSvc       *attsvc.Service
 	PresenceSvc  *presencesvc.Service
 	RoomSvc      *roomsvc.Service
+	DeviceSvc    *devicesvc.Service
 	Broker       pubsub.Broker
 
 	// WS plumbing surfaced for handler-level tests that want to assert
@@ -147,6 +151,7 @@ func New(t *testing.T) *Harness {
 	msgs := msgrepo.New(pool)
 	atts := attrepo.New(pool)
 	presences := presrepo.New(pool)
+	devices := devicerepo.New(pool)
 	sm := session.New(pool)
 
 	broker := pubsub.NewInProc(pubsub.NewRegistry())
@@ -222,6 +227,10 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build room service: %v", err)
 	}
+	deviceSvc, err := devicesvc.New(devicesvc.Config{Devices: devices})
+	if err != nil {
+		t.Fatalf("Harness: build device service: %v", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -256,6 +265,10 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build room handler: %v", err)
 	}
+	deviceHandler, err := httpapi.NewDeviceHandler(deviceSvc, authSvc, v)
+	if err != nil {
+		t.Fatalf("Harness: build device handler: %v", err)
+	}
 
 	// §8 WebSocket: build hub + bridge + upgrade handler so harness
 	// users can dial /v1/ws like any other route. The bridge owns one
@@ -285,6 +298,7 @@ func New(t *testing.T) *Harness {
 	attHandler.Mount(router)
 	presenceHandler.Mount(router)
 	roomHandler.Mount(router)
+	deviceHandler.Mount(router)
 	wsHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
@@ -314,6 +328,7 @@ func New(t *testing.T) *Harness {
 		ConvRepo:     convs,
 		MsgRepo:      msgs,
 		AttRepo:      atts,
+		DeviceRepo:   devices,
 		NotifPrefSvc: notifSvc,
 		AuthSvc:      authSvc,
 		UserSvc:      userSvc,
@@ -323,6 +338,7 @@ func New(t *testing.T) *Harness {
 		AttSvc:       attSvc,
 		PresenceSvc:  presenceSvc,
 		RoomSvc:      roomSvc,
+		DeviceSvc:    deviceSvc,
 		Broker:       broker,
 		WSHub:        wsHub,
 		WSBridge:     wsBridge,

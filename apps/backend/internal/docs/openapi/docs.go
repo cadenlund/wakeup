@@ -1695,6 +1695,155 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/devices": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Stores (or refreshes) the caller's Expo push token + platform per §6.1. Idempotent on the (user_id, expo_token) pair: re-registering the same token from the same user updates ` + "`" + `last_seen_at` + "`" + ` and refreshes the platform rather than creating a duplicate row, so mobile clients can call this on every cold start without bloating the table. Returns the persisted row including its server-issued ` + "`" + `id` + "`" + `, which the client uses to call DELETE /v1/devices/{id} on logout.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "devices"
+                ],
+                "summary": "Register a device's Expo push token",
+                "parameters": [
+                    {
+                        "description": "Token + platform",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.RegisterDeviceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Persisted device token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.DeviceTokenResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON or platform",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/devices/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Removes the caller's device token by ` + "`" + `id` + "`" + ` (returned from POST /v1/devices). Scoped to the authenticated user — passing another user's id surfaces as 404 to avoid enumeration. The mobile client calls this on logout so we stop pushing to a device the user signed out of.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "devices"
+                ],
+                "summary": "Delete a device token",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Device token id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Device token not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/friends": {
             "get": {
                 "security": [
@@ -3574,6 +3723,31 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.DeviceTokenResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "expo_token": {
+                    "type": "string",
+                    "example": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "last_seen_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "platform": {
+                    "type": "string",
+                    "example": "ios"
+                }
+            }
+        },
         "internal_handler_http.EditMessageRequest": {
             "type": "object",
             "required": [
@@ -3992,6 +4166,27 @@ const docTemplate = `{
                 "user_id": {
                     "type": "string",
                     "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
+        "internal_handler_http.RegisterDeviceRequest": {
+            "type": "object",
+            "required": [
+                "expo_token",
+                "platform"
+            ],
+            "properties": {
+                "expo_token": {
+                    "type": "string",
+                    "example": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "ios",
+                        "android"
+                    ],
+                    "example": "ios"
                 }
             }
         },
