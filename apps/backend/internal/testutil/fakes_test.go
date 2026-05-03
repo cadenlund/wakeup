@@ -185,17 +185,21 @@ func TestFakeObjectStore_Reset(t *testing.T) {
 func TestSentryRecorder_CaptureAndReset(t *testing.T) {
 	t.Parallel()
 	r := &testutil.SentryRecorder{}
-	r.Capture(errors.New("boom"), map[string]string{"request_id": "abc"})
+	tags := map[string]string{"request_id": "abc"}
+	r.Capture(errors.New("boom"), tags)
+	// Mutate the input map after Capture returns. The recorded copy
+	// must stay intact — recovery middleware reuses its tag map across
+	// requests, so a non-defensive copy would let a later request's
+	// tags retroactively rewrite earlier events.
+	tags["request_id"] = "MUTATED"
 
-	// Mutate the input map after Capture returns. Recorded copy must
-	// stay intact.
 	r.Capture(errors.New("boom2"), map[string]string{"request_id": "def"})
 
 	if len(r.Events) != 2 {
 		t.Fatalf("Events len = %d, want 2", len(r.Events))
 	}
 	if r.Events[0].Tags["request_id"] != "abc" {
-		t.Errorf("event[0] tags = %v", r.Events[0].Tags)
+		t.Errorf("event[0] tags clobbered: got %v, want request_id=abc", r.Events[0].Tags)
 	}
 	if r.Events[1].Tags["request_id"] != "def" {
 		t.Errorf("event[1] tags = %v", r.Events[1].Tags)
