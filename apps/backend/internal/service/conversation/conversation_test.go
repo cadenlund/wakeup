@@ -1079,6 +1079,7 @@ func TestService_DBClosedReturnsInternal(t *testing.T) {
 	for _, c := range checks {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			err := c.fn()
 			if err == nil {
 				t.Fatalf("%s: expected error against closed pool", c.name)
