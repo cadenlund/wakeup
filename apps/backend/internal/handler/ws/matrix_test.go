@@ -291,6 +291,15 @@ func TestMessageNew_MultiInstanceFanout(t *testing.T) {
 	t.Cleanup(func() { _ = bobConn.Close(websocket.StatusNormalClosure, "") })
 	bobWrapped := wrap(t, bobConn)
 
+	// Wait for bob's connection to register on hub2 — Dial returns once
+	// the upgrade handshake is done, but the server-side handler races
+	// hub2.Register against this point. Without the wait, a Send fast
+	// enough to reach the bridge-dispatcher before Register lands gets
+	// dropped on the floor (no live conns for the user) and the
+	// downstream Receive times out. The other matrix tests already use
+	// this helper for the same reason on the harness's hub.
+	waitConnCount(t, hub2, bob.ID, 1)
+
 	// Publish via the message service on instance 1 (the harness).
 	if _, err := h.MsgSvc.Send(context.Background(), msgsvc.SendParams{
 		ConversationID: convID, Sender: alice.ID, Body: "fan me out",
