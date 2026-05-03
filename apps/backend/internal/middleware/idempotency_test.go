@@ -3,6 +3,7 @@ package middleware_test
 import (
 	"context"
 	"crypto/sha256"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -275,12 +276,21 @@ func TestIdempotency_BodyTooLargeSkipsAndPassesThrough(t *testing.T) {
 	t.Parallel()
 	f := newIdemFixture(t)
 	uid := f.makeIdemUser(t)
+	big := strings.Repeat("x", mw.MaxIdempotentBodyBytes+1)
 	called := 0
-	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
+	var handlerSawBody []byte
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, r *http.Request) {
 		called++
+		// Read the full body so the test catches the regression where
+		// the middleware truncated to MaxIdempotentBodyBytes+1 instead
+		// of reattaching the remaining bytes via MultiReader.
+		read, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("downstream read body: %v", err)
+		}
+		handlerSawBody = read
 		w.WriteHeader(http.StatusCreated)
 	})
-	big := strings.Repeat("x", mw.MaxIdempotentBodyBytes+1)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(big)).
 		WithContext(ctxWithUser(uid))
@@ -292,6 +302,10 @@ func TestIdempotency_BodyTooLargeSkipsAndPassesThrough(t *testing.T) {
 	}
 	if called != 1 {
 		t.Errorf("downstream should still run on body-too-large, got %d calls", called)
+	}
+	if string(handlerSawBody) != big {
+		t.Errorf("oversized body truncated: handler saw %d bytes, want %d",
+			len(handlerSawBody), len(big))
 	}
 	if n := f.countEntries(t, uid); n != 0 {
 		t.Errorf("body-too-large must not be cached; rows = %d", n)
