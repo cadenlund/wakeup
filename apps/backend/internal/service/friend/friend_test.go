@@ -50,6 +50,81 @@ func makeUser(ctx context.Context, t *testing.T, st *stack) domain.User {
 	return created
 }
 
+// ListAcceptedFriendIDs is the §11.3 / §9.2 fan-out helper used by
+// the presence service to enumerate "who do I notify when I change
+// status." Unit-tested here so the §13.8 audit isn't skipping it.
+
+func TestListAcceptedFriendIDs_ReturnsAcceptedOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	owner := makeUser(ctx, t, st)
+	friend1 := makeUser(ctx, t, st)
+	friend2 := makeUser(ctx, t, st)
+	pendingTarget := makeUser(ctx, t, st)
+
+	// owner ↔ friend1 + owner ↔ friend2 accepted.
+	for _, target := range []domain.User{friend1, friend2} {
+		f, err := st.svc.SendRequest(ctx, owner.ID, target.Username)
+		if err != nil {
+			t.Fatalf("SendRequest %s: %v", target.Username, err)
+		}
+		if _, err := st.svc.AcceptRequest(ctx, target.ID, f.ID); err != nil {
+			t.Fatalf("AcceptRequest %s: %v", target.Username, err)
+		}
+	}
+	// owner ↔ pendingTarget pending (must NOT appear in the list).
+	if _, err := st.svc.SendRequest(ctx, owner.ID, pendingTarget.Username); err != nil {
+		t.Fatalf("SendRequest pending: %v", err)
+	}
+
+	got, err := st.svc.ListAcceptedFriendIDs(ctx, owner.ID)
+	if err != nil {
+		t.Fatalf("ListAcceptedFriendIDs: %v", err)
+	}
+	// Build a set so the test fails on duplicates as well as on
+	// missing/extra IDs — len(got) alone wouldn't catch a regression
+	// that returned `[friend1, friend1]` for two distinct friendships.
+	gotSet := make(map[uuid.UUID]int, len(got))
+	for _, id := range got {
+		gotSet[id]++
+	}
+	for id, n := range gotSet {
+		if n != 1 {
+			t.Errorf("friend id %v returned %d times (duplicate)", id, n)
+		}
+	}
+	want := map[uuid.UUID]struct{}{friend1.ID: {}, friend2.ID: {}}
+	if len(gotSet) != len(want) {
+		t.Fatalf("got %d distinct accepted friends, want %d: %+v", len(gotSet), len(want), got)
+	}
+	for id := range want {
+		if _, ok := gotSet[id]; !ok {
+			t.Errorf("expected friend id %v missing from result", id)
+		}
+	}
+	if _, leaked := gotSet[pendingTarget.ID]; leaked {
+		t.Errorf("pending friend leaked into accepted list: %v", pendingTarget.ID)
+	}
+	if _, leaked := gotSet[owner.ID]; leaked {
+		t.Errorf("owner id leaked into own accepted list: %v", owner.ID)
+	}
+}
+
+func TestListAcceptedFriendIDs_EmptyForLonelyUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st).ID
+	got, err := st.svc.ListAcceptedFriendIDs(ctx, uid)
+	if err != nil {
+		t.Fatalf("ListAcceptedFriendIDs: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected 0, got %+v", got)
+	}
+}
+
 func asAPIError(t *testing.T, err error) *apierror.Error {
 	t.Helper()
 	var ae *apierror.Error
