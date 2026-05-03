@@ -408,6 +408,45 @@ func requestHashHelper(method, path string, body []byte) []byte {
 	return h.Sum(nil)
 }
 
+// captureWriter must give the handler its OWN header map, not the
+// underlying writer's. Otherwise headers set by upstream middleware
+// (X-Request-ID, CORS, Set-Cookie from session middleware, etc.)
+// would be snapshotted into the cache entry and replayed on every
+// future request — duplicating per-request metadata or poisoning
+// future responses with stale values. (CodeRabbit caught this on PR #74.)
+func TestIdempotency_DoesNotSnapshotUpstreamHeaders(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	uid := uuid.New()
+	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+		// Handler sets ONLY this one header.
+		w.Header().Set("X-Handler-Set", "yes")
+		w.WriteHeader(http.StatusCreated)
+	})
+	// Wrap with a fake "upstream middleware" that sets a per-request
+	// header on the response BEFORE the idempotency middleware sees it.
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Upstream-Set", "request-1")
+		h.ServeHTTP(w, r)
+	})
+
+	// First request — caches.
+	rec1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{}`)).
+		WithContext(ctxWithUser(uid))
+	req1.Header.Set(mw.IdempotencyKeyHeader, "key-no-pollution")
+	upstream.ServeHTTP(rec1, req1)
+
+	// Cached entry must NOT contain the upstream header.
+	cached := store.entries[store.k("key-no-pollution", uid)]
+	if _, leaked := cached.ResponseHeaders["X-Upstream-Set"]; leaked {
+		t.Errorf("upstream header leaked into cache: %+v", cached.ResponseHeaders)
+	}
+	if cached.ResponseHeaders["X-Handler-Set"][0] != "yes" {
+		t.Errorf("handler header missing from cache: %+v", cached.ResponseHeaders)
+	}
+}
+
 func TestIdempotency_PanicsOnBadConfig(t *testing.T) {
 	t.Parallel()
 	defer func() {

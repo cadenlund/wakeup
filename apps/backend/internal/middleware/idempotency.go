@@ -62,6 +62,16 @@ type IdempotencyConfig struct {
 // same request with the same Idempotency-Key header gets the same
 // response back without the handler being re-invoked.
 //
+// Concurrency caveat: this implementation matches the §4.8 algorithm
+// literally — Get-then-Put-on-miss with ErrConflict on the way out.
+// Two truly concurrent requests with the same (user_id, key) can both
+// see Get-miss and both run the handler before one Put loses; the
+// loser's cache write fails but its handler's side effects already
+// landed. For at-most-once *handler execution* (vs at-most-once
+// *response delivery*, which we do guarantee for retries) we'd need
+// an atomic reservation flow — see PR #74 review thread for the
+// followup design.
+//
 // Algorithm (§4.8):
 //
 //  1. No header → pass through unchanged. Idempotency is opt-in.
@@ -118,31 +128,37 @@ func Idempotency(cfg IdempotencyConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Read the FULL body so we can both (a) hash the first
-			// MaxIdempotentBodyBytes for the cache key check and
-			// (b) hand the complete payload to the downstream handler.
-			// io.LimitReader(MaxIdempotentBodyBytes+1) would truncate the
-			// downstream handler's view — CodeRabbit caught this on PR #74.
-			// Upstream chi has a max-body cap (http.MaxBytesReader at the
-			// route level) so io.ReadAll is bounded.
-			body, err := io.ReadAll(r.Body)
+			// Read up to MaxIdempotentBodyBytes+1 — just enough to
+			// know whether the body fits the cache. io.ReadAll on the
+			// raw Body would buffer arbitrarily large payloads in this
+			// middleware, defeating any upstream MaxBytesReader caps
+			// (CodeRabbit caught this on PR #74).
+			limited, err := io.ReadAll(io.LimitReader(r.Body, MaxIdempotentBodyBytes+1))
 			if err != nil {
 				cfg.WriteError(w, r, apierror.BadRequest("read body").WithCause(err))
 				return
 			}
-			// Restore the body so the handler can re-read it. Do this
-			// regardless of skip vs cache so the next.ServeHTTP path
-			// always sees the original payload.
-			r.Body = io.NopCloser(bytes.NewReader(body))
-
 			// Body too large → opt out and tag the response so the
-			// client knows idempotency wasn't applied. This is a
-			// pass-through, not an error.
-			if len(body) > MaxIdempotentBodyBytes {
+			// client knows idempotency wasn't applied. Re-attach the
+			// remaining bytes via MultiReader so the handler still sees
+			// the COMPLETE payload (truncating it would silently corrupt
+			// the request).
+			if len(limited) > MaxIdempotentBodyBytes {
+				rest := r.Body
+				r.Body = struct {
+					io.Reader
+					io.Closer
+				}{
+					Reader: io.MultiReader(bytes.NewReader(limited), rest),
+					Closer: rest,
+				}
 				w.Header().Set(IdempotentReplayHeader, "skipped")
 				next.ServeHTTP(w, r)
 				return
 			}
+			body := limited
+			// Cache path: body fits, handler will read from a buffered copy.
+			r.Body = io.NopCloser(bytes.NewReader(body))
 
 			hash := requestHash(r.Method, r.URL.Path, body)
 			entry, getErr := cfg.Store.Get(r.Context(), key, user.ID)
@@ -282,12 +298,26 @@ func requestHash(method, path string, body []byte) []byte {
 // (Header, Write, WriteHeader). Other interfaces (Flusher, Hijacker)
 // are intentionally NOT proxied — write endpoints don't need them, and
 // re-implementing them with capture semantics is a rabbit hole.
+//
+// Header() returns a PRIVATE map rather than the underlying writer's
+// map. If we returned the live map, we'd snapshot upstream-set headers
+// (X-Request-ID, CORS, security headers) on Put, then re-emit them on
+// replay where the upstream chain would set them again — duplicating
+// or corrupting per-request metadata (CodeRabbit caught this on PR #74).
 type captureWriter struct {
 	http.ResponseWriter
+	headers       http.Header
 	body          bytes.Buffer
 	status        int
 	headerWritten bool
 	flushed       bool
+}
+
+func (c *captureWriter) Header() http.Header {
+	if c.headers == nil {
+		c.headers = make(http.Header)
+	}
+	return c.headers
 }
 
 func (c *captureWriter) WriteHeader(status int) {
@@ -305,9 +335,9 @@ func (c *captureWriter) Write(p []byte) (int, error) {
 	return c.body.Write(p)
 }
 
-// flushHeader writes the status to the underlying writer once. Idempotent
-// — a second call is a no-op so the explicit-flush path and the
-// implicit-via-Write path don't double up.
+// flushHeader writes the captured headers + status to the underlying
+// writer once. Idempotent — a second call is a no-op so the
+// explicit-flush path and the implicit-via-Write path don't double up.
 func (c *captureWriter) flushHeader() {
 	if c.flushed {
 		return
@@ -315,6 +345,12 @@ func (c *captureWriter) flushHeader() {
 	c.flushed = true
 	if c.status == 0 {
 		c.status = http.StatusOK
+	}
+	dst := c.ResponseWriter.Header()
+	for k, vs := range c.headers {
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
 	}
 	c.ResponseWriter.WriteHeader(c.status)
 }
