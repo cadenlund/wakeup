@@ -23,9 +23,12 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/wsproto"
 )
 
-const (
-	lkAPIKey    = "devkey"
-	lkAPISecret = "devsecretdevsecretdevsecret"
+// Match the dev keys the LiveKit testcontainer ships with so the
+// §12.8.4 e2e test (which goes through the harness path) and the
+// §12.8.3 webhook tests use the same provider.
+var (
+	lkAPIKey    = testutil.LiveKitDevAPIKey
+	lkAPISecret = testutil.LiveKitDevAPISecret
 )
 
 // signWebhookRequest builds a *http.Request that
