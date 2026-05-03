@@ -89,6 +89,12 @@ WHERE status = 'accepted'
 ORDER BY accepted_at DESC, id DESC
 LIMIT $4`
 
+const listAllAcceptedFriendIDsSQL = `-- name: ListAllAcceptedFriendIDs :many
+SELECT CASE WHEN requester_id = $1 THEN addressee_id ELSE requester_id END AS friend_id
+FROM friendships
+WHERE status = 'accepted'
+  AND (requester_id = $1 OR addressee_id = $1)`
+
 const listPendingByUserSQL = `-- name: ListPendingByUser :many
 SELECT id, requester_id, addressee_id, status, created_at, accepted_at
 FROM friendships
@@ -200,6 +206,32 @@ func (q *Queries) DeleteByPair(ctx context.Context, a, b uuid.UUID) error {
 		return fmt.Errorf("friendship: delete by pair: %w", err)
 	}
 	return nil
+}
+
+// ListAllAcceptedFriendIDs returns the user_id of every accepted
+// friend, unpaginated. Used by the §9 presence service for fan-out
+// (presence.update fires for friends only, so we need every friend
+// at once — pagination would force the publisher into an N-page walk
+// per state change). The friend graph is bounded by user behavior;
+// realistic upper bound is in the hundreds.
+func (q *Queries) ListAllAcceptedFriendIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listAllAcceptedFriendIDsSQL, userID)
+	if err != nil {
+		return nil, fmt.Errorf("friendship: list accepted friend ids: %w", err)
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("friendship: list accepted friend ids scan: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("friendship: list accepted friend ids rows: %w", err)
+	}
+	return out, nil
 }
 
 // ListAcceptedByUser returns the user's accepted friendships ordered by
