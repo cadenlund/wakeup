@@ -97,6 +97,13 @@ func (q *Queries) List(ctx context.Context, p ListParams) ([]domain.AuditLog, er
 	if limit <= 0 {
 		limit = pagination.DefaultLimit
 	}
+	if limit > pagination.MaxLimit {
+		// Defense-in-depth: the §6.1 query-param parser caps at MaxLimit
+		// already, but bypassing the handler (admin scripts, tests)
+		// could pass anything. Clamp here so the SQL LIMIT and the
+		// over-fetch slice are always bounded.
+		limit = pagination.MaxLimit
+	}
 	overFetch := limit + 1
 
 	var ts *time.Time

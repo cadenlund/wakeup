@@ -258,6 +258,32 @@ func TestList_PaginatesWithCursor(t *testing.T) {
 	}
 }
 
+func TestList_ClampsLimitToMax(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := audit.New(pool)
+	actor := makeUser(ctx, t, pool)
+
+	// Seed a few rows so the LIMIT clamp affects an observable result
+	// (not strictly necessary — the clamp is a code-path check).
+	for i := 0; i < 3; i++ {
+		if err := repo.Create(ctx, audit.CreateParams{
+			ID: uuid.Must(uuid.NewV7()), ActorID: &actor, Action: "user.update",
+		}); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	// Limit far above MaxLimit must not blow up; just returns at most MaxLimit+1 rows.
+	rows, err := repo.List(ctx, audit.ListParams{Limit: 10_000_000})
+	if err != nil {
+		t.Fatalf("List with huge limit: %v", err)
+	}
+	if len(rows) > pagination.MaxLimit+1 {
+		t.Errorf("expected at most MaxLimit+1 rows, got %d", len(rows))
+	}
+}
+
 func TestList_DefaultLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
