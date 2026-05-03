@@ -31,6 +31,13 @@ type UserLoader interface {
 // middleware can read the same value.
 const SessionUserIDKey = "user_id"
 
+// SessionImpersonatingKey is the scs session key the §8.7 admin
+// impersonate handler writes when an admin starts acting as another
+// user. LoadUser checks this AFTER loading the session owner; when set
+// (and the target user is loadable), ctx.User is overridden with the
+// target while ctx.RealUser stays as the admin.
+const SessionImpersonatingKey = "impersonating_user_id"
+
 // AuthRoles enumerates the §4.6 role values RequireRole consults.
 const (
 	RoleUser  = "user"
@@ -102,8 +109,35 @@ func LoadUser(sm *scs.SessionManager, users UserLoader, writeError errorWriter) 
 				return
 			}
 			loaded := u
-			ctx := WithUser(r.Context(), &loaded)
-			ctx = WithRealUser(ctx, &loaded)
+			ctx := WithRealUser(r.Context(), &loaded)
+			effective := &loaded
+
+			// §8.7 impersonation overlay. The admin handler stores the
+			// target user_id under SessionImpersonatingKey via scs.Put;
+			// resolve it here so the rest of the request sees ctx.User
+			// as the impersonated user. Failures (parse error, target
+			// soft-deleted) clear the field so the admin falls back to
+			// acting as themselves rather than getting stuck.
+			if rawTarget := sm.GetString(r.Context(), SessionImpersonatingKey); rawTarget != "" {
+				targetID, parseErr := uuid.Parse(rawTarget)
+				if parseErr != nil {
+					sm.Remove(r.Context(), SessionImpersonatingKey)
+				} else if target, lookupErr := users.GetByID(r.Context(), targetID); lookupErr != nil {
+					if apierror.IsCode(lookupErr, apierror.CodeNotFound) {
+						// Target was soft-deleted out from under the
+						// session; drop the impersonation field but
+						// keep the admin's own session intact.
+						sm.Remove(r.Context(), SessionImpersonatingKey)
+					} else {
+						writeError(w, r, apierror.Internal("load impersonated user").WithCause(lookupErr))
+						return
+					}
+				} else {
+					t := target
+					effective = &t
+				}
+			}
+			ctx = WithUser(ctx, effective)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
