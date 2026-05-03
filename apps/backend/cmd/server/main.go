@@ -26,6 +26,7 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
+	wshandler "github.com/cadenlund/wakeup/apps/backend/internal/handler/ws"
 	"github.com/cadenlund/wakeup/apps/backend/internal/job"
 	"github.com/cadenlund/wakeup/apps/backend/internal/log"
 	"github.com/cadenlund/wakeup/apps/backend/internal/mailer"
@@ -207,6 +208,26 @@ func run() error {
 		return fmt.Errorf("attachment handler: %w", err)
 	}
 
+	// §8 WebSocket realtime: hub + bridge + upgrade handler. The bridge
+	// drains the broker (Redis pubsub in prod) and fans events out to
+	// connected users on this instance. defer Close so a SIGTERM
+	// triggers a clean dispatcher shutdown.
+	wsHub := wshandler.NewHub(logger)
+	wsBridge, err := wshandler.NewBridge(wsHub, broker, logger)
+	if err != nil {
+		return fmt.Errorf("ws bridge: %w", err)
+	}
+	defer wsBridge.Close()
+	wsHandler, err := wshandler.NewHandler(wshandler.HandlerConfig{
+		Hub: wsHub, Bridge: wsBridge, Broker: broker,
+		Auth: authSvc, Convs: convSvc, Logger: logger,
+		AllowedOrigins: cfg.CORSOriginList(),
+		WriteError:     httpapi.WriteError,
+	})
+	if err != nil {
+		return fmt.Errorf("ws handler: %w", err)
+	}
+
 	router, err := buildRouter(routerDeps{
 		Cfg:                 cfg,
 		Logger:              logger,
@@ -227,6 +248,7 @@ func run() error {
 		ConversationHandler: convHandler,
 		MessageHandler:      messageHandler,
 		AttachmentHandler:   attachmentHandler,
+		WSHandler:           wsHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("router: %w", err)
