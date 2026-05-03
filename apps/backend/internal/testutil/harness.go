@@ -209,9 +209,13 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build presence service: %v", err)
 	}
+	// Match the dev keys that StartLiveKit's container ships with so
+	// the §12.8.4 e2e test's HTTP-issued tokens are accepted by a
+	// real LiveKit instance. (LiveKitURL stays as a placeholder —
+	// the e2e test dials env.URL directly off the testcontainer.)
 	roomSvc, err := roomsvc.New(roomsvc.Config{
 		Convs: convSvc, Users: users,
-		APIKey: "devkey", APISecret: "devsecretdevsecretdevsecret",
+		APIKey: LiveKitDevAPIKey, APISecret: LiveKitDevAPISecret,
 		LiveKitURL: "ws://localhost:7880",
 		Redis:      redisClient,
 	})

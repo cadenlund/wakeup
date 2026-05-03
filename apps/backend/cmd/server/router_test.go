@@ -81,7 +81,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	}
 	livekitWebhookHandler, err := httpapi.NewLiveKitWebhookHandler(
 		h.RoomSvc, h.Broker,
-		lkauth.NewSimpleKeyProvider("devkey", "devsecretdevsecretdevsecret"),
+		lkauth.NewSimpleKeyProvider(testutil.LiveKitDevAPIKey, testutil.LiveKitDevAPISecret),
 		nil,
 	)
 	if err != nil {
