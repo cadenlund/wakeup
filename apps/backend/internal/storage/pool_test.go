@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/storage"
+	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
 // Tests that don't need a real postgres. The connect/Ping happy-path is
@@ -90,5 +91,58 @@ func TestHealthCheck_NilPool(t *testing.T) {
 	// reading slog output, but don't pin the exact text.
 	if errors.Is(err, context.Canceled) {
 		t.Fatalf("got unexpected wrapped context error: %v", err)
+	}
+}
+
+// HealthCheck happy + bounded-failure paths against a real pool. Uses
+// testutil.NewTestDB so the assertions cover the Ping success branch
+// and the canceled-context branch — both of which the nil-pool test
+// can't reach.
+func TestHealthCheck_RealPool(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewTestDB(t)
+	if err := storage.HealthCheck(context.Background(), pool); err != nil {
+		t.Errorf("HealthCheck on live pool: %v", err)
+	}
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := storage.HealthCheck(canceledCtx, pool); err == nil {
+		t.Error("HealthCheck on canceled ctx should error")
+	}
+}
+
+// NewPool succeeds against a live postgres URL — exercises the
+// pgxpool.NewWithConfig + Ping success path that the validation
+// tests above can't reach. Uses the testutil-bound database URL so
+// the test runs in the same env as the rest of the suite.
+//
+// Also asserts non-default knobs (MaxConns, MaxConnLifetime, etc.)
+// land on the pool's config — this catches a regression where one of
+// the override branches was unconditionally applied.
+func TestNewPool_LiveSuccess(t *testing.T) {
+	t.Parallel()
+	dsn := testutil.StartPostgres(t)
+	pool, err := storage.NewPool(context.Background(), storage.PoolConfig{
+		DatabaseURL:     dsn,
+		MaxConns:        3,
+		MinConns:        1,
+		MaxConnLifetime: 30 * time.Second,
+		MaxConnIdleTime: 15 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if got := pool.Config().MaxConns; got != 3 {
+		t.Errorf("MaxConns = %d, want 3", got)
+	}
+	if got := pool.Config().MinConns; got != 1 {
+		t.Errorf("MinConns = %d, want 1", got)
+	}
+	if got := pool.Config().MaxConnLifetime; got != 30*time.Second {
+		t.Errorf("MaxConnLifetime = %v, want 30s", got)
+	}
+	if got := pool.Config().MaxConnIdleTime; got != 15*time.Second {
+		t.Errorf("MaxConnIdleTime = %v, want 15s", got)
 	}
 }
