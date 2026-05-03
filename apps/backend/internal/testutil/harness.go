@@ -40,6 +40,7 @@ import (
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
+	presrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/presence"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
@@ -47,6 +48,7 @@ import (
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
+	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 )
@@ -98,6 +100,7 @@ type Harness struct {
 	ConvSvc      *convsvc.Service
 	MsgSvc       *msgsvc.Service
 	AttSvc       *attsvc.Service
+	PresenceSvc  *presencesvc.Service
 	Broker       pubsub.Broker
 
 	// WS plumbing surfaced for handler-level tests that want to assert
@@ -141,6 +144,7 @@ func New(t *testing.T) *Harness {
 	convs := convrepo.New(pool)
 	msgs := msgrepo.New(pool)
 	atts := attrepo.New(pool)
+	presences := presrepo.New(pool)
 	sm := session.New(pool)
 
 	broker := pubsub.NewInProc(pubsub.NewRegistry())
@@ -197,6 +201,12 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build attachment service: %v", err)
 	}
+	presenceSvc, err := presencesvc.New(presencesvc.Config{
+		Repo: presences, Broker: broker, Friends: friendSvc,
+	})
+	if err != nil {
+		t.Fatalf("Harness: build presence service: %v", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -222,6 +232,10 @@ func New(t *testing.T) *Harness {
 	attHandler, err := httpapi.NewAttachmentHandler(attSvc, authSvc)
 	if err != nil {
 		t.Fatalf("Harness: build attachment handler: %v", err)
+	}
+	presenceHandler, err := httpapi.NewPresenceHandler(presenceSvc, userSvc, authSvc, v)
+	if err != nil {
+		t.Fatalf("Harness: build presence handler: %v", err)
 	}
 
 	// §8 WebSocket: build hub + bridge + upgrade handler so harness
@@ -250,6 +264,7 @@ func New(t *testing.T) *Harness {
 	convHandler.Mount(router)
 	msgHandler.Mount(router)
 	attHandler.Mount(router)
+	presenceHandler.Mount(router)
 	wsHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
@@ -286,6 +301,7 @@ func New(t *testing.T) *Harness {
 		ConvSvc:      convSvc,
 		MsgSvc:       msgSvc,
 		AttSvc:       attSvc,
+		PresenceSvc:  presenceSvc,
 		Broker:       broker,
 		WSHub:        wsHub,
 		WSBridge:     wsBridge,

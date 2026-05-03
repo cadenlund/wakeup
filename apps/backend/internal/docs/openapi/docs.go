@@ -2359,6 +2359,133 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/presence/friends": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns one row per accepted friend with their current presence status (` + "`" + `online` + "`" + ` / ` + "`" + `away` + "`" + ` / ` + "`" + `offline` + "`" + ` / ` + "`" + `sleeping` + "`" + `) and ` + "`" + `last_active_at` + "`" + `. Friends with no row yet surface as ` + "`" + `offline` + "`" + `. Used on app open to populate the friend list immediately; the realtime stream then updates incrementally via §7.2 ` + "`" + `presence.update` + "`" + `.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "presence"
+                ],
+                "summary": "List friends' presence",
+                "responses": {
+                    "200": {
+                        "description": "Friends' presence",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.PresenceListResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/presence/status": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Manual override for the user's status. Only ` + "`" + `online` + "`" + ` and ` + "`" + `sleeping` + "`" + ` are user-settable — the decay sweeper handles ` + "`" + `away` + "`" + ` / ` + "`" + `offline` + "`" + ` automatically (§9.2). On a real change, the server publishes ` + "`" + `presence.update` + "`" + ` to every accepted friend (§7.2).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "presence"
+                ],
+                "summary": "Set my presence status",
+                "parameters": [
+                    {
+                        "description": "Status to set",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.SetPresenceStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/readyz": {
             "get": {
                 "description": "Pings Postgres and Redis with independent 1.5s timeouts. Returns 200 only when both respond; otherwise 500 with a §4.4 envelope listing failed dependencies.",
@@ -2853,6 +2980,55 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/widget/friends": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Mobile widget endpoint per §6.1. Returns one row per accepted friend, embedding the public user profile alongside their presence state — designed for a low-frequency poll (~15min) that wants everything for the widget UI in one shape.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "presence"
+                ],
+                "summary": "Widget feed (friends + presence)",
+                "responses": {
+                    "200": {
+                        "description": "Friends with embedded presence",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.WidgetFriendsResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_http.ErrorResponse"
                         }
@@ -3492,6 +3668,34 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.PresenceListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.PresenceResponse"
+                    }
+                }
+            }
+        },
+        "internal_handler_http.PresenceResponse": {
+            "type": "object",
+            "properties": {
+                "last_active_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "online"
+                },
+                "user_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
         "internal_handler_http.RegisterRequest": {
             "type": "object",
             "required": [
@@ -3573,6 +3777,22 @@ const docTemplate = `{
                 "reply_to_message_id": {
                     "type": "string",
                     "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
+        "internal_handler_http.SetPresenceStatusRequest": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "online",
+                        "sleeping"
+                    ],
+                    "example": "sleeping"
                 }
             }
         },
@@ -3679,6 +3899,28 @@ const docTemplate = `{
                 "username": {
                     "type": "string",
                     "example": "caden"
+                }
+            }
+        },
+        "internal_handler_http.WidgetFriendRow": {
+            "type": "object",
+            "properties": {
+                "presence": {
+                    "$ref": "#/definitions/internal_handler_http.PresenceResponse"
+                },
+                "user": {
+                    "$ref": "#/definitions/internal_handler_http.UserResponse"
+                }
+            }
+        },
+        "internal_handler_http.WidgetFriendsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.WidgetFriendRow"
+                    }
                 }
             }
         }
