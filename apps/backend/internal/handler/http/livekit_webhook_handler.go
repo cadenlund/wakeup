@@ -146,6 +146,12 @@ func (h *LiveKitWebhookHandler) handleRoomStarted(ctx context.Context, convID uu
 	h.publish(ctx, convID, wsproto.EventRoomStarted, wsproto.RoomStartedPayload{
 		ConversationID: convID,
 	})
+	// TODO(11.5): trigger room.started push notifications here. Per
+	// §10.7 the flow is: fetch conversation members → for each
+	// member who is offline AND has notification_preferences.calls
+	// = true, call notification.SendOfflinePush(category="calls").
+	// Wired in Phase 11.5 once the push service ships; landed as a
+	// stub in 10.7 so the dependency is visible at the call site.
 	return nil
 }
 
