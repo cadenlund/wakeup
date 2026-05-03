@@ -103,18 +103,23 @@ func New(cfg Config) (*Service, error) {
 // heartbeat event. Refreshes timestamps and — when the row's status
 // flips from `away` back to `online` — publishes presence.update.
 func (s *Service) Heartbeat(ctx context.Context, userID uuid.UUID) error {
-	prior, err := s.repo.Get(ctx, userID)
-	if err != nil && !errors.Is(err, presrepo.ErrNotFound) {
-		return apierror.Internal("presence: get prior").WithCause(err)
+	prior, getErr := s.repo.Get(ctx, userID)
+	if getErr != nil && !errors.Is(getErr, presrepo.ErrNotFound) {
+		return apierror.Internal("presence: get prior").WithCause(getErr)
 	}
 	updated, err := s.repo.UpsertHeartbeat(ctx, userID)
 	if err != nil {
 		return apierror.Internal("presence: heartbeat").WithCause(err)
 	}
 	// Publish only on a real status change. Fresh rows (prior NotFound)
-	// imply "user just became online" — also worth a fan-out.
+	// default priorStatus to offline so the offline→online transition
+	// fires a fan-out. Use the GET error (not the upsert err, which
+	// has just been re-assigned) — the prior version of this code
+	// shadowed the variable and silently treated every fresh row's
+	// prior as zero-value, losing the offline default. (CodeRabbit
+	// PR #52.)
 	priorStatus := domain.PresenceOffline
-	if err == nil {
+	if getErr == nil {
 		priorStatus = prior.Status
 	}
 	if updated.Status != priorStatus {
