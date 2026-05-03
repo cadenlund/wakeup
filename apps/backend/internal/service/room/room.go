@@ -231,6 +231,14 @@ func participantVideoKey(convID, userID uuid.UUID) string {
 	return fmt.Sprintf("room:%s:participant:%s:video", convID, userID)
 }
 
+// participantJoinedAtKey returns the Redis key for the per-participant
+// joined-at timestamp surfaced by §6.2 GetParticipants. Stamped on
+// AddParticipant; cleared on RemoveParticipant alongside the video
+// flag. (CodeRabbit PR #56.)
+func participantJoinedAtKey(convID, userID uuid.UUID) string {
+	return fmt.Sprintf("room:%s:participant:%s:joined_at", convID, userID)
+}
+
 // GetParticipants returns the current participant list + started_at
 // for the conversation's room. Membership-gated. Reads from Redis;
 // the webhook handler in 10.4 keeps the set fresh.
@@ -253,9 +261,16 @@ func (s *Service) GetParticipants(ctx context.Context, userID, convID uuid.UUID)
 			continue
 		}
 		video, _ := s.redis.Get(ctx, participantVideoKey(convID, uid)).Result()
+		joined := time.Time{}
+		if rawTS, err := s.redis.Get(ctx, participantJoinedAtKey(convID, uid)).Result(); err == nil {
+			if t, err := time.Parse(time.RFC3339Nano, rawTS); err == nil {
+				joined = t
+			}
+		}
 		out.Participants = append(out.Participants, Participant{
-			UserID: uid,
-			Video:  video == "true",
+			UserID:   uid,
+			JoinedAt: joined,
+			Video:    video == "true",
 		})
 	}
 	startedRaw, err := s.redis.Get(ctx, startedAtKey(convID)).Result()
@@ -269,8 +284,10 @@ func (s *Service) GetParticipants(ctx context.Context, userID, convID uuid.UUID)
 
 // AddParticipant is the webhook-side helper — called by the §10.4
 // LiveKit webhook handler on `participant_joined`. SADD's the user
-// to the participant set, sets the joined-at and video keys, and
-// stamps started_at if this is the first participant.
+// to the participant set, stamps the joined-at timestamp (only on
+// the first add — at-least-once delivery means we may see the same
+// event again, and we want the original join time), and refreshes
+// the room TTL.
 //
 // Returns true iff the SADD created a new entry (so the caller can
 // short-circuit duplicate WS broadcasts on at-least-once webhook
@@ -285,6 +302,15 @@ func (s *Service) AddParticipant(ctx context.Context, convID, userID uuid.UUID) 
 	if err := s.redis.Expire(ctx, participantsKey(convID), participantSetTTL).Err(); err != nil {
 		return false, fmt.Errorf("room: EXPIRE: %w", err)
 	}
+	if added > 0 {
+		// First add — stamp joined_at. SETNX so a duplicate event
+		// (at-least-once) on a participant who briefly left and
+		// rejoined doesn't overwrite a prior session's clock.
+		if err := s.redis.Set(ctx, participantJoinedAtKey(convID, userID),
+			s.now().Format(time.RFC3339Nano), participantSetTTL).Err(); err != nil {
+			return false, fmt.Errorf("room: SET joined_at: %w", err)
+		}
+	}
 	return added > 0, nil
 }
 
@@ -298,6 +324,9 @@ func (s *Service) RemoveParticipant(ctx context.Context, convID, userID uuid.UUI
 	}
 	if err := s.redis.Del(ctx, participantVideoKey(convID, userID)).Err(); err != nil {
 		return 0, fmt.Errorf("room: DEL video: %w", err)
+	}
+	if err := s.redis.Del(ctx, participantJoinedAtKey(convID, userID)).Err(); err != nil {
+		return 0, fmt.Errorf("room: DEL joined_at: %w", err)
 	}
 	size, err := s.redis.SCard(ctx, participantsKey(convID)).Result()
 	if err != nil {

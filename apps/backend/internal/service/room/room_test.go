@@ -451,6 +451,9 @@ func TestRoomLifecycle_AddMarkSetVideoRemove(t *testing.T) {
 	if got.Participants[0].UserID != a.ID || !got.Participants[0].Video {
 		t.Errorf("participant = %+v, want a w/ video=true", got.Participants[0])
 	}
+	if !got.Participants[0].JoinedAt.Equal(st.now) {
+		t.Errorf("JoinedAt = %v, want %v (frozen now)", got.Participants[0].JoinedAt, st.now)
+	}
 	if got.StartedAt == nil {
 		t.Errorf("StartedAt nil after MarkStarted")
 	}
