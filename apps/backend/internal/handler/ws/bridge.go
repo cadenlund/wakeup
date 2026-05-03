@@ -168,10 +168,19 @@ func (b *Bridge) UnsubscribeAll(ctx context.Context, userID uuid.UUID) []string 
 }
 
 // Close stops the dispatcher and drops every subscription. Safe to
-// call multiple times.
+// call multiple times AND safe to call before any Subscribe (the
+// dispatcher is started lazily, so Close-before-Subscribe must not
+// wait for a goroutine that never ran). CodeRabbit PR #48.
 func (b *Bridge) Close() {
 	b.stopOnce.Do(func() {
 		close(b.stopCh)
+		// Force startOnce to fire so doneCh is guaranteed to be
+		// closed by *some* goroutine — either the live dispatcher
+		// (if Subscribe already ran) or this no-op spawn whose
+		// dispatch() will see stopCh closed and return immediately.
+		b.startOnce.Do(func() {
+			go b.dispatch()
+		})
 		<-b.doneCh
 	})
 }

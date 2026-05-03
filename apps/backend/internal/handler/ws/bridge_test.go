@@ -294,6 +294,31 @@ func TestNewBridge_RejectsBadConfig(t *testing.T) {
 	}
 }
 
+// Regression: Close() before any Subscribe must not deadlock. The
+// dispatcher is started lazily by Subscribe, so an early Close used
+// to wait on a doneCh that nothing closed. (CodeRabbit PR #48.)
+func TestBridge_CloseBeforeSubscribeDoesNotBlock(t *testing.T) {
+	t.Parallel()
+	hub := ws.NewHub(nil)
+	broker := pubsub.NewInProc(pubsub.NewRegistry())
+	t.Cleanup(func() { _ = broker.Close() })
+	b, err := ws.NewBridge(hub, broker, nil)
+	if err != nil {
+		t.Fatalf("NewBridge: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		b.Close()
+		b.Close() // also assert idempotent
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close blocked when called before any Subscribe")
+	}
+}
+
 func TestBridge_CloseIsIdempotent(t *testing.T) {
 	t.Parallel()
 	hub := ws.NewHub(nil)
