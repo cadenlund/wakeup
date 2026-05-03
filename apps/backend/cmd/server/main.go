@@ -48,6 +48,7 @@ import (
 	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
+	roomsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/room"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 )
@@ -176,6 +177,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("presence service: %w", err)
 	}
+	roomSvc, err := roomsvc.New(roomsvc.Config{
+		Convs: convSvc, Users: users,
+		APIKey: cfg.LiveKitAPIKey, APISecret: cfg.LiveKitAPISecret,
+		LiveKitURL: cfg.LiveKitURL,
+		Redis:      redisClient,
+		Logger:     logger,
+	})
+	if err != nil {
+		return fmt.Errorf("room service: %w", err)
+	}
 
 	// §4.12 background-job runner. Phase 7.4 registers the attachment
 	// orphan sweeper; later phases add presence / idempotency / session
@@ -224,6 +235,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("presence handler: %w", err)
 	}
+	roomHandler, err := httpapi.NewRoomHandler(roomSvc, authSvc, v)
+	if err != nil {
+		return fmt.Errorf("room handler: %w", err)
+	}
 
 	// §8 WebSocket realtime: hub + bridge + upgrade handler. The bridge
 	// drains the broker (Redis pubsub in prod) and fans events out to
@@ -260,6 +275,7 @@ func run() error {
 		MsgSvc:              messageSvc,
 		AttSvc:              attachmentSvc,
 		PresenceSvc:         presenceSvc,
+		RoomSvc:             roomSvc,
 		UserHandler:         userHandler,
 		AuthHandler:         authHandler,
 		FriendHandler:       friendHandler,
@@ -267,6 +283,7 @@ func run() error {
 		MessageHandler:      messageHandler,
 		AttachmentHandler:   attachmentHandler,
 		PresenceHandler:     presenceHandler,
+		RoomHandler:         roomHandler,
 		WSHandler:           wsHandler,
 	})
 	if err != nil {

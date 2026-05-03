@@ -49,6 +49,7 @@ import (
 	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
+	roomsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/room"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 )
@@ -101,6 +102,7 @@ type Harness struct {
 	MsgSvc       *msgsvc.Service
 	AttSvc       *attsvc.Service
 	PresenceSvc  *presencesvc.Service
+	RoomSvc      *roomsvc.Service
 	Broker       pubsub.Broker
 
 	// WS plumbing surfaced for handler-level tests that want to assert
@@ -207,6 +209,15 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build presence service: %v", err)
 	}
+	roomSvc, err := roomsvc.New(roomsvc.Config{
+		Convs: convSvc, Users: users,
+		APIKey: "devkey", APISecret: "devsecretdevsecretdevsecret",
+		LiveKitURL: "ws://localhost:7880",
+		Redis:      redisClient,
+	})
+	if err != nil {
+		t.Fatalf("Harness: build room service: %v", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -237,6 +248,10 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build presence handler: %v", err)
 	}
+	roomHandler, err := httpapi.NewRoomHandler(roomSvc, authSvc, v)
+	if err != nil {
+		t.Fatalf("Harness: build room handler: %v", err)
+	}
 
 	// §8 WebSocket: build hub + bridge + upgrade handler so harness
 	// users can dial /v1/ws like any other route. The bridge owns one
@@ -265,6 +280,7 @@ func New(t *testing.T) *Harness {
 	msgHandler.Mount(router)
 	attHandler.Mount(router)
 	presenceHandler.Mount(router)
+	roomHandler.Mount(router)
 	wsHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
@@ -302,6 +318,7 @@ func New(t *testing.T) *Harness {
 		MsgSvc:       msgSvc,
 		AttSvc:       attSvc,
 		PresenceSvc:  presenceSvc,
+		RoomSvc:      roomSvc,
 		Broker:       broker,
 		WSHub:        wsHub,
 		WSBridge:     wsBridge,
