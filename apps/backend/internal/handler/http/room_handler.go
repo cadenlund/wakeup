@@ -45,7 +45,7 @@ func (h *RoomHandler) Mount(r chi.Router) {
 // Join issues a LiveKit JWT for the conversation room.
 //
 // @Summary      Join a conversation's room
-// @Description  Issues a LiveKit JWT scoped to this conversation's persistent room (§10.3 — `room_id == conversation_id`). The caller must be a member; non-members get 404 (no enumeration leak). Token TTL is 10 minutes; LiveKit auto-refreshes during the connection. The `video` flag is a UI hint baked into the JWT metadata so other participants can render the camera-on indicator — token publish permissions are identical regardless.
+// @Description  Issues a LiveKit JWT scoped to this conversation's persistent room (§10.3 — the room name is `conv:<conversation_id>`, returned verbatim in the response's `room_id` field; the prefix lets ops tell call rooms apart from any other LiveKit room name we may add later). The caller must be a member; non-members get 404 (no enumeration leak). Token TTL is 10 minutes; LiveKit auto-refreshes during the connection. The `video` flag is a UI hint baked into the JWT metadata so other participants can render the camera-on indicator — token publish permissions are identical regardless.
 // @Tags         rooms
 // @Accept       json
 // @Produce      json

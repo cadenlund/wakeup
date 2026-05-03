@@ -1540,7 +1540,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Issues a LiveKit JWT scoped to this conversation's persistent room (§10.3 — ` + "`" + `room_id == conversation_id` + "`" + `). The caller must be a member; non-members get 404 (no enumeration leak). Token TTL is 10 minutes; LiveKit auto-refreshes during the connection. The ` + "`" + `video` + "`" + ` flag is a UI hint baked into the JWT metadata so other participants can render the camera-on indicator — token publish permissions are identical regardless.",
+                "description": "Issues a LiveKit JWT scoped to this conversation's persistent room (§10.3 — the room name is ` + "`" + `conv:\u003cconversation_id\u003e` + "`" + `, returned verbatim in the response's ` + "`" + `room_id` + "`" + ` field; the prefix lets ops tell call rooms apart from any other LiveKit room name we may add later). The caller must be a member; non-members get 404 (no enumeration leak). Token TTL is 10 minutes; LiveKit auto-refreshes during the connection. The ` + "`" + `video` + "`" + ` flag is a UI hint baked into the JWT metadata so other participants can render the camera-on indicator — token publish permissions are identical regardless.",
                 "consumes": [
                     "application/json"
                 ],
