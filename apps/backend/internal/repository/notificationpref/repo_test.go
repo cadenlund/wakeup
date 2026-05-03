@@ -85,6 +85,66 @@ func TestGetOrCreate_Idempotent(t *testing.T) {
 	}
 }
 
+func TestGet_NotFoundForFreshUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := notificationpref.New(pool)
+	uid := makeUser(ctx, t, pool)
+
+	if _, err := repo.Get(ctx, uid); !errors.Is(err, notificationpref.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for user with no row, got %v", err)
+	}
+}
+
+func TestGet_ReturnsRowAfterCreate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := notificationpref.New(pool)
+	uid := makeUser(ctx, t, pool)
+
+	if _, err := repo.GetOrCreate(ctx, uid); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := repo.Get(ctx, uid)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.UserID != uid {
+		t.Errorf("UserID mismatch: %v", got.UserID)
+	}
+	if !got.DirectMessages || !got.GroupMessages || !got.FriendRequests || !got.Calls {
+		t.Errorf("expected all defaults true, got %+v", got)
+	}
+}
+
+func TestGet_ReflectsPatchedValues(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := notificationpref.New(pool)
+	uid := makeUser(ctx, t, pool)
+
+	if _, err := repo.GetOrCreate(ctx, uid); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	off := false
+	if _, err := repo.Patch(ctx, notificationpref.PatchParams{
+		UserID: uid, Calls: &off,
+	}); err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+
+	got, err := repo.Get(ctx, uid)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Calls {
+		t.Errorf("Get should reflect patched Calls=false")
+	}
+}
+
 func TestPatch_PartialPreservesUntouched(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

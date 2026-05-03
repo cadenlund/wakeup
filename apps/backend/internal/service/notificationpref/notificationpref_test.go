@@ -203,6 +203,121 @@ func TestNew_RejectsNilPrefs(t *testing.T) {
 	}
 }
 
+// --- ShouldNotify --------------------------------------------------------
+
+func TestShouldNotify_DefaultsAllTrueForFreshUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	for _, cat := range []notificationpref.Category{
+		notificationpref.CategoryDirectMessages,
+		notificationpref.CategoryGroupMessages,
+		notificationpref.CategoryFriendRequests,
+		notificationpref.CategoryCalls,
+	} {
+		if !st.svc.ShouldNotify(ctx, uid, cat) {
+			t.Errorf("category %q: expected true (default), got false", cat)
+		}
+	}
+
+	// And critically, the read path should NOT have auto-created a row —
+	// the gate is read-only so notification triggers don't pile up writes.
+	var count int
+	if err := st.pool.QueryRow(ctx,
+		"SELECT count(*) FROM notification_preferences WHERE user_id = $1", uid,
+	).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("ShouldNotify should be read-only; found %d row(s)", count)
+	}
+}
+
+func TestShouldNotify_RespectsPatchedToggle(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	off := false
+	if _, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID: uid, Calls: &off,
+	}); err != nil {
+		t.Fatalf("UpdateForUser: %v", err)
+	}
+
+	if st.svc.ShouldNotify(ctx, uid, notificationpref.CategoryCalls) {
+		t.Errorf("Calls patched off, ShouldNotify(calls) should be false")
+	}
+	// Other categories untouched.
+	for _, cat := range []notificationpref.Category{
+		notificationpref.CategoryDirectMessages,
+		notificationpref.CategoryGroupMessages,
+		notificationpref.CategoryFriendRequests,
+	} {
+		if !st.svc.ShouldNotify(ctx, uid, cat) {
+			t.Errorf("category %q should still be true after patching only Calls", cat)
+		}
+	}
+}
+
+func TestShouldNotify_AllCategoriesIndependent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	off := false
+	on := true
+	if _, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID:         uid,
+		DirectMessages: &off,
+		GroupMessages:  &on,
+		FriendRequests: &off,
+		Calls:          &on,
+	}); err != nil {
+		t.Fatalf("UpdateForUser: %v", err)
+	}
+
+	cases := map[notificationpref.Category]bool{
+		notificationpref.CategoryDirectMessages: false,
+		notificationpref.CategoryGroupMessages:  true,
+		notificationpref.CategoryFriendRequests: false,
+		notificationpref.CategoryCalls:          true,
+	}
+	for cat, want := range cases {
+		if got := st.svc.ShouldNotify(ctx, uid, cat); got != want {
+			t.Errorf("ShouldNotify(%q) = %v, want %v", cat, got, want)
+		}
+	}
+}
+
+func TestShouldNotify_FailsOpenOnDBError(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// Canceled ctx → pgx returns an error → ShouldNotify must fail open.
+	if !st.svc.ShouldNotify(ctx, uuid.New(), notificationpref.CategoryDirectMessages) {
+		t.Error("expected ShouldNotify to fail open (true) on DB error")
+	}
+}
+
+func TestShouldNotify_UnknownCategoryDefaultsTrue(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	// An unrecognized category shouldn't drop a notification — fail-open
+	// is consistent with the rest of ShouldNotify.
+	if !st.svc.ShouldNotify(ctx, uid, notificationpref.Category("nonexistent")) {
+		t.Error("expected unknown category to default true")
+	}
+}
+
 // --- error mapping -------------------------------------------------------
 
 // canceledCtx error path: a canceled context surfaces from pgx as a
