@@ -12,6 +12,7 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
@@ -681,9 +682,10 @@ func TestUnblock_NoRowReturnsNotFound(t *testing.T) {
 }
 
 // ListFriends keyset-paginates: 3 friends accepted, request limit=2 →
-// HasMore=true and a non-nil cursor. Walks the cursor to fetch the
-// last row. Covers the HasMore/cursor branch that the limit=10 test
-// can't reach.
+// page 1 has HasMore=true with a non-nil cursor; page 2 (using that
+// cursor) returns the remaining row with HasMore=false. Covers both
+// the over-fetch/cursor branch and the terminal-page branch that the
+// limit=10 test can't reach. Also asserts no overlap between pages.
 func TestListFriends_PaginatesPastLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -707,7 +709,34 @@ func TestListFriends_PaginatesPastLimit(t *testing.T) {
 		t.Errorf("page 1 len = %d, want 2", len(first.Friendships))
 	}
 	if !first.HasMore || first.NextCursor == nil {
-		t.Errorf("page 1 expected HasMore=true with cursor, got hasMore=%v cursor=%v", first.HasMore, first.NextCursor)
+		t.Fatalf("page 1 expected HasMore=true with cursor, got hasMore=%v cursor=%v", first.HasMore, first.NextCursor)
+	}
+
+	cursor, err := pagination.Decode(*first.NextCursor)
+	if err != nil {
+		t.Fatalf("decode page 1 cursor: %v", err)
+	}
+	second, err := st.svc.ListFriends(ctx, friend.ListFriendsParams{
+		UserID: me.ID, Limit: 2, Cursor: cursor,
+	})
+	if err != nil {
+		t.Fatalf("ListFriends page 2: %v", err)
+	}
+	if len(second.Friendships) != 1 {
+		t.Errorf("page 2 len = %d, want 1", len(second.Friendships))
+	}
+	if second.HasMore || second.NextCursor != nil {
+		t.Errorf("page 2 expected terminal pagination, got hasMore=%v cursor=%v", second.HasMore, second.NextCursor)
+	}
+	// Pages must not overlap.
+	pageOne := map[uuid.UUID]struct{}{}
+	for _, f := range first.Friendships {
+		pageOne[f.ID] = struct{}{}
+	}
+	for _, f := range second.Friendships {
+		if _, dup := pageOne[f.ID]; dup {
+			t.Errorf("friendship %s appeared on both pages", f.ID)
+		}
 	}
 }
 
