@@ -2,6 +2,8 @@ package fixtures_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
@@ -92,51 +94,65 @@ func TestMakeUser_WithSoftDeleted(t *testing.T) {
 // The remaining stubs (MakeFriendship, MakeConversation, MakeMessage,
 // MakeAttachment) all panic with a "real impl lands in milestone X"
 // message. They survive as a search target for "where does the
-// fixture for X live?" rather than as functional code. We assert the
-// panic so a future caller who tries to use them gets the documented
-// pointer instead of a less-clear nil-pointer panic.
-//
-// One subtest per stub so a regression that turns one of them into a
-// no-op is visible in the test output.
+// fixture for X live?" rather than as functional code. We assert
+// both that the panic fires AND that the recovered value mentions
+// the milestone pointer, so a future stub that swaps in a generic
+// "not implemented" message or a bare nil-deref would surface here.
 func TestStubs_PanicWithMilestonePointer(t *testing.T) {
 	t.Parallel()
-	t.Run("MakeFriendship", func(t *testing.T) {
-		t.Parallel()
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic")
-			}
-		}()
-		var u domain.User
-		fixtures.MakeFriendship(t, nil, u, u)
-	})
-	t.Run("MakeConversation", func(t *testing.T) {
-		t.Parallel()
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic")
-			}
-		}()
-		fixtures.MakeConversation(t, nil, nil)
-	})
-	t.Run("MakeMessage", func(t *testing.T) {
-		t.Parallel()
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic")
-			}
-		}()
-		var u domain.User
-		fixtures.MakeMessage(t, nil, nil, u)
-	})
-	t.Run("MakeAttachment", func(t *testing.T) {
-		t.Parallel()
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic")
-			}
-		}()
-		var u domain.User
-		fixtures.MakeAttachment(t, nil, u)
-	})
+	cases := []struct {
+		name    string
+		fn      func(t *testing.T)
+		wantSub string
+	}{
+		{
+			name: "MakeFriendship",
+			fn: func(t *testing.T) {
+				var u domain.User
+				fixtures.MakeFriendship(t, nil, u, u)
+			},
+			wantSub: "milestone 4.1",
+		},
+		{
+			name: "MakeConversation",
+			fn: func(t *testing.T) {
+				fixtures.MakeConversation(t, nil, nil)
+			},
+			wantSub: "milestone 5.1",
+		},
+		{
+			name: "MakeMessage",
+			fn: func(t *testing.T) {
+				var u domain.User
+				fixtures.MakeMessage(t, nil, nil, u)
+			},
+			wantSub: "milestone 6.1",
+		},
+		{
+			name: "MakeAttachment",
+			fn: func(t *testing.T) {
+				var u domain.User
+				fixtures.MakeAttachment(t, nil, u)
+			},
+			wantSub: "milestone 7.1",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Errorf("%s: expected panic", tc.name)
+					return
+				}
+				msg := fmt.Sprint(r)
+				if !strings.Contains(msg, tc.wantSub) {
+					t.Errorf("%s: panic %q missing milestone pointer %q", tc.name, msg, tc.wantSub)
+				}
+			}()
+			tc.fn(t)
+		})
+	}
 }
