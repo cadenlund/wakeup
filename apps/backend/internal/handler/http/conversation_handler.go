@@ -166,6 +166,7 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 // 404 (no enumeration leak).
 //
 // @Summary      Get conversation
+// @Description  Returns the conversation row with its full member list. Caller must be a member; non-members surface as 404 so the existence of the conversation isn't leaked across the friend graph.
 // @Tags         conversations
 // @Produce      json
 // @Security     CookieAuth
