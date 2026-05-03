@@ -74,7 +74,7 @@ Expect `201 Created` with the message id, `Idempotent-Replay: false` absent
 Now generate a UUID v7 client-side (any UUID works) and send the SAME
 body twice with the same `Idempotency-Key` header:
 
-```
+```http
 POST /v1/conversations/{id}/messages
 Idempotency-Key: 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c
 Content-Type: application/json
