@@ -3311,6 +3311,38 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/webhooks/livekit": {
+            "post": {
+                "description": "Unauthenticated endpoint that receives LiveKit's room/participant lifecycle events. Signature verification happens inside the handler via the configured KeyProvider — there is no bearer-token / cookie auth here. Events that fail verification get 401; events for unknown rooms get 200 (no enumeration). Handled events: room_started, room_finished, participant_joined, participant_left, track_published (camera only), track_unpublished (camera only).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "webhooks"
+                ],
+                "summary": "LiveKit webhook receiver",
+                "responses": {
+                    "200": {
+                        "description": "ok"
+                    },
+                    "401": {
+                        "description": "Invalid or missing webhook signature",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {

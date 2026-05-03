@@ -42,30 +42,31 @@ import (
 // The struct exists so tests can construct a deterministic router without
 // dragging in the full main() side effects (env, signal handlers).
 type routerDeps struct {
-	Cfg                 *config.Config
-	Logger              *slog.Logger
-	Pool                *pgxpool.Pool
-	Redis               *redis.Client
-	Sessions            *scs.SessionManager
-	Limiter             *ratelimit.Limiter
-	UserSvc             *usersvc.Service
-	AuthSvc             *auth.Service
-	NotifPrefSvc        *notifprefsvc.Service
-	FriendSvc           *friendsvc.Service
-	ConvSvc             *convsvc.Service
-	MsgSvc              *msgsvc.Service
-	AttSvc              *attsvc.Service
-	PresenceSvc         *presencesvc.Service
-	RoomSvc             *roomsvc.Service
-	UserHandler         *httpapi.UserHandler
-	AuthHandler         *httpapi.AuthHandler
-	FriendHandler       *httpapi.FriendHandler
-	ConversationHandler *httpapi.ConversationHandler
-	MessageHandler      *httpapi.MessageHandler
-	AttachmentHandler   *httpapi.AttachmentHandler
-	PresenceHandler     *httpapi.PresenceHandler
-	RoomHandler         *httpapi.RoomHandler
-	WSHandler           *wshandler.Handler
+	Cfg                   *config.Config
+	Logger                *slog.Logger
+	Pool                  *pgxpool.Pool
+	Redis                 *redis.Client
+	Sessions              *scs.SessionManager
+	Limiter               *ratelimit.Limiter
+	UserSvc               *usersvc.Service
+	AuthSvc               *auth.Service
+	NotifPrefSvc          *notifprefsvc.Service
+	FriendSvc             *friendsvc.Service
+	ConvSvc               *convsvc.Service
+	MsgSvc                *msgsvc.Service
+	AttSvc                *attsvc.Service
+	PresenceSvc           *presencesvc.Service
+	RoomSvc               *roomsvc.Service
+	UserHandler           *httpapi.UserHandler
+	AuthHandler           *httpapi.AuthHandler
+	FriendHandler         *httpapi.FriendHandler
+	ConversationHandler   *httpapi.ConversationHandler
+	MessageHandler        *httpapi.MessageHandler
+	AttachmentHandler     *httpapi.AttachmentHandler
+	PresenceHandler       *httpapi.PresenceHandler
+	RoomHandler           *httpapi.RoomHandler
+	LiveKitWebhookHandler *httpapi.LiveKitWebhookHandler
+	WSHandler             *wshandler.Handler
 
 	// Rate-limit tier overrides. Zero values fall back to the
 	// production §8.3 defaults (10/min auth, 60/min writes, 300/min
@@ -112,7 +113,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
 		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil || d.RoomSvc == nil ||
-		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.WSHandler == nil {
+		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.LiveKitWebhookHandler == nil || d.WSHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
 
@@ -134,6 +135,14 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 	// them without state.
 	r.Get("/v1/healthz", healthz)
 	r.Get("/v1/readyz", readyz(d))
+
+	// /webhooks/livekit is also OUTSIDE auth: §10.4 specifies LiveKit
+	// fires unauthenticated POSTs that the handler verifies via the
+	// HMAC-signed Authorization header. Sticking it here also keeps it
+	// out of the §4.7 idempotency middleware (LiveKit retries are
+	// handled at the application layer via the SADD's `added > 0`
+	// guard).
+	r.Post("/webhooks/livekit", d.LiveKitWebhookHandler.Handle)
 	r.Get("/v1/openapi.json", openAPISpec)
 	r.Get("/v1/docs/*", httpswagger.Handler(
 		httpswagger.URL("/v1/openapi.json"),
