@@ -112,12 +112,18 @@ func TestWSHandler_HeartbeatIsNoOp(t *testing.T) {
 	if err := conn.Write(context.Background(), websocket.MessageText, payload); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	// Briefly verify no echo frame arrives.
+	// Briefly verify no echo frame arrives. Check ctx.Err() so we
+	// distinguish "deadline tripped (success)" from "conn died for an
+	// unrelated reason" — the latter is a real failure worth catching
+	// instead of treating any read error as a pass. (CodeRabbit PR #49.)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, frame, err := conn.Read(ctx)
 	if err == nil {
 		t.Errorf("got unexpected frame after heartbeat: %s", frame)
+	}
+	if ctx.Err() == nil {
+		t.Fatalf("read failed before deadline (conn may have closed unexpectedly): %v", err)
 	}
 }
 
@@ -261,12 +267,17 @@ func TestWSHandler_TypingRejectsNonMember(t *testing.T) {
 		t.Fatalf("stranger Write: %v", err)
 	}
 
-	// Alice must NOT receive a typing event.
+	// Alice must NOT receive a typing event. Same ctx.Err() pattern:
+	// the test passes only when the read is bounded by the deadline,
+	// not by a phantom conn-closed error. (CodeRabbit PR #49.)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, frame, err := aliceConn.Read(ctx)
 	if err == nil {
 		t.Errorf("alice received a typing event from a non-member: %s", frame)
+	}
+	if ctx.Err() == nil {
+		t.Fatalf("read failed before deadline (conn may have closed unexpectedly): %v", err)
 	}
 }
 
