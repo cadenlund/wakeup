@@ -118,11 +118,14 @@ done
 
 echo
 echo "== Pending events (not yet wired in backend services) =="
+# Use the same is_real_test gate so a stub or an unrelated test file
+# can't silently promote a pending event to "covered". (CodeRabbit
+# PR #50.)
 for event in "${PENDING_EVENTS[@]}"; do
   for subtest in "${REQUIRED_SUBTESTS[@]}"; do
-    pattern="^func Test${event}_${subtest}\b"
-    if ! grep -RE "$pattern" "$WS_DIR" >/dev/null 2>&1; then
-      printf 'pending: Test%s_%s (will be required when its service publishes)\n' "$event" "$subtest"
+    name="Test${event}_${subtest}"
+    if ! is_real_test "$name"; then
+      printf 'pending: %s (will be required when its service publishes)\n' "$name"
       warn=$((warn + 1))
     fi
   done
@@ -210,8 +213,7 @@ for sub in "${LIFECYCLE_REQUIRED[@]}"; do
   fi
 done
 for sub in "${LIFECYCLE_PENDING[@]}"; do
-  pattern="t\.Run\(\"${sub}\""
-  if ! grep -RE "$pattern" "$WS_DIR" >/dev/null 2>&1; then
+  if ! is_real_subtest "$sub"; then
     printf 'pending: TestWebSocketLifecycle/%s\n' "$sub"
     warn=$((warn + 1))
   fi
