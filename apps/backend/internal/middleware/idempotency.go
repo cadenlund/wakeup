@@ -204,10 +204,18 @@ func Idempotency(cfg IdempotencyConfig) func(http.Handler) http.Handler {
 			// Idempotent-Replay header — replay sets that itself based
 			// on whether it was a fresh hit or a cache replay.
 			snapshot := snapshotHeaders(rec.Header())
+			// bytes.Buffer.Bytes() returns nil when nothing was written;
+			// the schema's response_body is NOT NULL, so coerce empty
+			// payloads to []byte{} so handlers that produce a status-only
+			// response (e.g. 204 No Content) still cache cleanly.
+			cachedBody := rec.body.Bytes()
+			if cachedBody == nil {
+				cachedBody = []byte{}
+			}
 			if _, putErr := cfg.Store.Put(r.Context(), idemrepo.PutParams{
 				Key: key, UserID: user.ID, RequestHash: hash,
 				ResponseStatus: rec.status, ResponseHeaders: snapshot,
-				ResponseBody: rec.body.Bytes(),
+				ResponseBody: cachedBody,
 				TTL:          IdempotencyTTL,
 			}); putErr != nil {
 				if errors.Is(putErr, idemrepo.ErrConflict) {

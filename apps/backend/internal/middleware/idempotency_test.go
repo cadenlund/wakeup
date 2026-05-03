@@ -6,52 +6,65 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	idemrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/idempotency"
+	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
-// memStore is an in-memory IdempotencyStore. Lets the middleware tests
-// run without a real DB while exercising every branch of the §4.8 flow.
-type memStore struct {
-	mu      sync.Mutex
-	entries map[string]idemrepo.Entry // key=key+userID
+// idemFixture is the per-test pgtestdb-backed setup. Per CodeRabbit on
+// PR #74, the middleware tests now exercise the REAL idempotency
+// repository against a fresh per-test database, not a custom in-memory
+// double — so any divergence between the middleware's expectations and
+// the production repo (NULL handling, header round-trip, ErrConflict
+// semantics) shows up here.
+type idemFixture struct {
+	pool *pgxpool.Pool
+	repo *idemrepo.Queries
 }
 
-func newMemStore() *memStore { return &memStore{entries: make(map[string]idemrepo.Entry)} }
-
-func (m *memStore) k(key string, uid uuid.UUID) string { return key + "::" + uid.String() }
-
-func (m *memStore) Get(_ context.Context, key string, userID uuid.UUID) (idemrepo.Entry, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if e, ok := m.entries[m.k(key, userID)]; ok {
-		return e, nil
-	}
-	return idemrepo.Entry{}, idemrepo.ErrNotFound
+func newIdemFixture(t *testing.T) *idemFixture {
+	t.Helper()
+	pool := testutil.NewTestDB(t)
+	return &idemFixture{pool: pool, repo: idemrepo.New(pool)}
 }
 
-func (m *memStore) Put(_ context.Context, p idemrepo.PutParams) (idemrepo.Entry, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.entries[m.k(p.Key, p.UserID)]; ok {
-		return idemrepo.Entry{}, idemrepo.ErrConflict
+// makeIdemUser inserts a user via raw SQL so the FK from
+// idempotency_keys.user_id is satisfied. Same trick used in the repo's
+// own tests; avoids dragging in the user repository's fixtures.
+func (f *idemFixture) makeIdemUser(t *testing.T) uuid.UUID {
+	t.Helper()
+	id := uuid.Must(uuid.NewV7())
+	full := strings.ReplaceAll(id.String(), "-", "")
+	_, err := f.pool.Exec(context.Background(), `
+		INSERT INTO users (id, username, display_name, email, password_hash)
+		VALUES ($1, $2, 'T', $3, 'h')
+	`, id, "u"+full, full+"@x.test")
+	if err != nil {
+		t.Fatalf("makeIdemUser: %v", err)
 	}
-	e := idemrepo.Entry{
-		Key: p.Key, UserID: p.UserID, RequestHash: p.RequestHash,
-		ResponseStatus:  p.ResponseStatus,
-		ResponseHeaders: p.ResponseHeaders,
-		ResponseBody:    p.ResponseBody,
+	return id
+}
+
+// countEntries returns the number of live (unexpired) rows for the
+// given user — replaces the old memStore.entries length checks.
+func (f *idemFixture) countEntries(t *testing.T, userID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM idempotency_keys WHERE user_id = $1 AND expires_at > now()",
+		userID,
+	).Scan(&n); err != nil {
+		t.Fatalf("countEntries: %v", err)
 	}
-	m.entries[m.k(p.Key, p.UserID)] = e
-	return e, nil
+	return n
 }
 
 func ctxWithUser(uid uuid.UUID) context.Context {
@@ -68,15 +81,16 @@ func newIdempotencyStack(t *testing.T, store mw.IdempotencyStore, downstream htt
 
 func TestIdempotency_NoHeaderPassesThrough(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
 	called := 0
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		called++
 		w.WriteHeader(http.StatusCreated)
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader("body")).
-		WithContext(ctxWithUser(uuid.New()))
+		WithContext(ctxWithUser(uid))
 	h.ServeHTTP(rec, req)
 	if called != 1 {
 		t.Errorf("downstream calls = %d, want 1", called)
@@ -89,14 +103,15 @@ func TestIdempotency_NoHeaderPassesThrough(t *testing.T) {
 
 func TestIdempotency_NonWriteMethodPassesThrough(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
 	called := 0
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		called++
 		w.WriteHeader(http.StatusOK)
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil).WithContext(ctxWithUser(uuid.New()))
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil).WithContext(ctxWithUser(uid))
 	req.Header.Set(mw.IdempotencyKeyHeader, "anything")
 	h.ServeHTTP(rec, req)
 	if called != 1 {
@@ -106,9 +121,10 @@ func TestIdempotency_NonWriteMethodPassesThrough(t *testing.T) {
 
 func TestIdempotency_FreshRequestCachesAndStreams(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
 	called := 0
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		called++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -116,7 +132,7 @@ func TestIdempotency_FreshRequestCachesAndStreams(t *testing.T) {
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{"a":1}`)).
-		WithContext(ctxWithUser(uuid.New()))
+		WithContext(ctxWithUser(uid))
 	req.Header.Set(mw.IdempotencyKeyHeader, "key-fresh")
 	h.ServeHTTP(rec, req)
 
@@ -132,21 +148,21 @@ func TestIdempotency_FreshRequestCachesAndStreams(t *testing.T) {
 	if called != 1 {
 		t.Errorf("downstream calls = %d, want 1", called)
 	}
-	if len(store.entries) != 1 {
-		t.Errorf("expected 1 cached entry, got %d", len(store.entries))
+	if n := f.countEntries(t, uid); n != 1 {
+		t.Errorf("expected 1 cached entry, got %d", n)
 	}
 }
 
 func TestIdempotency_ReplayServesCachedResponse(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
 	called := 0
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		called++
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"first":true}`))
 	})
-	uid := uuid.New()
 	first := func() *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{"a":1}`)).
@@ -181,12 +197,12 @@ func TestIdempotency_ReplayServesCachedResponse(t *testing.T) {
 
 func TestIdempotency_KeyReusedDifferentBodyReturns422(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	})
-	uid := uuid.New()
-	// Seed the store with body A.
+	// Seed via the wire with body A.
 	rec1 := httptest.NewRecorder()
 	req1 := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{"a":1}`)).
 		WithContext(ctxWithUser(uid))
@@ -209,15 +225,15 @@ func TestIdempotency_KeyReusedDifferentBodyReturns422(t *testing.T) {
 
 func TestIdempotency_KeysScopedPerUser(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
+	f := newIdemFixture(t)
 	called := 0
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		called++
 		w.WriteHeader(http.StatusOK)
 	})
 	// Two different users using the same key string. Both must run the
 	// handler — one user's cache hit must NOT replay for the other.
-	for _, uid := range []uuid.UUID{uuid.New(), uuid.New()} {
+	for _, uid := range []uuid.UUID{f.makeIdemUser(t), f.makeIdemUser(t)} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{}`)).
 			WithContext(ctxWithUser(uid))
@@ -231,15 +247,15 @@ func TestIdempotency_KeysScopedPerUser(t *testing.T) {
 
 func TestIdempotency_5xxNotCached(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
 	called := 0
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		called++
 		// Force a 500 response.
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("transient"))
 	})
-	uid := uuid.New()
 	for i := 0; i < 2; i++ {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{}`)).
@@ -250,20 +266,24 @@ func TestIdempotency_5xxNotCached(t *testing.T) {
 	if called != 2 {
 		t.Errorf("5xx must not be cached; downstream calls = %d, want 2", called)
 	}
+	if n := f.countEntries(t, uid); n != 0 {
+		t.Errorf("5xx must not be cached; rows = %d", n)
+	}
 }
 
 func TestIdempotency_BodyTooLargeSkipsAndPassesThrough(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
 	called := 0
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		called++
 		w.WriteHeader(http.StatusCreated)
 	})
 	big := strings.Repeat("x", mw.MaxIdempotentBodyBytes+1)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(big)).
-		WithContext(ctxWithUser(uuid.New()))
+		WithContext(ctxWithUser(uid))
 	req.Header.Set(mw.IdempotencyKeyHeader, "key-big")
 	h.ServeHTTP(rec, req)
 	if rec.Header().Get(mw.IdempotentReplayHeader) != "skipped" {
@@ -273,15 +293,15 @@ func TestIdempotency_BodyTooLargeSkipsAndPassesThrough(t *testing.T) {
 	if called != 1 {
 		t.Errorf("downstream should still run on body-too-large, got %d calls", called)
 	}
-	if len(store.entries) != 0 {
-		t.Errorf("body-too-large must not be cached")
+	if n := f.countEntries(t, uid); n != 0 {
+		t.Errorf("body-too-large must not be cached; rows = %d", n)
 	}
 }
 
 func TestIdempotency_NoUserReturns401(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	f := newIdemFixture(t)
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	rec := httptest.NewRecorder()
@@ -298,14 +318,14 @@ func TestIdempotency_NoUserReturns401(t *testing.T) {
 // default Content-Type and clients would parse JSON as text/plain.
 func TestIdempotency_ReplayRestoresHeaders(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("X-Custom", "first-call")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"x":1}`))
 	})
-	uid := uuid.New()
 	first := httptest.NewRecorder()
 	req1 := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{}`)).
 		WithContext(ctxWithUser(uid))
@@ -332,18 +352,21 @@ func TestIdempotency_ReplayRestoresHeaders(t *testing.T) {
 	}
 }
 
-// Concurrent writers race: simulate two requests with the same key
-// where the *second* Put hits a PK conflict. The middleware must log
-// the race and not corrupt the in-flight response (the first request
-// already wrote one). We verify the Idempotent-Replay header on the
-// racing request stays "false" since the handler did execute.
+// Concurrent writers race: pre-seed an entry directly via the repo, then
+// let the middleware miss-Get-then-Put-conflict path execute. We assert
+// the handler still ran (as PR #74's documented limitation states) and
+// the in-flight response wasn't corrupted by the cache write failure.
 func TestIdempotency_PutConflictDoesNotFailRequest(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
-	uid := uuid.New()
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
 
-	// Pre-seed an entry so the next Put trips ErrConflict.
-	if _, err := store.Put(context.Background(), idemrepo.PutParams{
+	// Pre-seed an entry directly via the repo so the next Put trips
+	// ErrConflict — but, crucially, the middleware's Get won't see it
+	// because we wrap the repo with raceStore (returns ErrNotFound for
+	// every Get). Real-world equivalent: two requests both miss Get and
+	// race to Put.
+	if _, err := f.repo.Put(context.Background(), idemrepo.PutParams{
 		Key: "race-key", UserID: uid,
 		RequestHash:    requestHashHelper("POST", "/v1/x", []byte(`{"a":1}`)),
 		ResponseStatus: http.StatusCreated,
@@ -353,9 +376,7 @@ func TestIdempotency_PutConflictDoesNotFailRequest(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// stub Get to miss so the middleware falls into the Put path
-	// and trips ErrConflict on the way out.
-	racing := &raceStore{base: store}
+	racing := &raceStore{base: f.repo}
 	called := 0
 	h := mw.Idempotency(mw.IdempotencyConfig{
 		Store: racing, WriteError: fakeWriteError,
@@ -382,11 +403,10 @@ func TestIdempotency_PutConflictDoesNotFailRequest(t *testing.T) {
 	}
 }
 
-// raceStore returns ErrNotFound on Get even when the underlying memStore
-// has the key — simulates a race where two goroutines both miss Get
-// before either has written. Put delegates to the base so the
-// pre-seeded conflict surfaces normally.
-type raceStore struct{ base *memStore }
+// raceStore wraps a real repo: forces Get to miss so the middleware
+// always falls into the Put path. Used to deterministically exercise
+// the §4.8 race window without spinning up two goroutines.
+type raceStore struct{ base *idemrepo.Queries }
 
 func (r *raceStore) Get(_ context.Context, _ string, _ uuid.UUID) (idemrepo.Entry, error) {
 	return idemrepo.Entry{}, idemrepo.ErrNotFound
@@ -394,18 +414,6 @@ func (r *raceStore) Get(_ context.Context, _ string, _ uuid.UUID) (idemrepo.Entr
 
 func (r *raceStore) Put(ctx context.Context, p idemrepo.PutParams) (idemrepo.Entry, error) {
 	return r.base.Put(ctx, p)
-}
-
-// requestHashHelper duplicates the unexported requestHash so tests can
-// pre-seed the memStore with the exact bytes the middleware will compute.
-func requestHashHelper(method, path string, body []byte) []byte {
-	h := sha256.New()
-	h.Write([]byte(method))
-	h.Write([]byte(" "))
-	h.Write([]byte(path))
-	h.Write([]byte("\n"))
-	h.Write(body)
-	return h.Sum(nil)
 }
 
 // captureWriter must give the handler its OWN header map, not the
@@ -416,10 +424,9 @@ func requestHashHelper(method, path string, body []byte) []byte {
 // future responses with stale values. (CodeRabbit caught this on PR #74.)
 func TestIdempotency_DoesNotSnapshotUpstreamHeaders(t *testing.T) {
 	t.Parallel()
-	store := newMemStore()
-	uid := uuid.New()
-	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
-		// Handler sets ONLY this one header.
+	f := newIdemFixture(t)
+	uid := f.makeIdemUser(t)
+	h := newIdempotencyStack(t, f.repo, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Handler-Set", "yes")
 		w.WriteHeader(http.StatusCreated)
 	})
@@ -430,15 +437,18 @@ func TestIdempotency_DoesNotSnapshotUpstreamHeaders(t *testing.T) {
 		h.ServeHTTP(w, r)
 	})
 
-	// First request — caches.
 	rec1 := httptest.NewRecorder()
 	req1 := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{}`)).
 		WithContext(ctxWithUser(uid))
 	req1.Header.Set(mw.IdempotencyKeyHeader, "key-no-pollution")
 	upstream.ServeHTTP(rec1, req1)
 
-	// Cached entry must NOT contain the upstream header.
-	cached := store.entries[store.k("key-no-pollution", uid)]
+	// Cached entry — fetched via the real repo — must NOT contain the
+	// upstream header.
+	cached, err := f.repo.Get(context.Background(), "key-no-pollution", uid)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if _, leaked := cached.ResponseHeaders["X-Upstream-Set"]; leaked {
 		t.Errorf("upstream header leaked into cache: %+v", cached.ResponseHeaders)
 	}
@@ -455,4 +465,16 @@ func TestIdempotency_PanicsOnBadConfig(t *testing.T) {
 		}
 	}()
 	_ = mw.Idempotency(mw.IdempotencyConfig{WriteError: fakeWriteError})
+}
+
+// requestHashHelper duplicates the unexported requestHash so tests can
+// pre-seed the repo with the exact bytes the middleware will compute.
+func requestHashHelper(method, path string, body []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte(method))
+	h.Write([]byte(" "))
+	h.Write([]byte(path))
+	h.Write([]byte("\n"))
+	h.Write(body)
+	return h.Sum(nil)
 }
