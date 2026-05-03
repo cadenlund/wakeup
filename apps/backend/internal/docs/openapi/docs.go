@@ -15,6 +15,445 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/v1/admin/audit": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns audit_log rows newest-first, keyset-paginated. Same envelope as /v1/users.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List audit log (admin)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "example": 20,
+                        "description": "Page size (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0=\"",
+                        "description": "Opaque pagination cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AuditLogListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid limit or cursor",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin role required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/admin/impersonate/end": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Clears ` + "`" + `impersonating_user_id` + "`" + ` from the admin's session via scs.Manager.Remove and writes the audit ` + "`" + `impersonate.ended` + "`" + ` bookend. Idempotent: with no active impersonation, returns 200 with the admin's MeResponse and writes no audit row.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "End impersonation (admin)",
+                "responses": {
+                    "200": {
+                        "description": "Admin's own MeResponse",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.MeResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin role required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/admin/users": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Paginated trigram-prefix search across active (non soft-deleted) users. Soft-deleted users can be retrieved individually via GET /v1/admin/users/{id}. Same cursor envelope as the public /v1/users endpoint.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List users (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"caden\"",
+                        "description": "Search prefix",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "example": 20,
+                        "description": "Page size (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0=\"",
+                        "description": "Opaque pagination cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AdminUserListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid limit or cursor",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin role required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/admin/users/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns the full row for the given user, including soft-deleted users (their ` + "`" + `deleted_at` + "`" + ` will be non-null). Use this when an admin needs to inspect a deleted account.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get user by id (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "User id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AdminUserResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin role required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Patches ` + "`" + `role` + "`" + ` (promote/demote) and/or ` + "`" + `deleted_at` + "`" + ` (set to now() to soft-delete). Both fields optional and may appear in the same call. Restoring a soft-deleted user (sending ` + "`" + `deleted_at: null` + "`" + `) is intentionally NOT supported here yet — it returns 422.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update user (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "User id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Patch fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.UpdateAdminUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AdminUserResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON or id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin role required",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/admin/users/{id}/impersonate": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Per §8.7: validates the restriction matrix, writes the audit ` + "`" + `impersonate.started` + "`" + ` bookend, and stores ` + "`" + `impersonating_user_id` + "`" + ` on the admin's existing session via scs.Manager.Put. Subsequent requests resolve ` + "`" + `ctx.User` + "`" + ` to the target via the auth middleware. Returns the target's MeResponse with ` + "`" + `impersonated_by` + "`" + ` set.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Start impersonating a user (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Target user id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Target's MeResponse with impersonated_by set",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.MeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin role required, or target is admin",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Target not found or soft-deleted",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Cannot impersonate yourself",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/attachments": {
             "post": {
                 "security": [
@@ -3573,6 +4012,62 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.AdminUserListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.AdminUserResponse"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "next_cursor": {
+                    "type": "string",
+                    "example": "eyJ0cyI6Ii4uLiJ9"
+                }
+            }
+        },
+        "internal_handler_http.AdminUserResponse": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string",
+                    "example": "https://wakeup.app/avatars/caden.png"
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
+                },
+                "deleted_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
+                },
+                "display_name": {
+                    "type": "string",
+                    "example": "Caden Lund"
+                },
+                "email": {
+                    "type": "string",
+                    "example": "caden@example.com"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "role": {
+                    "type": "string",
+                    "example": "user"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "caden"
+                }
+            }
+        },
         "internal_handler_http.AttachmentResponse": {
             "type": "object",
             "properties": {
@@ -3599,6 +4094,57 @@ const docTemplate = `{
                 "url": {
                     "type": "string",
                     "example": "https://wakeup-prod-media.s3.amazonaws.com/attachments/0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c?X-Amz-..."
+                }
+            }
+        },
+        "internal_handler_http.AuditLogListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.AuditLogResponse"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "next_cursor": {
+                    "type": "string",
+                    "example": "eyJ0cyI6Ii4uLiJ9"
+                }
+            }
+        },
+        "internal_handler_http.AuditLogResponse": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "example": "user.update_role"
+                },
+                "actor_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "metadata": {
+                    "type": "object"
+                },
+                "target_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "target_type": {
+                    "type": "string",
+                    "example": "user"
                 }
             }
         },
@@ -4319,6 +4865,23 @@ const docTemplate = `{
                         "sleeping"
                     ],
                     "example": "sleeping"
+                }
+            }
+        },
+        "internal_handler_http.UpdateAdminUserRequest": {
+            "type": "object",
+            "properties": {
+                "deleted_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "admin"
+                    ],
+                    "example": "admin"
                 }
             }
         },

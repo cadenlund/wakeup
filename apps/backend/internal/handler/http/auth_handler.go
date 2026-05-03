@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 
+	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 )
 
@@ -79,7 +80,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusCreated, RegisterResponse{User: toMeResponse(created)})
+	WriteJSON(w, http.StatusCreated, RegisterResponse{User: toMeResponse(created, nil)})
 }
 
 // Login validates credentials and binds the session cookie.
@@ -113,7 +114,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, LoginResponse{User: toMeResponse(u)})
+	WriteJSON(w, http.StatusOK, LoginResponse{User: toMeResponse(u, nil)})
 }
 
 // Logout destroys the current session. Idempotent — missing session is
@@ -185,12 +186,22 @@ func (h *AuthHandler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 // @Failure      500  {object} ErrorResponse "Internal error"
 // @Router       /v1/auth/me [get]
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
+	// Prefer the middleware-loaded users so the §8.7 impersonation
+	// overlay surfaces here too: ctx.User is the *effective* user
+	// (the impersonated target during impersonation), ctx.RealUser is
+	// the session owner. Falls back to auth.Me only if the middleware
+	// chain hasn't run for some reason — the production router always
+	// wires LoadUser upstream.
+	if eff := mw.UserFromContext(r.Context()); eff != nil {
+		WriteJSON(w, http.StatusOK, toMeResponse(*eff, mw.RealUserFromContext(r.Context())))
+		return
+	}
 	u, err := h.svc.Me(r.Context())
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toMeResponse(u))
+	WriteJSON(w, http.StatusOK, toMeResponse(u, nil))
 }
 
 // RequestPasswordReset emails a reset link if the email belongs to a

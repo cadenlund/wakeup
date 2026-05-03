@@ -192,7 +192,7 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toMeResponse(updated))
+	WriteJSON(w, http.StatusOK, toMeResponse(updated, nil))
 }
 
 // DeleteMe soft-deletes the authenticated user. Per §4.6 their content
@@ -279,7 +279,7 @@ func (h *UserHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, AvatarUploadResponse{User: toMeResponse(updated)})
+	WriteJSON(w, http.StatusOK, AvatarUploadResponse{User: toMeResponse(updated, nil)})
 }
 
 // GetNotifications returns the authenticated user's notification toggles.

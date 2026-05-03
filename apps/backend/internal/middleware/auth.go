@@ -161,16 +161,20 @@ func RequireAuth(writeError errorWriter) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireAdmin requires the request user (effective, not real) to have
-// role=admin. Returns 401 when no user is loaded and 403 when the
-// loaded user is non-admin.
+// RequireAdmin requires the SESSION OWNER (ctx.RealUser) to have
+// role=admin — admin authority is a property of the real session, not
+// of the effective user. During §8.7 impersonation the effective user
+// is the target (typically a non-admin), but the admin must still be
+// able to navigate /v1/admin/* (including ending the impersonation).
+// Returns 401 when no user is loaded and 403 when the real user is
+// non-admin.
 func RequireAdmin(writeError errorWriter) func(http.Handler) http.Handler {
 	if writeError == nil {
 		panic("middleware.RequireAdmin: nil writeError")
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			u := UserFromContext(r.Context())
+			u := RealUserFromContext(r.Context())
 			if u == nil {
 				writeError(w, r, apierror.Unauthorized("not authenticated"))
 				return

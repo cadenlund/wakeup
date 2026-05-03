@@ -32,9 +32,11 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
 	wshandler "github.com/cadenlund/wakeup/apps/backend/internal/handler/ws"
+	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	attrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/attachment"
+	auditrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/audit"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	devicerepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/devicetoken"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
@@ -43,6 +45,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	presrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/presence"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	adminsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
@@ -109,6 +112,8 @@ type Harness struct {
 	PresenceSvc     *presencesvc.Service
 	RoomSvc         *roomsvc.Service
 	DeviceSvc       *devicesvc.Service
+	AdminSvc        *adminsvc.Service
+	AuditRepo       *auditrepo.Queries
 	Broker          pubsub.Broker
 
 	// WS plumbing surfaced for handler-level tests that want to assert
@@ -154,6 +159,7 @@ func New(t *testing.T) *Harness {
 	atts := attrepo.New(pool)
 	presences := presrepo.New(pool)
 	devices := devicerepo.New(pool)
+	audits := auditrepo.New(pool)
 	sm := session.New(pool)
 
 	broker := pubsub.NewInProc(pubsub.NewRegistry())
@@ -204,6 +210,10 @@ func New(t *testing.T) *Harness {
 	deviceSvc, err := devicesvc.New(devicesvc.Config{Devices: devices})
 	if err != nil {
 		t.Fatalf("Harness: build device service: %v", err)
+	}
+	adminSvc, err := adminsvc.New(adminsvc.Config{Pool: pool, Users: users, Audit: audits})
+	if err != nil {
+		t.Fatalf("Harness: build admin service: %v", err)
 	}
 	notificationSvc, err := notifsvc.New(notifsvc.Config{
 		Prefs: notifSvc, Devices: devices, Pusher: pusher,
@@ -287,6 +297,10 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build device handler: %v", err)
 	}
+	adminHandler, err := httpapi.NewAdminHandler(adminSvc, authSvc, sm, v)
+	if err != nil {
+		t.Fatalf("Harness: build admin handler: %v", err)
+	}
 
 	// §8 WebSocket: build hub + bridge + upgrade handler so harness
 	// users can dial /v1/ws like any other route. The bridge owns one
@@ -308,6 +322,11 @@ func New(t *testing.T) *Harness {
 
 	router := chi.NewRouter()
 	router.Use(requestIDMiddleware) // §4.7 entry — full chain lands in 3.8.
+	// LoadUser populates ctx.User / ctx.RealUser from the session, which
+	// the §12.5 admin handlers and §8.7 impersonation guard read. Mounted
+	// here (under sm.LoadAndSave) so harness-driven tests see the same
+	// context shape that the production router sets up.
+	router.Use(mw.LoadUser(sm, userSvc, httpapi.WriteError))
 	authHandler.Mount(router)
 	userHandler.Mount(router)
 	friendHandler.Mount(router)
@@ -317,6 +336,13 @@ func New(t *testing.T) *Harness {
 	presenceHandler.Mount(router)
 	roomHandler.Mount(router)
 	deviceHandler.Mount(router)
+	// Admin routes are gated by RequireAdmin so non-admin sessions hit
+	// 403 just like in production. Mount the handler under a sub-router
+	// that wraps every /v1/admin/* path.
+	router.Group(func(r chi.Router) {
+		r.Use(mw.RequireAdmin(httpapi.WriteError))
+		adminHandler.Mount(r)
+	})
 	wsHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
@@ -358,6 +384,8 @@ func New(t *testing.T) *Harness {
 		PresenceSvc:     presenceSvc,
 		RoomSvc:         roomSvc,
 		DeviceSvc:       deviceSvc,
+		AdminSvc:        adminSvc,
+		AuditRepo:       audits,
 		Broker:          broker,
 		WSHub:           wsHub,
 		WSBridge:        wsBridge,

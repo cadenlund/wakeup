@@ -21,6 +21,7 @@ import (
 	wshandler "github.com/cadenlund/wakeup/apps/backend/internal/handler/ws"
 	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
+	adminsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
@@ -59,6 +60,7 @@ type routerDeps struct {
 	PresenceSvc           *presencesvc.Service
 	RoomSvc               *roomsvc.Service
 	DeviceSvc             *devicesvc.Service
+	AdminSvc              *adminsvc.Service
 	UserHandler           *httpapi.UserHandler
 	AuthHandler           *httpapi.AuthHandler
 	FriendHandler         *httpapi.FriendHandler
@@ -68,6 +70,7 @@ type routerDeps struct {
 	PresenceHandler       *httpapi.PresenceHandler
 	RoomHandler           *httpapi.RoomHandler
 	DeviceHandler         *httpapi.DeviceHandler
+	AdminHandler          *httpapi.AdminHandler
 	LiveKitWebhookHandler *httpapi.LiveKitWebhookHandler
 	WSHandler             *wshandler.Handler
 
@@ -115,8 +118,8 @@ func resolveTier(override, fallback rateLimitTier) rateLimitTier {
 func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
-		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil || d.RoomSvc == nil || d.DeviceSvc == nil ||
-		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.DeviceHandler == nil || d.LiveKitWebhookHandler == nil || d.WSHandler == nil {
+		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil || d.RoomSvc == nil || d.DeviceSvc == nil || d.AdminSvc == nil ||
+		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.DeviceHandler == nil || d.AdminHandler == nil || d.LiveKitWebhookHandler == nil || d.WSHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
 
@@ -227,6 +230,16 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Post("/v1/conversations/{id}/room/leave", d.RoomHandler.Leave)
 				r.Post("/v1/devices", d.DeviceHandler.Register)
 				r.Delete("/v1/devices/{id}", d.DeviceHandler.Delete)
+
+				// §12.5 admin write endpoints. RequireAdmin sits inside
+				// the writes-tier rate-limit group so admins still pay
+				// the per-IP write budget like everyone else.
+				r.Group(func(r chi.Router) {
+					r.Use(mw.RequireAdmin(httpapi.WriteError))
+					r.Patch("/v1/admin/users/{id}", d.AdminHandler.UpdateUser)
+					r.Post("/v1/admin/users/{id}/impersonate", d.AdminHandler.StartImpersonation)
+					r.Post("/v1/admin/impersonate/end", d.AdminHandler.EndImpersonation)
+				})
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RateLimit(mw.RateLimitConfig{
@@ -249,6 +262,13 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Get("/v1/widget/friends", d.PresenceHandler.WidgetFriends)
 				r.Get("/v1/conversations/{id}/room", d.RoomHandler.Get)
 				r.Get("/v1/ws", d.WSHandler.Upgrade)
+				// §12.5 admin read endpoints — RequireAdmin gate.
+				r.Group(func(r chi.Router) {
+					r.Use(mw.RequireAdmin(httpapi.WriteError))
+					r.Get("/v1/admin/users", d.AdminHandler.ListUsers)
+					r.Get("/v1/admin/users/{id}", d.AdminHandler.GetUser)
+					r.Get("/v1/admin/audit", d.AdminHandler.ListAudit)
+				})
 			})
 		})
 	})
