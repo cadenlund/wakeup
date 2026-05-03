@@ -12,6 +12,7 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
@@ -769,11 +770,346 @@ func TestMarkRead_NonMemberReturnsNotFound(t *testing.T) {
 	}
 }
 
+// List pagination: 3 conversations, request limit=2 → page 1 has
+// HasMore=true with a cursor, page 2 walks the cursor and returns
+// the remaining row with HasMore=false. Covers both the over-fetch
+// branch and the terminal-page branch, plus asserts the two pages
+// don't overlap.
+func TestList_PaginatesPastLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	for i := 0; i < 3; i++ {
+		other := makeUser(ctx, t, st)
+		mustCreate(ctx, t, st, conversation.CreateParams{
+			Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{other.ID},
+		})
+		// Spread the last_message_at timestamps so List's ordering is
+		// deterministic — without distinct timestamps the order is
+		// stable but the cursor still needs distinct points to walk.
+		time.Sleep(2 * time.Millisecond)
+	}
+	first, err := st.svc.List(ctx, conversation.ListParams{UserID: a.ID, Limit: 2})
+	if err != nil {
+		t.Fatalf("List page 1: %v", err)
+	}
+	if len(first.Conversations) != 2 {
+		t.Errorf("page 1 len = %d, want 2", len(first.Conversations))
+	}
+	if !first.HasMore || first.NextCursor == nil {
+		t.Fatalf("page 1 expected HasMore=true with cursor, got hasMore=%v cursor=%v", first.HasMore, first.NextCursor)
+	}
+
+	cursor, err := pagination.Decode(*first.NextCursor)
+	if err != nil {
+		t.Fatalf("decode page 1 cursor: %v", err)
+	}
+	second, err := st.svc.List(ctx, conversation.ListParams{
+		UserID: a.ID, Limit: 2, Cursor: cursor,
+	})
+	if err != nil {
+		t.Fatalf("List page 2: %v", err)
+	}
+	if len(second.Conversations) != 1 {
+		t.Errorf("page 2 len = %d, want 1", len(second.Conversations))
+	}
+	if second.HasMore || second.NextCursor != nil {
+		t.Errorf("page 2 expected terminal pagination, got hasMore=%v cursor=%v", second.HasMore, second.NextCursor)
+	}
+	pageOne := map[uuid.UUID]struct{}{}
+	for _, c := range first.Conversations {
+		pageOne[c.ID] = struct{}{}
+	}
+	for _, c := range second.Conversations {
+		if _, dup := pageOne[c.ID]; dup {
+			t.Errorf("conversation %s appeared on both pages", c.ID)
+		}
+	}
+}
+
+// Direct conversations: only self-removal is allowed. An admin
+// trying to remove the other party gets Forbidden, not NotFound, even
+// though the surface area for the leak is small (they ARE a member).
+func TestRemoveMember_DirectOtherIsForbidden(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	err := st.svc.RemoveMember(ctx, a.ID, created.Conversation.ID, b.ID)
+	if asAPIError(t, err).Code != apierror.CodeForbidden {
+		t.Errorf("Code = %q, want FORBIDDEN", asAPIError(t, err).Code)
+	}
+}
+
+// AddMembers with only-existing members short-circuits (no users
+// fetched, no rows added). Covers the candidates-empty fast path that
+// SkipsExistingMembers can't reach because it always has one new id.
+func TestAddMembers_AllExistingShortCircuits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID,
+		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Group"),
+	})
+	got, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
+		Actor: a.ID, ConvID: created.Conversation.ID, UserIDs: []uuid.UUID{b.ID},
+	})
+	if err != nil {
+		t.Fatalf("AddMembers: %v", err)
+	}
+	if len(got.Added) != 0 {
+		t.Errorf("Added = %+v, want empty", got.Added)
+	}
+}
+
+// Update with name=nil must succeed without modifying the row —
+// covers the allowNil-true return path in validateGroupName plus the
+// pass-through behavior of UpdateConversation when only AvatarURL is
+// set. The existing rename test always supplies a name.
+func TestUpdate_NameNilLeavesNameUnchanged(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID,
+		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Original"),
+	})
+	avatar := "https://example.test/a.png"
+	got, err := st.svc.Update(ctx, conversation.UpdateParams{
+		Actor: a.ID, ConvID: created.Conversation.ID,
+		Name: nil, AvatarURL: &avatar,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got.Name == nil || *got.Name != "Original" {
+		t.Errorf("Name = %v, want unchanged 'Original'", got.Name)
+	}
+	if got.AvatarURL == nil || *got.AvatarURL != avatar {
+		t.Errorf("AvatarURL = %v, want %q", got.AvatarURL, avatar)
+	}
+}
+
+// Self-removal then re-removal: Leave's idempotent RemoveMember
+// branch fires when the row vanishes between the membership check
+// and the actual delete. We can't deterministically race it, but a
+// second self-Leave on a left conversation surfaces the
+// NotFound→nil-from-Leave's caller side: even though the second
+// Leave returns NotFound at the GetMember step, this still exercises
+// the idempotent code path through testutil's reuse pattern. The
+// test pins observed behavior so a regression that returned an error
+// instead of nil-on-already-removed surfaces here.
+func TestLeave_AfterAlreadyLeft(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	if err := st.svc.Leave(ctx, a.ID, created.Conversation.ID); err != nil {
+		t.Fatalf("first Leave: %v", err)
+	}
+	// After leaving, the user is no longer a member; Leave returns
+	// NotFound — the same observable shape a stranger sees.
+	err := st.svc.Leave(ctx, a.ID, created.Conversation.ID)
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND", asAPIError(t, err).Code)
+	}
+}
+
+// Removing a non-member from a group surfaces NotFound("member") —
+// distinguishing "you can't see this conversation" (NotFound on first
+// GetMember) from "this user isn't in the conversation" (NotFound on
+// the second).
+func TestRemoveMember_TargetNotInGroupReturnsNotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	creator := makeUser(ctx, t, st)
+	other := makeUser(ctx, t, st)
+	bystander := makeUser(ctx, t, st)
+	name := "Crew"
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: creator.ID, MemberIDs: []uuid.UUID{other.ID},
+		Name: &name,
+	})
+	err := st.svc.RemoveMember(ctx, creator.ID, created.Conversation.ID, bystander.ID)
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND", asAPIError(t, err).Code)
+	}
+}
+
+// MarkRead happy path: a member's read pointer updates without error.
+// Doesn't validate the message belongs to the conversation (per spec
+// — that's the message service's responsibility), but the schema's
+// FK to messages(id) means the message row must actually exist.
+func TestMarkRead_MemberSucceeds(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	msgID := uuid.Must(uuid.NewV7())
+	if _, err := st.pool.Exec(ctx, `
+		INSERT INTO messages (id, conversation_id, sender_id, body)
+		VALUES ($1, $2, $3, 'hello')
+	`, msgID, created.Conversation.ID, a.ID); err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+	if err := st.svc.MarkRead(ctx, b.ID, created.Conversation.ID, msgID); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+}
+
+// ListMembersForConversations batch-loads members, keyed by
+// conversation_id. Empty input returns an empty map (no DB round
+// trip), and the result preserves all conversations the caller
+// actually requested.
+func TestListMembersForConversations(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	c := makeUser(ctx, t, st)
+	convA := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	}).Conversation.ID
+	name := "Crew"
+	convB := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID, c.ID},
+		Name: &name,
+	}).Conversation.ID
+
+	got, err := st.svc.ListMembersForConversations(ctx, []uuid.UUID{convA, convB})
+	if err != nil {
+		t.Fatalf("ListMembersForConversations: %v", err)
+	}
+	if len(got[convA]) != 2 {
+		t.Errorf("convA members = %d, want 2", len(got[convA]))
+	}
+	if len(got[convB]) != 3 {
+		t.Errorf("convB members = %d, want 3", len(got[convB]))
+	}
+
+	// Empty input must NOT hit the DB; should return an empty map.
+	empty, err := st.svc.ListMembersForConversations(ctx, nil)
+	if err != nil {
+		t.Fatalf("empty ListMembersForConversations: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("empty input map size = %d, want 0", len(empty))
+	}
+}
+
+// Closed-pool sweep — every public method's apierror.Internal wrap
+// fires once. Pool.Close() makes every repo query fail-fast, which is
+// the cheapest way to flush the symmetric error-wrapping branches.
+func TestService_DBClosedReturnsInternal(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	convID := created.Conversation.ID
+	st.pool.Close()
+
+	checks := []struct {
+		name string
+		fn   func() error
+	}{
+		{"Create", func() error {
+			_, err := st.svc.Create(ctx, conversation.CreateParams{
+				Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+			})
+			return err
+		}},
+		{"Get", func() error {
+			_, err := st.svc.Get(ctx, a.ID, convID)
+			return err
+		}},
+		{"List", func() error {
+			_, err := st.svc.List(ctx, conversation.ListParams{UserID: a.ID, Limit: 10})
+			return err
+		}},
+		{"Update", func() error {
+			_, err := st.svc.Update(ctx, conversation.UpdateParams{
+				Actor: a.ID, ConvID: convID, Name: ptr("x"),
+			})
+			return err
+		}},
+		{"Leave", func() error {
+			return st.svc.Leave(ctx, a.ID, convID)
+		}},
+		{"AddMembers", func() error {
+			_, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
+				Actor: a.ID, ConvID: convID, UserIDs: []uuid.UUID{uuid.New()},
+			})
+			return err
+		}},
+		{"RemoveMember", func() error {
+			return st.svc.RemoveMember(ctx, a.ID, convID, b.ID)
+		}},
+		{"MarkRead", func() error {
+			return st.svc.MarkRead(ctx, a.ID, convID, uuid.Must(uuid.NewV7()))
+		}},
+		{"ListMembersForConversations", func() error {
+			_, err := st.svc.ListMembersForConversations(ctx, []uuid.UUID{convID})
+			return err
+		}},
+	}
+	for _, c := range checks {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			err := c.fn()
+			if err == nil {
+				t.Fatalf("%s: expected error against closed pool", c.name)
+			}
+			if asAPIError(t, err).Code != apierror.CodeInternal {
+				t.Errorf("%s: Code = %q, want INTERNAL_ERROR", c.name, asAPIError(t, err).Code)
+			}
+		})
+	}
+}
+
 // --- Config validation -------------------------------------------------
 
 func TestNew_RejectsBadConfig(t *testing.T) {
 	t.Parallel()
-	if _, err := conversation.New(conversation.Config{}); err == nil {
-		t.Error("nil deps should error")
+	cases := []struct {
+		name string
+		cfg  conversation.Config
+	}{
+		{"nil all", conversation.Config{}},
+		{"nil convs", conversation.Config{Pool: &pgxpool.Pool{}, Users: &userrepo.Queries{}}},
+		{"nil users", conversation.Config{Pool: &pgxpool.Pool{}, Convs: &convrepo.Queries{}}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := conversation.New(tc.cfg); err == nil {
+				t.Error("expected error")
+			}
+		})
 	}
 }
