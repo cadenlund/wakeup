@@ -462,8 +462,16 @@ func (h *Harness) WSDial(t *testing.T, c *http.Client) *coderws.Conn {
 	wsURL := "ws" + strings.TrimPrefix(h.Server.URL, "http") + "/v1/ws"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	tr, _ := c.Transport.(*http.Transport)
-	dialClient := &http.Client{Transport: tr, Jar: c.Jar}
+	// Preserve whatever http.RoundTripper the caller's client uses
+	// (the harness's TLS-trusting transport in practice, but a future
+	// caller could wrap it with logging / instrumentation). Earlier
+	// code narrowed to *http.Transport via type-assert and silently
+	// dropped any custom transport. (CodeRabbit PR #50.)
+	transport := c.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	dialClient := &http.Client{Transport: transport, Jar: c.Jar}
 	conn, resp, err := coderws.Dial(ctx, wsURL, &coderws.DialOptions{
 		HTTPClient: dialClient,
 	})

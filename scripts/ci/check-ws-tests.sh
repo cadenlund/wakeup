@@ -65,14 +65,49 @@ fail=0
 warn=0
 
 # Each (event, subtest) pair is a top-level Go test name like
-# `TestMessageNew_FiresForRecipients`. Grep for it across the WS
-# package's test files.
+# `TestMessageNew_FiresForRecipients`. Grep for the func declaration
+# AND check the body isn't just t.Skip — a stub doesn't satisfy the
+# §12.7 matrix even if it grep-matches. (CodeRabbit PR #50.)
+#
+# is_real_test name → 0 if a real (non-skipped) func exists in WS_DIR.
+is_real_test() {
+  local name="$1"
+  awk -v name="$name" '
+    BEGIN { in_func = 0; depth = 0; skipped = 0; saw = 0 }
+    {
+      if (!in_func) {
+        if ($0 ~ "^func " name "\\(") {
+          in_func = 1
+          saw = 1
+          # Count braces on the func line itself (rare but possible).
+          opens = gsub(/\{/, "{")
+          closes = gsub(/\}/, "}")
+          depth = opens - closes
+          next
+        }
+      } else {
+        opens = gsub(/\{/, "{")
+        closes = gsub(/\}/, "}")
+        depth += opens - closes
+        if ($0 ~ /t\.Skip\(/) skipped = 1
+        if (depth <= 0) {
+          if (saw && !skipped) { found = 1; exit }
+          in_func = 0
+          saw = 0
+          skipped = 0
+        }
+      }
+    }
+    END { exit found ? 0 : 1 }
+  ' "$WS_DIR"/*.go
+}
+
 echo "== §12.7 WebSocket test matrix coverage =="
 for event in "${REQUIRED_EVENTS[@]}"; do
   for subtest in "${REQUIRED_SUBTESTS[@]}"; do
-    pattern="^func Test${event}_${subtest}\b"
-    if ! grep -RE "$pattern" "$WS_DIR" >/dev/null 2>&1; then
-      printf 'MISSING (required): Test%s_%s\n' "$event" "$subtest"
+    name="Test${event}_${subtest}"
+    if ! is_real_test "$name"; then
+      printf 'MISSING (required): %s\n' "$name"
       fail=$((fail + 1))
     fi
   done
@@ -111,9 +146,41 @@ LIFECYCLE_PENDING=(
   "disconnect_publishes_presence_change"  # Phase 9
   "slow_consumer_kicked"        # covered by hub_test, listed for completeness
 )
+# Same is-real check for lifecycle t.Run subtests: a stub that calls
+# t.Skip immediately doesn't earn a "covered" tick.
+is_real_subtest() {
+  local name="$1"
+  awk -v name="$name" '
+    BEGIN { in_sub = 0; depth = 0; skipped = 0; saw = 0 }
+    {
+      if (!in_sub) {
+        # Match: t.Run("upgrade_no_cookie", func(...) {
+        if ($0 ~ "t\\.Run\\(\"" name "\"") {
+          in_sub = 1
+          saw = 1
+          opens = gsub(/\{/, "{")
+          closes = gsub(/\}/, "}")
+          depth = opens - closes
+          next
+        }
+      } else {
+        opens = gsub(/\{/, "{")
+        closes = gsub(/\}/, "}")
+        depth += opens - closes
+        if ($0 ~ /t\.Skip\(/) skipped = 1
+        if (depth <= 0) {
+          if (saw && !skipped) { found = 1; exit }
+          in_sub = 0
+          saw = 0
+          skipped = 0
+        }
+      }
+    }
+    END { exit found ? 0 : 1 }
+  ' "$WS_DIR"/*.go
+}
 for sub in "${LIFECYCLE_REQUIRED[@]}"; do
-  pattern="t\.Run\(\"${sub}\""
-  if ! grep -RE "$pattern" "$WS_DIR" >/dev/null 2>&1; then
+  if ! is_real_subtest "$sub"; then
     printf 'MISSING (required): TestWebSocketLifecycle/%s\n' "$sub"
     fail=$((fail + 1))
   fi
