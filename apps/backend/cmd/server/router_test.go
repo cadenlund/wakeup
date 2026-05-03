@@ -327,9 +327,17 @@ func TestRouter_AdminSmoke(t *testing.T) {
 	// promoted). Look up the row by username so we don't depend on
 	// register's response shape here.
 	ctx := context.Background()
-	if _, err := h.DB.Exec(ctx,
-		"UPDATE users SET role = 'admin' WHERE username = 'smokeadmin'"); err != nil {
+	tag, err := h.DB.Exec(ctx,
+		"UPDATE users SET role = 'admin' WHERE username = 'smokeadmin'")
+	if err != nil {
 		t.Fatalf("promote admin: %v", err)
+	}
+	// Exactly one row should be affected — the smokeadmin user we just
+	// registered. A 0 means the username didn't match (test setup bug);
+	// a >1 means a leak from a parallel test (impossible in pgtestdb,
+	// but cheap to guard).
+	if got := tag.RowsAffected(); got != 1 {
+		t.Fatalf("promote admin: expected 1 row affected, got %d", got)
 	}
 	adminUser, err := h.UserRepo.GetByEmail(ctx, "smokeadmin@x.test")
 	if err != nil {
@@ -396,7 +404,10 @@ func TestRouter_AdminSmoke(t *testing.T) {
 
 	// 7. §12.4 dangerous-route guard. Each of these must surface
 	// 403 BLOCKED_DURING_IMPERSONATION while the admin is impersonating.
-	for _, route := range []struct {
+	// Inline loop (not subtests): all four assertions share the cookie
+	// jar's mid-flow impersonation state, and t.Run wouldn't add value
+	// since they aren't parallelisable here anyway.
+	guardCases := []struct {
 		name   string
 		method string
 		path   string
@@ -414,28 +425,28 @@ func TestRouter_AdminSmoke(t *testing.T) {
 			http.MethodPost, "/v1/auth/password-reset/request",
 			`{"email":"smoketarget@x.test"}`,
 		},
-	} {
-		route := route
-		t.Run("blocked-"+route.name, func(t *testing.T) {
-			req, _ := http.NewRequest(route.method, srv.URL+route.path, strings.NewReader(route.body))
-			if route.body != "" {
-				req.Header.Set("Content-Type", "application/json")
-			}
-			resp, err := c.Do(req)
-			if err != nil {
-				t.Fatalf("%s: %v", route.name, err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != http.StatusForbidden {
-				body, _ := io.ReadAll(resp.Body)
-				t.Fatalf("%s status=%d body=%s, want 403", route.name, resp.StatusCode, body)
-			}
-			body, _ := io.ReadAll(resp.Body)
-			if !strings.Contains(string(body), "BLOCKED_DURING_IMPERSONATION") {
-				t.Errorf("%s body should contain BLOCKED_DURING_IMPERSONATION code: %s",
-					route.name, body)
-			}
-		})
+	}
+	for _, route := range guardCases {
+		req, err := http.NewRequest(route.method, srv.URL+route.path, strings.NewReader(route.body))
+		if err != nil {
+			t.Fatalf("%s: build request: %v", route.name, err)
+		}
+		if route.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", route.name, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s status=%d body=%s, want 403", route.name, resp.StatusCode, body)
+		}
+		if !strings.Contains(string(body), "BLOCKED_DURING_IMPERSONATION") {
+			t.Errorf("%s body should contain BLOCKED_DURING_IMPERSONATION code: %s",
+				route.name, body)
+		}
 	}
 
 	// 8. End impersonation.
@@ -530,7 +541,14 @@ func smokeLogout(t *testing.T, c *http.Client, baseURL string) {
 	if err != nil {
 		t.Fatalf("logout: %v", err)
 	}
-	_ = resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
+	// Logout is idempotent and always 204. A non-2xx here means the
+	// session jar is in an unexpected state and the rest of the smoke
+	// flow would run against the wrong session — fail immediately.
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("logout status=%d body=%s", resp.StatusCode, body)
+	}
 }
 
 func decodeMap(t *testing.T, r io.Reader) map[string]any {
