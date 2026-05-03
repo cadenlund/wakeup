@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 )
 
 // In-memory fakes used by Harness in handler/service tests. Their method
@@ -63,14 +65,14 @@ type FakePush struct {
 	At     time.Time
 }
 
-// Notification mirrors §10.2's pushnotif.Notification shape so callers can
-// pass the same struct shape they'd pass in production. When the production
-// pushnotif.Notification lands, this type can be aliased.
-type Notification struct {
-	Title string
-	Body  string
-	Data  map[string]any
-}
+// Notification is a type alias for pushnotif.Notification so FakePusher.Send
+// satisfies pushnotif.Pusher structurally — production services depending on
+// the Pusher interface can use *FakePusher in tests without an adapter.
+type Notification = pushnotif.Notification
+
+// Compile-time guard: callers can pass *FakePusher anywhere pushnotif.Pusher
+// is required.
+var _ pushnotif.Pusher = (*FakePusher)(nil)
 
 // Send records the call. Always returns nil. Tokens and Data are deep-copied
 // so caller-side mutations after Send returns can't corrupt recorded pushes.
