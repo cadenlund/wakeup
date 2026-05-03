@@ -221,6 +221,18 @@ func TestShouldNotify_DefaultsAllTrueForFreshUser(t *testing.T) {
 			t.Errorf("category %q: expected true (default), got false", cat)
 		}
 	}
+
+	// And critically, the read path should NOT have auto-created a row —
+	// the gate is read-only so notification triggers don't pile up writes.
+	var count int
+	if err := st.pool.QueryRow(ctx,
+		"SELECT count(*) FROM notification_preferences WHERE user_id = $1", uid,
+	).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("ShouldNotify should be read-only; found %d row(s)", count)
+	}
 }
 
 func TestShouldNotify_RespectsPatchedToggle(t *testing.T) {

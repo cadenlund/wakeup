@@ -50,6 +50,11 @@ VALUES ($1)
 ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
 RETURNING user_id, direct_messages, group_messages, friend_requests, calls, updated_at`
 
+const getSQL = `-- name: Get :one
+SELECT user_id, direct_messages, group_messages, friend_requests, calls, updated_at
+FROM notification_preferences
+WHERE user_id = $1`
+
 const patchSQL = `-- name: Patch :one
 UPDATE notification_preferences
 SET direct_messages = COALESCE($2, direct_messages),
@@ -72,6 +77,20 @@ func scanRow(row pgx.Row) (domain.NotificationPreference, error) {
 		&p.UpdatedAt,
 	)
 	return p, err
+}
+
+// Get returns the user's preference row if it exists, or ErrNotFound
+// if the user has never touched their preferences. The §11 ShouldNotify
+// gate uses this to avoid forcing a write on every notification trigger.
+func (q *Queries) Get(ctx context.Context, userID uuid.UUID) (domain.NotificationPreference, error) {
+	pref, err := scanRow(q.db.QueryRow(ctx, getSQL, userID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.NotificationPreference{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.NotificationPreference{}, fmt.Errorf("notificationpref: get: %w", err)
+	}
+	return pref, nil
 }
 
 // GetOrCreate returns the user's preference row, inserting one with

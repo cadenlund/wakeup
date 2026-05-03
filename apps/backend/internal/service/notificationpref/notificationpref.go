@@ -17,6 +17,7 @@ package notificationpref
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/google/uuid"
 
@@ -80,17 +81,17 @@ func (s *Service) GetForUser(ctx context.Context, userID uuid.UUID) (domain.Noti
 
 // ShouldNotify returns whether the user has the given category enabled.
 // Defaults to true (notify) when:
-//   - the user has no preferences row yet (schema defaults are all true)
-//   - the DB call fails (fail-open: better to over-notify than skip a real
-//     notification because of a transient pgx error)
-//   - category is unrecognized (treat as a defensive default rather than
-//     surfacing a misuse to the caller)
-//
-// Side note: GetOrCreate inserts a defaults row on first call. We accept
-// the harmless write here because the row will be created momentarily
-// anyway (every user eventually reads / patches their preferences).
+//   - the user has no preferences row yet (matches schema-default
+//     all-true semantics — read-only path, no write side-effect)
+//   - the DB call fails (fail-open: better to over-notify than skip a
+//     real notification because of a transient pgx error)
+//   - category is unrecognized (defensive default; logs a warning so
+//     caller misuse is detectable in production)
 func (s *Service) ShouldNotify(ctx context.Context, userID uuid.UUID, category Category) bool {
-	pref, err := s.prefs.GetOrCreate(ctx, userID)
+	pref, err := s.prefs.Get(ctx, userID)
+	if errors.Is(err, repo.ErrNotFound) {
+		return true
+	}
 	if err != nil {
 		return true
 	}
@@ -104,6 +105,10 @@ func (s *Service) ShouldNotify(ctx context.Context, userID uuid.UUID, category C
 	case CategoryCalls:
 		return pref.Calls
 	}
+	slog.WarnContext(ctx, "notificationpref: unknown category, defaulting to notify",
+		slog.String("category", string(category)),
+		slog.String("user_id", userID.String()),
+	)
 	return true
 }
 

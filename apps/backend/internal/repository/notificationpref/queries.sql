@@ -12,6 +12,14 @@ VALUES ($1)
 ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
 RETURNING user_id, direct_messages, group_messages, friend_requests, calls, updated_at;
 
+-- name: Get :one
+-- Pure read used by §11 ShouldNotify so the gate doesn't force a write
+-- on every notification trigger. Returns no row when the user has never
+-- touched their preferences — callers map that to "default true".
+SELECT user_id, direct_messages, group_messages, friend_requests, calls, updated_at
+FROM notification_preferences
+WHERE user_id = $1;
+
 -- name: Patch :one
 -- Patches only the fields whose pointer was non-nil in the caller (mapped
 -- to NULL or value at the SQL boundary). COALESCE leaves untouched
