@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	lkauth "github.com/livekit/protocol/auth"
+
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
 	wshandler "github.com/cadenlund/wakeup/apps/backend/internal/handler/ws"
@@ -77,6 +79,14 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("room handler: %v", err)
 	}
+	livekitWebhookHandler, err := httpapi.NewLiveKitWebhookHandler(
+		h.RoomSvc, h.Broker,
+		lkauth.NewSimpleKeyProvider("devkey", "devsecretdevsecretdevsecret"),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("livekit webhook handler: %v", err)
+	}
 
 	// Each test gets a unique rate-limit scope so parallel smoke tests
 	// (all bound to 127.0.0.1, all sharing the testcontainer redis)
@@ -84,33 +94,34 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	// production-shaped — only the keyspace differs.
 	suffix := "-" + testutil.NextSuffix()
 	router, err := buildRouter(routerDeps{
-		Cfg:                 cfg,
-		Logger:              slog.Default(),
-		Pool:                h.DB,
-		Redis:               h.Redis,
-		Sessions:            h.Sessions,
-		Limiter:             ratelimit.New(h.Redis),
-		UserSvc:             h.UserSvc,
-		AuthSvc:             h.AuthSvc,
-		NotifPrefSvc:        h.NotifPrefSvc,
-		FriendSvc:           h.FriendSvc,
-		ConvSvc:             h.ConvSvc,
-		MsgSvc:              h.MsgSvc,
-		AttSvc:              h.AttSvc,
-		PresenceSvc:         h.PresenceSvc,
-		RoomSvc:             h.RoomSvc,
-		UserHandler:         userHandler,
-		AuthHandler:         authHandler,
-		FriendHandler:       friendHandler,
-		ConversationHandler: convHandler,
-		MessageHandler:      msgHandler,
-		AttachmentHandler:   attHandler,
-		PresenceHandler:     presenceHandler,
-		RoomHandler:         roomHandler,
-		WSHandler:           wsHandler,
-		RateLimitAuth:       rateLimitTier{Scope: "auth" + suffix, Limit: 10000, Window: time.Minute},
-		RateLimitWrites:     rateLimitTier{Scope: "writes" + suffix, Limit: 10000, Window: time.Minute},
-		RateLimitReads:      rateLimitTier{Scope: "reads" + suffix, Limit: 10000, Window: time.Minute},
+		Cfg:                   cfg,
+		Logger:                slog.Default(),
+		Pool:                  h.DB,
+		Redis:                 h.Redis,
+		Sessions:              h.Sessions,
+		Limiter:               ratelimit.New(h.Redis),
+		UserSvc:               h.UserSvc,
+		AuthSvc:               h.AuthSvc,
+		NotifPrefSvc:          h.NotifPrefSvc,
+		FriendSvc:             h.FriendSvc,
+		ConvSvc:               h.ConvSvc,
+		MsgSvc:                h.MsgSvc,
+		AttSvc:                h.AttSvc,
+		PresenceSvc:           h.PresenceSvc,
+		RoomSvc:               h.RoomSvc,
+		UserHandler:           userHandler,
+		AuthHandler:           authHandler,
+		FriendHandler:         friendHandler,
+		ConversationHandler:   convHandler,
+		MessageHandler:        msgHandler,
+		AttachmentHandler:     attHandler,
+		PresenceHandler:       presenceHandler,
+		RoomHandler:           roomHandler,
+		LiveKitWebhookHandler: livekitWebhookHandler,
+		WSHandler:             wsHandler,
+		RateLimitAuth:         rateLimitTier{Scope: "auth" + suffix, Limit: 10000, Window: time.Minute},
+		RateLimitWrites:       rateLimitTier{Scope: "writes" + suffix, Limit: 10000, Window: time.Minute},
+		RateLimitReads:        rateLimitTier{Scope: "reads" + suffix, Limit: 10000, Window: time.Minute},
 	})
 	if err != nil {
 		t.Fatalf("buildRouter: %v", err)

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	lkauth "github.com/livekit/protocol/auth"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
@@ -239,6 +240,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("room handler: %w", err)
 	}
+	livekitWebhookHandler, err := httpapi.NewLiveKitWebhookHandler(
+		roomSvc, broker,
+		lkauth.NewSimpleKeyProvider(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret),
+		logger,
+	)
+	if err != nil {
+		return fmt.Errorf("livekit webhook handler: %w", err)
+	}
 
 	// §8 WebSocket realtime: hub + bridge + upgrade handler. The bridge
 	// drains the broker (Redis pubsub in prod) and fans events out to
@@ -261,30 +270,31 @@ func run() error {
 	}
 
 	router, err := buildRouter(routerDeps{
-		Cfg:                 cfg,
-		Logger:              logger,
-		Pool:                pool,
-		Redis:               redisClient,
-		Sessions:            sessions,
-		Limiter:             limiter,
-		UserSvc:             userSvc,
-		AuthSvc:             authSvc,
-		NotifPrefSvc:        notifPrefSvc,
-		FriendSvc:           friendSvc,
-		ConvSvc:             convSvc,
-		MsgSvc:              messageSvc,
-		AttSvc:              attachmentSvc,
-		PresenceSvc:         presenceSvc,
-		RoomSvc:             roomSvc,
-		UserHandler:         userHandler,
-		AuthHandler:         authHandler,
-		FriendHandler:       friendHandler,
-		ConversationHandler: convHandler,
-		MessageHandler:      messageHandler,
-		AttachmentHandler:   attachmentHandler,
-		PresenceHandler:     presenceHandler,
-		RoomHandler:         roomHandler,
-		WSHandler:           wsHandler,
+		Cfg:                   cfg,
+		Logger:                logger,
+		Pool:                  pool,
+		Redis:                 redisClient,
+		Sessions:              sessions,
+		Limiter:               limiter,
+		UserSvc:               userSvc,
+		AuthSvc:               authSvc,
+		NotifPrefSvc:          notifPrefSvc,
+		FriendSvc:             friendSvc,
+		ConvSvc:               convSvc,
+		MsgSvc:                messageSvc,
+		AttSvc:                attachmentSvc,
+		PresenceSvc:           presenceSvc,
+		RoomSvc:               roomSvc,
+		UserHandler:           userHandler,
+		AuthHandler:           authHandler,
+		FriendHandler:         friendHandler,
+		ConversationHandler:   convHandler,
+		MessageHandler:        messageHandler,
+		AttachmentHandler:     attachmentHandler,
+		PresenceHandler:       presenceHandler,
+		RoomHandler:           roomHandler,
+		LiveKitWebhookHandler: livekitWebhookHandler,
+		WSHandler:             wsHandler,
 	})
 	if err != nil {
 		return fmt.Errorf("router: %w", err)
