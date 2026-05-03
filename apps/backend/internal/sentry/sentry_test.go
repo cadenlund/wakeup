@@ -10,12 +10,20 @@ import (
 
 // New rejects an empty DSN so missing-secret rollouts in non-dev envs
 // fail fast at startup. cmd/server's buildSentry handles the dev case
-// by returning nil before reaching New; this test pins the contract.
+// by returning nil before reaching New; this test pins the exact error
+// message so a future refactor that swallows or rewords the validation
+// failure surfaces here.
 func TestNew_RejectsEmptyDSN(t *testing.T) {
 	t.Parallel()
+	const wantMsg = "sentry: Config.DSN is required"
 	for _, dsn := range []string{"", "   ", "\t\n"} {
-		if _, err := sentryclient.New(sentryclient.Config{DSN: dsn}); err == nil {
+		_, err := sentryclient.New(sentryclient.Config{DSN: dsn})
+		if err == nil {
 			t.Errorf("New(%q): expected error, got nil", dsn)
+			continue
+		}
+		if err.Error() != wantMsg {
+			t.Errorf("New(%q): err = %q, want %q", dsn, err.Error(), wantMsg)
 		}
 	}
 }

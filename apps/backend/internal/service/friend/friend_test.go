@@ -82,17 +82,32 @@ func TestListAcceptedFriendIDs_ReturnsAcceptedOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAcceptedFriendIDs: %v", err)
 	}
-	want := map[uuid.UUID]bool{friend1.ID: true, friend2.ID: true}
-	if len(got) != len(want) {
-		t.Fatalf("got %d accepted friends, want 2: %+v", len(got), got)
-	}
+	// Build a set so the test fails on duplicates as well as on
+	// missing/extra IDs — len(got) alone wouldn't catch a regression
+	// that returned `[friend1, friend1]` for two distinct friendships.
+	gotSet := make(map[uuid.UUID]int, len(got))
 	for _, id := range got {
-		if !want[id] {
-			t.Errorf("unexpected friend id %v", id)
+		gotSet[id]++
+	}
+	for id, n := range gotSet {
+		if n != 1 {
+			t.Errorf("friend id %v returned %d times (duplicate)", id, n)
 		}
-		if id == pendingTarget.ID {
-			t.Errorf("pending friend leaked into accepted list: %v", id)
+	}
+	want := map[uuid.UUID]struct{}{friend1.ID: {}, friend2.ID: {}}
+	if len(gotSet) != len(want) {
+		t.Fatalf("got %d distinct accepted friends, want %d: %+v", len(gotSet), len(want), got)
+	}
+	for id := range want {
+		if _, ok := gotSet[id]; !ok {
+			t.Errorf("expected friend id %v missing from result", id)
 		}
+	}
+	if _, leaked := gotSet[pendingTarget.ID]; leaked {
+		t.Errorf("pending friend leaked into accepted list: %v", pendingTarget.ID)
+	}
+	if _, leaked := gotSet[owner.ID]; leaked {
+		t.Errorf("owner id leaked into own accepted list: %v", owner.ID)
 	}
 }
 
