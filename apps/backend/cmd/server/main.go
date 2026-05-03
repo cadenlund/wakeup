@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	lkauth "github.com/livekit/protocol/auth"
 	"github.com/redis/go-redis/v9"
@@ -33,6 +34,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/mailer"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
 	attrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/attachment"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
@@ -49,6 +51,7 @@ import (
 	devicesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/device"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
 	msgsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/message"
+	notifsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notification"
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
 	roomsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/room"
@@ -116,6 +119,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("mailer: %w", err)
 	}
+	pusher, err := buildPusher(cfg)
+	if err != nil {
+		return fmt.Errorf("pushnotif: %w", err)
+	}
 
 	users := userrepo.New(pool)
 	resets := passwordreset.New(pool)
@@ -155,16 +162,38 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("notificationpref service: %w", err)
 	}
-	friendSvc, err := friendsvc.New(friendsvc.Config{Friends: friendsRepo, Users: users})
+	notificationSvc, err := notifsvc.New(notifsvc.Config{
+		Prefs: notifPrefSvc, Devices: devicesRepo, Pusher: pusher,
+	})
 	if err != nil {
-		return fmt.Errorf("friend service: %w", err)
+		return fmt.Errorf("notification service: %w", err)
 	}
 	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convsRepo, Users: users})
 	if err != nil {
 		return fmt.Errorf("conversation service: %w", err)
 	}
+	// presenceSvc is built before friend/message so it can be wired into
+	// both as the §11.5 PresenceLister. presenceSvc itself takes a
+	// FriendListGetter — we resolve that with a thin lazy adapter so we
+	// don't need a two-pass construction for the cycle.
+	friendSvcRef := &lazyFriendList{}
+	presenceSvc, err := presencesvc.New(presencesvc.Config{
+		Repo: presRepo, Broker: broker, Friends: friendSvcRef, Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("presence service: %w", err)
+	}
+	friendSvc, err := friendsvc.New(friendsvc.Config{
+		Friends: friendsRepo, Users: users,
+		Presence: presenceSvc, Notifications: notificationSvc, Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("friend service: %w", err)
+	}
+	friendSvcRef.inner = friendSvc
 	messageSvc, err := msgsvc.New(msgsvc.Config{
 		Pool: pool, Msgs: msgsRepo, Convs: convsRepo, Broker: broker, Logger: logger,
+		Presence: presenceSvc, Notifications: notificationSvc,
 	})
 	if err != nil {
 		return fmt.Errorf("message service: %w", err)
@@ -174,12 +203,6 @@ func run() error {
 	})
 	if err != nil {
 		return fmt.Errorf("attachment service: %w", err)
-	}
-	presenceSvc, err := presencesvc.New(presencesvc.Config{
-		Repo: presRepo, Broker: broker, Friends: friendSvc, Logger: logger,
-	})
-	if err != nil {
-		return fmt.Errorf("presence service: %w", err)
 	}
 	roomSvc, err := roomsvc.New(roomsvc.Config{
 		Convs: convSvc, Users: users,
@@ -255,6 +278,11 @@ func run() error {
 		roomSvc, broker,
 		lkauth.NewSimpleKeyProvider(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret),
 		logger,
+		httpapi.LiveKitWebhookHandlerConfig{
+			Convs:         convsRepo,
+			Presence:      presenceSvc,
+			Notifications: notificationSvc,
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("livekit webhook handler: %w", err)
@@ -375,3 +403,43 @@ func buildMailer(cfg *config.Config) (mailer.Mailer, error) {
 type noopMailer struct{}
 
 func (noopMailer) SendPasswordReset(_ context.Context, _, _ string) error { return nil }
+
+// buildPusher returns an Expo-backed pusher in production. Mirrors
+// buildMailer's noop-in-dev pattern so `just dev` doesn't need an
+// EXPO_ACCESS_TOKEN. Outside local/test, a missing token is fatal —
+// silently no-op'ing would mean every offline-push trigger drops on
+// the floor without anyone noticing.
+func buildPusher(cfg *config.Config) (pushnotif.Pusher, error) {
+	if cfg.ExpoAccessToken == "" {
+		switch cfg.Env {
+		case "local", "test":
+			return noopPusher{}, nil
+		default:
+			return nil, fmt.Errorf("pushnotif: EXPO_ACCESS_TOKEN is required in env=%s", cfg.Env)
+		}
+	}
+	return pushnotif.New(pushnotif.Config{AccessToken: cfg.ExpoAccessToken})
+}
+
+type noopPusher struct{}
+
+func (noopPusher) Send(_ context.Context, _ []string, _ pushnotif.Notification) error {
+	return nil
+}
+
+// lazyFriendList is the §11.5 wire-up adapter that breaks the
+// friend↔presence construction cycle. presence.Service needs a
+// FriendLister at construction time so it can fan out presence updates
+// to friends; friend.Service (post-11.5) needs a PresenceLister so it
+// can gate offline pushes. This adapter holds a *friendsvc.Service that
+// the caller assigns once both are built — every method delegates.
+type lazyFriendList struct {
+	inner *friendsvc.Service
+}
+
+func (l *lazyFriendList) ListAcceptedFriendIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	if l.inner == nil {
+		return nil, nil
+	}
+	return l.inner.ListAcceptedFriendIDs(ctx, userID)
+}
