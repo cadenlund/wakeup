@@ -20,6 +20,7 @@ package job
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -63,8 +64,16 @@ func New(log *slog.Logger) *Runner {
 }
 
 // Register adds a job. Must be called before Start; calling after Start
-// is a programmer error.
+// is a programmer error. Validates the Job at registration so an
+// invalid Interval() doesn't surface as a runtime panic from
+// time.NewTicker on the first tick.
 func (r *Runner) Register(j Job) {
+	if j == nil {
+		panic("job: Register called with nil Job")
+	}
+	if j.Interval() <= 0 {
+		panic(fmt.Sprintf("job: Register: %q has non-positive Interval=%v", j.Name(), j.Interval()))
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.started {
@@ -77,6 +86,10 @@ func (r *Runner) Register(j Job) {
 
 // Start launches one goroutine per registered job. Idempotent — a
 // repeated Start is a no-op.
+//
+// All wg.Add calls happen while holding r.mu so a concurrent Stop()
+// can't observe wg.Counter()==0 between Start releasing the lock and
+// the spawned goroutines registering themselves. (CodeRabbit PR #45.)
 func (r *Runner) Start(ctx context.Context) {
 	r.mu.Lock()
 	if r.started {
@@ -87,10 +100,13 @@ func (r *Runner) Start(ctx context.Context) {
 	rootCtx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
 	jobs := append([]Job(nil), r.jobs...)
+	// Register every goroutine with the WaitGroup BEFORE releasing the
+	// lock; otherwise Stop()→Wait() can fire before any wg.Add and
+	// return immediately, leaving live tick loops behind us.
+	r.wg.Add(len(jobs))
 	r.mu.Unlock()
 
 	for _, j := range jobs {
-		r.wg.Add(1)
 		go r.tickLoop(rootCtx, j)
 	}
 }

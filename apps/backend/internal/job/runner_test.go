@@ -115,11 +115,14 @@ func TestRunner_StartIsIdempotent(t *testing.T) {
 	r.Start(context.Background())
 	defer r.Stop()
 	<-j.ranAt
-	// If Start spawned a second goroutine, runCount would tick twice as
-	// fast. Wait two intervals and assert <4 ticks have happened.
+	// If Start spawned a second goroutine, runCount would tick at twice
+	// the natural rate. Wait two intervals (≈ 60 ms; +slack for
+	// scheduler jitter) and assert at most three ticks have happened —
+	// "≤ 3" leaves headroom for one extra tick under load while still
+	// catching the duplicate-loop regression where we'd see ≥ 4.
 	time.Sleep(80 * time.Millisecond)
-	if got := j.runCount.Load(); got > 6 {
-		t.Errorf("runCount = %d — Start may have spawned duplicate goroutines", got)
+	if got := j.runCount.Load(); got > 3 {
+		t.Errorf("runCount = %d (want ≤ 3) — Start may have spawned duplicate goroutines", got)
 	}
 }
 
@@ -140,4 +143,41 @@ func TestRunner_StopIsSafeBeforeStart(t *testing.T) {
 	t.Parallel()
 	r := job.New(nil)
 	r.Stop() // must not panic
+}
+
+func TestRunner_RegisterRejectsNonPositiveInterval(t *testing.T) {
+	t.Parallel()
+	r := job.New(nil)
+	defer func() {
+		if recover() == nil {
+			t.Error("Register with non-positive Interval should panic (would otherwise crash time.NewTicker on first tick)")
+		}
+	}()
+	r.Register(newFakeJob("zero", 0))
+}
+
+func TestRunner_RegisterRejectsNilJob(t *testing.T) {
+	t.Parallel()
+	r := job.New(nil)
+	defer func() {
+		if recover() == nil {
+			t.Error("Register(nil) should panic")
+		}
+	}()
+	r.Register(nil)
+}
+
+// Race regression: a goroutine that calls Stop() right after Start()
+// must not see Wait() return before the spawned tick loops have
+// registered themselves with the WaitGroup. Run a few times so the
+// race detector has a chance to spot it if the WaitGroup.Add ever
+// drifts back outside the lock.
+func TestRunner_StartStopRaceFreedom(t *testing.T) {
+	t.Parallel()
+	for i := 0; i < 10; i++ {
+		r := job.New(nil)
+		r.Register(newFakeJob("racy", 5*time.Millisecond))
+		r.Start(context.Background())
+		r.Stop()
+	}
 }

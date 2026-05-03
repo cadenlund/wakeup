@@ -69,6 +69,9 @@ type OrphanSweeperConfig struct {
 }
 
 // NewOrphanSweeper builds the sweeper. Repo + Storage are required.
+// Negative Cutoff or Interval values are rejected (instead of silently
+// defaulting) so a config typo surfaces at startup rather than as
+// surprising prod behavior. (CodeRabbit PR #45.)
 func NewOrphanSweeper(cfg OrphanSweeperConfig) (*OrphanSweeper, error) {
 	if cfg.Repo == nil {
 		return nil, errors.New("attachment: OrphanSweeper requires non-nil repo")
@@ -76,16 +79,22 @@ func NewOrphanSweeper(cfg OrphanSweeperConfig) (*OrphanSweeper, error) {
 	if cfg.Storage == nil {
 		return nil, errors.New("attachment: OrphanSweeper requires non-nil storage")
 	}
+	if cfg.Cutoff < 0 {
+		return nil, fmt.Errorf("attachment: OrphanSweeper Cutoff must be >= 0, got %v", cfg.Cutoff)
+	}
+	if cfg.Interval < 0 {
+		return nil, fmt.Errorf("attachment: OrphanSweeper Interval must be >= 0, got %v", cfg.Interval)
+	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 	cutoff := cfg.Cutoff
-	if cutoff <= 0 {
+	if cutoff == 0 {
 		cutoff = orphanCutoff
 	}
 	tick := cfg.Interval
-	if tick <= 0 {
+	if tick == 0 {
 		tick = orphanInterval
 	}
 	now := cfg.Now

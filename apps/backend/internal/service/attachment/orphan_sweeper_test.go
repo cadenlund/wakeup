@@ -146,7 +146,10 @@ func TestOrphanSweeper_S3FailureLeavesDBRow(t *testing.T) {
 	uploader := makeUserSweeper(ctx, t, pool)
 
 	id := makeOrphan(ctx, t, pool, repo, uploader, 25*time.Hour)
-	row, _ := repo.GetByID(ctx, id)
+	row, err := repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("setup: GetByID: %v", err)
+	}
 	store.failOn[row.StorageKey] = errors.New("simulated S3 outage")
 
 	if err := newSweeper(t, repo, store).Run(ctx); err != nil {
@@ -173,7 +176,10 @@ func TestOrphanSweeper_MixedBatch(t *testing.T) {
 	good := makeOrphan(ctx, t, pool, repo, uploader, 25*time.Hour)
 	bad := makeOrphan(ctx, t, pool, repo, uploader, 25*time.Hour)
 
-	badRow, _ := repo.GetByID(ctx, bad)
+	badRow, err := repo.GetByID(ctx, bad)
+	if err != nil {
+		t.Fatalf("setup: GetByID: %v", err)
+	}
 	store.failOn[badRow.StorageKey] = errors.New("simulated")
 
 	if err := newSweeper(t, repo, store).Run(ctx); err != nil {
@@ -209,6 +215,28 @@ func TestNewOrphanSweeper_RejectsBadConfig(t *testing.T) {
 	t.Parallel()
 	if _, err := attachment.NewOrphanSweeper(attachment.OrphanSweeperConfig{}); err == nil {
 		t.Error("nil deps should error")
+	}
+}
+
+func TestNewOrphanSweeper_RejectsNegativeCutoff(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewTestDB(t)
+	repo := attrepo.New(pool)
+	if _, err := attachment.NewOrphanSweeper(attachment.OrphanSweeperConfig{
+		Repo: repo, Storage: newFakeStorage(), Cutoff: -1 * time.Hour,
+	}); err == nil {
+		t.Error("negative Cutoff should error (CodeRabbit PR #45 fail-fast)")
+	}
+}
+
+func TestNewOrphanSweeper_RejectsNegativeInterval(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewTestDB(t)
+	repo := attrepo.New(pool)
+	if _, err := attachment.NewOrphanSweeper(attachment.OrphanSweeperConfig{
+		Repo: repo, Storage: newFakeStorage(), Interval: -1 * time.Hour,
+	}); err == nil {
+		t.Error("negative Interval should error (CodeRabbit PR #45 fail-fast)")
 	}
 }
 
