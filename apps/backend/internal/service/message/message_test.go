@@ -25,7 +25,11 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
-// fakePresence returns a canned []domain.PresenceState for ListForUsers.
+// fakePresence returns canned []domain.PresenceState filtered to the
+// requested IDs — matching the real presence.Service.ListForUsers
+// contract. A whole-list fake would let tests pass with mismatched
+// IDs and silently drift from production.
+//
 // If err is non-nil it overrides the data path so the failure branch
 // can be exercised.
 type fakePresence struct {
@@ -33,11 +37,21 @@ type fakePresence struct {
 	err    error
 }
 
-func (f *fakePresence) ListForUsers(_ context.Context, _ []uuid.UUID) ([]domain.PresenceState, error) {
+func (f *fakePresence) ListForUsers(_ context.Context, ids []uuid.UUID) ([]domain.PresenceState, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.states, nil
+	byID := make(map[uuid.UUID]domain.PresenceState, len(f.states))
+	for _, s := range f.states {
+		byID[s.UserID] = s
+	}
+	out := make([]domain.PresenceState, 0, len(ids))
+	for _, id := range ids {
+		if s, ok := byID[id]; ok {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 // fakeNotifier records every SendOfflinePush call. The mutex makes it

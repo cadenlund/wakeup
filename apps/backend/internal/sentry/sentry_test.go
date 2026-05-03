@@ -129,12 +129,22 @@ func TestCapture_NilTagsDoesNotPanic(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
-	u, _ := url.Parse(srv.URL)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse httptest URL: %v", err)
+	}
 	dsn := strings.Join([]string{u.Scheme, "://k@", u.Host, "/1"}, "")
 	c, err := sentryclient.New(sentryclient.Config{DSN: dsn})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	c.Capture(errors.New("boom"), nil)
-	c.Flush(5 * time.Second)
+	if !c.Flush(5 * time.Second) {
+		t.Error("Flush returned false (event still queued after timeout)")
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Error("upstream never received the captured event")
+	}
 }
