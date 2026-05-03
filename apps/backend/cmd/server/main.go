@@ -26,6 +26,7 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
+	"github.com/cadenlund/wakeup/apps/backend/internal/job"
 	"github.com/cadenlund/wakeup/apps/backend/internal/log"
 	"github.com/cadenlund/wakeup/apps/backend/internal/mailer"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
@@ -165,6 +166,20 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("attachment service: %w", err)
 	}
+
+	// §4.12 background-job runner. Phase 7.4 registers the attachment
+	// orphan sweeper; later phases add presence / idempotency / session
+	// sweepers to the same runner.
+	jobRunner := job.New(logger)
+	orphanSweeper, err := attsvc.NewOrphanSweeper(attsvc.OrphanSweeperConfig{
+		Repo: attsRepo, Storage: objStore, Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("attachment orphan sweeper: %w", err)
+	}
+	jobRunner.Register(orphanSweeper)
+	jobRunner.Start(rootCtx)
+	defer jobRunner.Stop()
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
