@@ -55,5 +55,8 @@ jobs:
       - name: §12.7 WebSocket test matrix coverage
         run: scripts/ci/check-ws-tests.sh
 
+      - name: §12.5 Handler test coverage matches swagger failures
+        run: scripts/ci/check-handler-tests.sh
+
       - name: Conform
         uses: siderolabs/conform@v0.1.0-alpha.30
