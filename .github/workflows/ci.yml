@@ -52,5 +52,8 @@ jobs:
       - name: Generate docs
         run: just gen-docs-check
 
+      - name: §12.7 WebSocket test matrix coverage
+        run: scripts/ci/check-ws-tests.sh
+
       - name: Conform
         uses: siderolabs/conform@v0.1.0-alpha.30

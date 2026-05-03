@@ -102,7 +102,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 // Send creates a new message in the conversation.
 //
 // @Summary      Send a message
-// @Description  Creates a new message in the conversation. The caller must be a member. `attachment_ids` link previously-uploaded attachments; `reply_to_message_id` must live in the same conversation (cross-conversation replies are rejected at 422). On success, fans out a `message.created` event on `conv:<id>:messages` per §4.5.
+// @Description  Creates a new message in the conversation. The caller must be a member. `attachment_ids` link previously-uploaded attachments; `reply_to_message_id` must live in the same conversation (cross-conversation replies are rejected at 422). On success, fans out a `message.new` event on `conv:<id>:messages` per §4.5 / §7.2.
 // @Tags         messages
 // @Accept       json
 // @Produce      json

@@ -22,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	coderws "github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -443,11 +444,44 @@ func WithPassword(s string) AuthClientOpt { return func(o *authClientOpts) { o.p
 // after registration since the public Register endpoint always creates `user`.
 func WithRole(s string) AuthClientOpt { return func(o *authClientOpts) { o.role = s } }
 
-// WSDial dials /v1/ws authenticated as the given user. Lands in Phase 8.1
-// when the WebSocket hub exists.
-func (h *Harness) WSDial(t *testing.T, _ *http.Client) any {
+// WSDial dials /v1/ws using the cookie jar from c so the WebSocket
+// upgrade carries the same session cookie REST endpoints accept.
+// Returns the *websocket.Conn the test can Read/Write on; on failure
+// fails the test with t.Fatalf. The test is responsible for closing
+// the returned conn.
+//
+// Nil-client guard: an unauth'd test that wants the 401 path should
+// use HTTPClient(t) (which returns a cookie-jar-only client) and dial
+// directly via coder/websocket. Passing nil here would NPE on the
+// transport / jar dereferences below — fail cleanly instead.
+func (h *Harness) WSDial(t *testing.T, c *http.Client) *coderws.Conn {
 	t.Helper()
-	panic("Harness.WSDial: wire me in Phase 8.1 (websocket hub) — milestone 1.9 only ships scaffolding")
+	if c == nil {
+		t.Fatalf("Harness.WSDial: nil *http.Client (use HTTPClient(t) for an unauth'd dial)")
+	}
+	wsURL := "ws" + strings.TrimPrefix(h.Server.URL, "http") + "/v1/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// Preserve whatever http.RoundTripper the caller's client uses
+	// (the harness's TLS-trusting transport in practice, but a future
+	// caller could wrap it with logging / instrumentation). Earlier
+	// code narrowed to *http.Transport via type-assert and silently
+	// dropped any custom transport. (CodeRabbit PR #50.)
+	transport := c.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	dialClient := &http.Client{Transport: transport, Jar: c.Jar}
+	conn, resp, err := coderws.Dial(ctx, wsURL, &coderws.DialOptions{
+		HTTPClient: dialClient,
+	})
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("WSDial: %v", err)
+	}
+	return conn
 }
 
 // requestIDMiddleware is the §4.7 minimal version: read X-Request-ID from

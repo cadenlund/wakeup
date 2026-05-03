@@ -13,7 +13,6 @@ package message
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +27,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
+	"github.com/cadenlund/wakeup/apps/backend/internal/wsproto"
 )
 
 // MaxBodyLen mirrors §4.6 — schema CHECK enforces it too. Service-layer
@@ -158,7 +158,7 @@ func (s *Service) Send(ctx context.Context, p SendParams) (SendResult, error) {
 		return SendResult{}, apierror.Internal("commit").WithCause(err)
 	}
 
-	s.publishMessageEvent(ctx, "message.created", created)
+	s.publishMessageEvent(ctx, wsproto.EventMessageNew, created)
 	return SendResult{Message: created, Attachments: append([]uuid.UUID(nil), p.AttachmentIDs...)}, nil
 }
 
@@ -192,7 +192,7 @@ func (s *Service) Edit(ctx context.Context, p EditParams) (domain.Message, error
 		}
 		return domain.Message{}, apierror.Internal("update body").WithCause(err)
 	}
-	s.publishMessageEvent(ctx, "message.edited", updated)
+	s.publishMessageEvent(ctx, wsproto.EventMessageEdited, updated)
 	return updated, nil
 }
 
@@ -229,7 +229,7 @@ func (s *Service) Delete(ctx context.Context, actor, messageID uuid.UUID) error 
 	if err := s.msgs.SoftDelete(ctx, messageID); err != nil {
 		return apierror.Internal("soft delete").WithCause(err)
 	}
-	s.publishMessageEvent(ctx, "message.deleted", current)
+	s.publishMessageEvent(ctx, wsproto.EventMessageDeleted, current)
 	return nil
 }
 
@@ -321,19 +321,25 @@ func (s *Service) ListReads(ctx context.Context, actor, messageID uuid.UUID) ([]
 // (e.g. tests that don't care about WS fan-out), this is a no-op.
 // Errors are logged at debug level: a broker outage can't undo an
 // already-committed insert.
-func (s *Service) publishMessageEvent(ctx context.Context, eventType string, m domain.Message) {
+//
+// Wire shape is the §7.1 wsproto envelope so the WS bridge can fan
+// the bytes straight to clients without re-wrapping. Earlier code
+// here published a flat map under the type name "message.created",
+// which mismatched both the §7.2 event registry ("message.new") and
+// the §7.1 wire format — caught when matrix tests landed in 8.4.
+func (s *Service) publishMessageEvent(ctx context.Context, eventType wsproto.EventType, m domain.Message) {
 	if s.broker == nil {
 		return
 	}
-	payload, err := json.Marshal(map[string]any{
-		"type":            eventType,
+	data := map[string]any{
 		"message_id":      m.ID,
 		"conversation_id": m.ConversationID,
 		"sender_id":       m.SenderID,
 		"created_at":      m.CreatedAt,
-	})
+	}
+	payload, err := wsproto.Encode(eventType, data)
 	if err != nil {
-		s.logger.Warn("message: marshal event", slog.String("error", err.Error()))
+		s.logger.Warn("message: encode event", slog.String("error", err.Error()))
 		return
 	}
 	channel := fmt.Sprintf("conv:%s:messages", m.ConversationID)
