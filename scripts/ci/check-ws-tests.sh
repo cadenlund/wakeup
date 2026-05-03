@@ -70,32 +70,35 @@ warn=0
 # §12.7 matrix even if it grep-matches. (CodeRabbit PR #50.)
 #
 # is_real_test name → 0 if a real (non-skipped) func exists in WS_DIR.
+# A function whose body is just t.Skip(...) does NOT satisfy the
+# matrix even on a single-line declaration. (CodeRabbit PR #50.)
 is_real_test() {
   local name="$1"
   awk -v name="$name" '
     BEGIN { in_func = 0; depth = 0; skipped = 0; saw = 0 }
+    function inspect_line(   o, c) {
+      o = gsub(/\{/, "{")
+      c = gsub(/\}/, "}")
+      depth += o - c
+      if ($0 ~ /t\.Skip(Now|f)?\(/) skipped = 1
+      if (depth <= 0) {
+        if (saw && !skipped) { found = 1; exit }
+        in_func = 0
+        saw = 0
+        skipped = 0
+      }
+    }
     {
       if (!in_func) {
         if ($0 ~ "^func " name "\\(") {
           in_func = 1
           saw = 1
-          # Count braces on the func line itself (rare but possible).
-          opens = gsub(/\{/, "{")
-          closes = gsub(/\}/, "}")
-          depth = opens - closes
-          next
+          depth = 0
+          skipped = 0
+          inspect_line()
         }
       } else {
-        opens = gsub(/\{/, "{")
-        closes = gsub(/\}/, "}")
-        depth += opens - closes
-        if ($0 ~ /t\.Skip\(/) skipped = 1
-        if (depth <= 0) {
-          if (saw && !skipped) { found = 1; exit }
-          in_func = 0
-          saw = 0
-          skipped = 0
-        }
+        inspect_line()
       }
     }
     END { exit found ? 0 : 1 }
@@ -146,35 +149,56 @@ LIFECYCLE_PENDING=(
   "disconnect_publishes_presence_change"  # Phase 9
   "slow_consumer_kicked"        # covered by hub_test, listed for completeness
 )
-# Same is-real check for lifecycle t.Run subtests: a stub that calls
-# t.Skip immediately doesn't earn a "covered" tick.
+# Same is-real check for lifecycle t.Run subtests, but scoped so we
+# only count t.Run("<name>", ...) occurrences INSIDE
+# TestWebSocketLifecycle. A `t.Run("upgrade_no_cookie", ...)` in some
+# other test must not satisfy this gate. (CodeRabbit PR #50.)
 is_real_subtest() {
   local name="$1"
   awk -v name="$name" '
-    BEGIN { in_sub = 0; depth = 0; skipped = 0; saw = 0 }
-    {
-      if (!in_sub) {
-        # Match: t.Run("upgrade_no_cookie", func(...) {
-        if ($0 ~ "t\\.Run\\(\"" name "\"") {
-          in_sub = 1
-          saw = 1
-          opens = gsub(/\{/, "{")
-          closes = gsub(/\}/, "}")
-          depth = opens - closes
-          next
-        }
-      } else {
-        opens = gsub(/\{/, "{")
-        closes = gsub(/\}/, "}")
-        depth += opens - closes
-        if ($0 ~ /t\.Skip\(/) skipped = 1
-        if (depth <= 0) {
-          if (saw && !skipped) { found = 1; exit }
-          in_sub = 0
-          saw = 0
-          skipped = 0
-        }
+    BEGIN { in_test = 0; in_sub = 0; depth_test = 0; depth_sub = 0; skipped = 0; saw = 0 }
+    function inspect_sub_line(   o, c) {
+      o = gsub(/\{/, "{")
+      c = gsub(/\}/, "}")
+      depth_sub += o - c
+      depth_test += o - c
+      if ($0 ~ /t\.Skip(Now|f)?\(/) skipped = 1
+      if (depth_sub <= 0) {
+        if (saw && !skipped) { found = 1; exit }
+        in_sub = 0
+        saw = 0
+        skipped = 0
       }
+    }
+    {
+      if (!in_test) {
+        if ($0 ~ "^func TestWebSocketLifecycle\\(") {
+          in_test = 1
+          o = gsub(/\{/, "{")
+          c = gsub(/\}/, "}")
+          depth_test = o - c
+          # The signature line itself usually has just one { and no }.
+        }
+        next
+      }
+      if (in_sub) {
+        inspect_sub_line()
+        next
+      }
+      # Track outer-test depth even when not in a subtest so we know
+      # when the test ends.
+      if ($0 ~ "t\\.Run\\(\"" name "\"") {
+        in_sub = 1
+        saw = 1
+        depth_sub = 0
+        skipped = 0
+        inspect_sub_line()
+        next
+      }
+      o = gsub(/\{/, "{")
+      c = gsub(/\}/, "}")
+      depth_test += o - c
+      if (depth_test <= 0) { in_test = 0 }
     }
     END { exit found ? 0 : 1 }
   ' "$WS_DIR"/*.go
