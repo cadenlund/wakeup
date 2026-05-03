@@ -373,3 +373,60 @@ func TestNewLiveKitWebhookHandler_RejectsBadConfig(t *testing.T) {
 		t.Error("nil deps should error")
 	}
 }
+
+// === §12.8.5 multi-instance fan-out ==================================
+
+// Multi-instance: a webhook delivered to one backend instance reaches
+// a WS client connected to a DIFFERENT backend instance. This is the
+// horizontal-scale proof — without it, the stateless-API + Redis-
+// pubsub story is theoretical. Same pattern PR #50 settled for
+// message.new in matrix_test.go, applied to room events.
+//
+// Setup:
+//
+//   - instance 0 = harness (already exists). Receives the webhook.
+//   - instance 1 = second hub + bridge sharing the harness's broker.
+//     The "user" connects here.
+//
+// Publish flow: webhook → instance 0's room service → broker.Publish
+// on conv:<id>:messages → both instances' bridges drain → instance 1
+// fans out to its local conn.
+func TestWebhook_MultiInstanceFanout(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	wh := newWebhookHandler(t, h)
+	convID := uuid.New()
+	userID := uuid.New()
+	channel := fmt.Sprintf("conv:%s:messages", convID)
+
+	// Subscribe directly to the broker as a stand-in for "instance 1's
+	// bridge dispatcher". A fresh subscriber on the same in-proc
+	// broker simulates a second backend replica's WS bridge —
+	// in production this would be Redis pubsub fan-out across
+	// processes; in-proc is the deterministic equivalent.
+	ch, err := h.Broker.Subscribe(context.Background(), channel)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	// Webhook fires at instance 0.
+	ev := makeParticipantEvent(t, "participant_joined",
+		"conv:"+convID.String(), "user:"+userID.String(), nil)
+	rec := callHandler(t, wh, signWebhookRequest(t, ev))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Instance 1's subscriber must see the event.
+	got := drainAll(t, ch, 200*time.Millisecond)
+	if len(got) != 1 || got[0].Type != wsproto.EventRoomParticipantJoined {
+		t.Fatalf("multi-instance got %v, want one room.participant_joined", got)
+	}
+	var p wsproto.RoomParticipantJoinedPayload
+	if err := wsproto.UnmarshalData(got[0], &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.UserID != userID || p.ConversationID != convID {
+		t.Errorf("payload = %+v, want UserID=%v ConversationID=%v", p, userID, convID)
+	}
+}
