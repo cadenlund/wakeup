@@ -71,9 +71,11 @@ func scanRow(row pgx.Row) (domain.DeviceToken, error) {
 // id is the persistent identifier — callers that need to delete a token
 // later use this id, not the expo token itself.
 func (q *Queries) Register(ctx context.Context, userID uuid.UUID, expoToken string, platform domain.DevicePlatform) (domain.DeviceToken, error) {
-	id := uuid.Must(uuid.NewV7())
-	row := q.db.QueryRow(ctx, registerSQL, id, userID, expoToken, string(platform))
-	tok, err := scanRow(row)
+	id, err := uuid.NewV7()
+	if err != nil {
+		return domain.DeviceToken{}, fmt.Errorf("devicetoken: register: generate id: %w", err)
+	}
+	tok, err := scanRow(q.db.QueryRow(ctx, registerSQL, id, userID, expoToken, string(platform)))
 	if err != nil {
 		return domain.DeviceToken{}, fmt.Errorf("devicetoken: register: %w", err)
 	}

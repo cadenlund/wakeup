@@ -90,8 +90,11 @@ func TestRegister_SamePairUpdatesLastSeenAndPlatform(t *testing.T) {
 	if second.Platform != domain.DeviceAndroid {
 		t.Errorf("Platform should refresh to android, got %q", second.Platform)
 	}
-	if !second.LastSeenAt.After(first.LastSeenAt.Add(-30 * time.Minute)) {
-		t.Errorf("LastSeenAt should bump forward: first=%v second=%v",
+	// We backdated to first.LastSeenAt - 1h before the second Register, so
+	// the postgres-side now() that fired during the upsert MUST yield a
+	// timestamp strictly after first.LastSeenAt.
+	if !second.LastSeenAt.After(first.LastSeenAt) {
+		t.Errorf("LastSeenAt should bump strictly forward: first=%v second=%v",
 			first.LastSeenAt, second.LastSeenAt)
 	}
 
