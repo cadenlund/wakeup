@@ -68,15 +68,15 @@ In **B**: `GET /v1/conversations` → the new group should appear.
 ## 4. Send messages — and exercise idempotency
 
 In **A**: `POST /v1/conversations/{id}/messages` with `{"body": "first message"}`.
-Expect `201 Created` with the message id, `Idempotent-Replay: false` absent
-(no key header).
+Expect `201 Created` with the message id; the `Idempotent-Replay` header
+must be absent when no `Idempotency-Key` was sent.
 
 Now generate a UUID v7 client-side (any UUID works) and send the SAME
 body twice with the same `Idempotency-Key` header:
 
 ```http
 POST /v1/conversations/{id}/messages
-Idempotency-Key: 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c
+Idempotency-Key: <client-generated-uuid-v7>
 Content-Type: application/json
 
 {"body": "retried message"}
