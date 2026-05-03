@@ -335,3 +335,25 @@ func TestGetForUser_WrapsErrorsAsInternal(t *testing.T) {
 		t.Errorf("Code = %q, want INTERNAL", asAPIError(t, err).Code)
 	}
 }
+
+// UpdateForUser surfaces apierror.Internal when the underlying
+// GetOrCreate fails — covers the upsert-error branch the
+// auto-creates-row test can't reach.
+func TestUpdateForUser_GetOrCreateErrorWrappedAsInternal(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID:         uuid.New(),
+		DirectMessages: ptr(false),
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if asAPIError(t, err).Code != apierror.CodeInternal {
+		t.Errorf("Code = %q, want INTERNAL", asAPIError(t, err).Code)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

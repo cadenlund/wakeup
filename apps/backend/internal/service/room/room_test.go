@@ -475,7 +475,35 @@ func TestRoomLifecycle_AddMarkSetVideoRemove(t *testing.T) {
 
 func TestNew_RejectsBadConfig(t *testing.T) {
 	t.Parallel()
-	if _, err := room.New(room.Config{}); err == nil {
-		t.Error("nil deps should error")
+	st := newStack(t)
+	base := room.Config{
+		Convs:      st.convSvc,
+		Users:      st.users,
+		APIKey:     "key",
+		APISecret:  "secret",
+		LiveKitURL: "ws://localhost:7880",
+		Redis:      st.rdb,
+	}
+	cases := []struct {
+		name string
+		mod  func(*room.Config)
+	}{
+		{"missing convs", func(c *room.Config) { c.Convs = nil }},
+		{"missing users", func(c *room.Config) { c.Users = nil }},
+		{"missing api key", func(c *room.Config) { c.APIKey = "" }},
+		{"missing api secret", func(c *room.Config) { c.APISecret = "" }},
+		{"missing livekit url", func(c *room.Config) { c.LiveKitURL = "" }},
+		{"missing redis", func(c *room.Config) { c.Redis = nil }},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := base
+			tc.mod(&cfg)
+			if _, err := room.New(cfg); err == nil {
+				t.Errorf("expected error for %s", tc.name)
+			}
+		})
 	}
 }
