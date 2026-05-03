@@ -546,3 +546,149 @@ func TestNew_RejectsBadConfig(t *testing.T) {
 		})
 	}
 }
+
+// --- Service-level direct tests (no HTTP harness) ---------------------
+//
+// These exercise auth.Service paths the harness's HTTP handler can't
+// reach because the handlers' decoder rejects them up front (e.g. an
+// unauthenticated /me with a session present but missing-from-DB
+// user). Calling the service directly with a context that carries an
+// scs session lets the §13.8 audit see the surface that the handler
+// path skips.
+
+// directService returns the bare svc + a sm.LoadAndSave-wrapped ctx
+// so service calls that read the session see the same shape they do
+// in production.
+func directService(t *testing.T) (*auth.Service, *scs.SessionManager) {
+	t.Helper()
+	pool := testutil.NewTestDB(t)
+	sm := session.New(pool)
+	users := user.New(pool)
+	resets := passwordreset.New(pool)
+	svc, err := auth.New(auth.Config{
+		Pool: pool, Users: users, Resets: resets,
+		Sessions: sm, Mailer: &recordingMailer{},
+	})
+	if err != nil {
+		t.Fatalf("auth.New: %v", err)
+	}
+	return svc, sm
+}
+
+// scsCtx returns a context with an scs session loaded.
+func scsCtx(t *testing.T, sm *scs.SessionManager) context.Context {
+	t.Helper()
+	ctx, err := sm.Load(context.Background(), "")
+	if err != nil {
+		t.Fatalf("sm.Load: %v", err)
+	}
+	return ctx
+}
+
+// CurrentUser without a session returns Unauthorized — covers the
+// no-session early-return.
+func TestCurrentUser_NoSessionReturnsUnauthorized(t *testing.T) {
+	t.Parallel()
+	svc, sm := directService(t)
+	ctx := scsCtx(t, sm)
+	if _, err := svc.CurrentUser(ctx); err == nil {
+		t.Fatal("expected error for empty session")
+	} else {
+		var ae *apierror.Error
+		if !errors.As(err, &ae) || ae.Code != apierror.CodeUnauthorized {
+			t.Errorf("err = %v, want UNAUTHORIZED", err)
+		}
+	}
+}
+
+// CurrentUser with a malformed user_id in the session returns
+// Unauthorized — covers the uuid.Parse error branch.
+func TestCurrentUser_MalformedSessionUserIDReturnsUnauthorized(t *testing.T) {
+	t.Parallel()
+	svc, sm := directService(t)
+	ctx := scsCtx(t, sm)
+	sm.Put(ctx, auth.SessionUserIDKey, "not-a-uuid")
+	if _, err := svc.CurrentUser(ctx); err == nil {
+		t.Fatal("expected error for garbled session")
+	} else {
+		var ae *apierror.Error
+		if !errors.As(err, &ae) || ae.Code != apierror.CodeUnauthorized {
+			t.Errorf("err = %v, want UNAUTHORIZED", err)
+		}
+	}
+}
+
+// Me with a session pointing at a deleted user returns Unauthorized
+// (not-found at the user repo collapses into UNAUTHORIZED so we don't
+// leak which session ids correspond to deleted accounts).
+func TestMe_DeletedUserReturnsUnauthorized(t *testing.T) {
+	t.Parallel()
+	svc, sm := directService(t)
+	ctx := scsCtx(t, sm)
+	// Put a real-but-nonexistent uuid in the session — same shape as a
+	// soft-deleted user (GetByID excludes deleted rows, so the lookup
+	// returns ErrNotFound).
+	sm.Put(ctx, auth.SessionUserIDKey, uuid.New().String())
+	_, err := svc.Me(ctx)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var ae *apierror.Error
+	if !errors.As(err, &ae) || ae.Code != apierror.CodeUnauthorized {
+		t.Errorf("err = %v, want UNAUTHORIZED", err)
+	}
+}
+
+// Logout on an empty session is a no-op (returns nil) — the §6.2
+// always-204 contract. Covers the success branch when there's no
+// session to destroy.
+func TestLogout_EmptySessionIsNoOp(t *testing.T) {
+	t.Parallel()
+	svc, sm := directService(t)
+	ctx := scsCtx(t, sm)
+	if err := svc.Logout(ctx); err != nil {
+		t.Errorf("Logout on empty session should be nil, got %v", err)
+	}
+}
+
+// LogoutAll on a no-session ctx still iterates and returns nil since
+// no sessions belong to the user. Covers the iterate-no-match path
+// (the harness test only exercises iterate-with-match).
+func TestLogoutAll_NoSessionsForUserReturnsNil(t *testing.T) {
+	t.Parallel()
+	svc, sm := directService(t)
+	ctx := scsCtx(t, sm)
+	if err := svc.LogoutAll(ctx, uuid.New()); err != nil {
+		t.Errorf("LogoutAll for unknown uid should be nil, got %v", err)
+	}
+}
+
+// RequestPasswordReset always returns nil — even for unknown emails —
+// to defeat enumeration. Covers the unknown-email branch which the
+// HTTP harness only confirms over the wire (200 round-trip), not the
+// nil-error contract at the service layer.
+func TestRequestPasswordReset_UnknownEmailReturnsNil(t *testing.T) {
+	t.Parallel()
+	svc, _ := directService(t)
+	if err := svc.RequestPasswordReset(context.Background(), "ghost@x.test"); err != nil {
+		t.Errorf("RequestPasswordReset on unknown email should be nil, got %v", err)
+	}
+}
+
+// ConfirmPasswordReset with empty NewPassword fast-fails before any
+// hashing or DB work. The handler test confirms over the wire; this
+// asserts the service-layer contract directly.
+func TestConfirmPasswordReset_EmptyPasswordFastFails(t *testing.T) {
+	t.Parallel()
+	svc, _ := directService(t)
+	err := svc.ConfirmPasswordReset(context.Background(), auth.ConfirmPasswordResetParams{
+		Token: "anything", NewPassword: "",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var ae *apierror.Error
+	if !errors.As(err, &ae) || ae.Code != apierror.CodeUnauthorized {
+		t.Errorf("err = %v, want UNAUTHORIZED", err)
+	}
+}
