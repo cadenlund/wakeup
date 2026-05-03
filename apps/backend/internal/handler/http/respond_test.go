@@ -201,3 +201,62 @@ func TestDecodeJSON_TrailingGarbage(t *testing.T) {
 		t.Fatalf("got %v, want BadRequest", e)
 	}
 }
+
+// WriteJSON with nil body writes the status header but no body —
+// covers the body==nil early-return that the typical write path
+// can't reach.
+func TestWriteJSON_NilBodyWritesHeaderOnly(t *testing.T) {
+	t.Parallel()
+	rec := httptest.NewRecorder()
+	httpapi.WriteJSON(rec, http.StatusAccepted, nil)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("status = %d, want 202", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("body should be empty: %q", rec.Body.String())
+	}
+}
+
+// WriteError(nil) is a defensive guard — if a handler ever passes nil
+// the response is a generic 500 instead of a panic. Documented in the
+// function comment, but no test reaches it because callers always
+// have a real error in hand.
+func TestWriteError_NilErrorIs500(t *testing.T) {
+	t.Parallel()
+	rec := httptest.NewRecorder()
+	httpapi.WriteError(rec, httptest.NewRequest(http.MethodGet, "/", nil), nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+// jsonTagName returns "" for a missing/dash tag so validator falls
+// back to the Go field name. NewValidator wires this in for the
+// snake_case field-error path; the helper is small but the dash and
+// missing branches are uncovered without exercising them directly.
+func TestNewValidator_UsesJSONTagsAndFallsBackOnDash(t *testing.T) {
+	t.Parallel()
+	type req struct {
+		WithJSON  string `json:"with_json"  validate:"required"`
+		WithDash  string `json:"-"          validate:"required"`
+		NoJSONTag string `validate:"required"`
+	}
+	v := httpapi.NewValidator()
+	err := v.Struct(req{})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	got := err.Error()
+	// json:"with_json" → field name is the json tag.
+	if !strings.Contains(got, "with_json") {
+		t.Errorf("expected with_json (snake_case from JSON tag), got %q", got)
+	}
+	// json:"-" → fall through to Go field name.
+	if !strings.Contains(got, "WithDash") {
+		t.Errorf("expected WithDash (Go name fallback), got %q", got)
+	}
+	// no json tag → fall through to Go field name.
+	if !strings.Contains(got, "NoJSONTag") {
+		t.Errorf("expected NoJSONTag (Go name fallback), got %q", got)
+	}
+}

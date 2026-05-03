@@ -405,3 +405,60 @@ func TestAdminListAudit_HappyPath(t *testing.T) {
 // (including BlockDuringImpersonation) is wired. The harness here
 // only mounts handler routes; it intentionally doesn't re-implement
 // the full router middleware tower.
+
+// Bad-query-param sweep for the paginated admin endpoints. q exceeding
+// 200 chars + bad limit + bad cursor each trip a distinct guard
+// inside ListUsers / ListAudit before any service call.
+func TestAdminListUsers_BadQueryParams(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	adminC, _ := h.AdminClient(t)
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"q over 200 chars", "/v1/admin/users?q=" + strings.Repeat("x", 201)},
+		{"bad limit", "/v1/admin/users?limit=abc"},
+		{"bad cursor", "/v1/admin/users?cursor=not-base64"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resp, err := adminC.Get(h.Server.URL + tc.path)
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode/100 != 4 {
+				t.Errorf("status = %d, want 4xx", resp.StatusCode)
+			}
+		})
+	}
+}
+
+func TestAdminListAudit_BadQueryParams(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	adminC, _ := h.AdminClient(t)
+
+	cases := []struct{ name, path string }{
+		{"bad limit", "/v1/admin/audit?limit=abc"},
+		{"bad cursor", "/v1/admin/audit?cursor=not-base64"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resp, err := adminC.Get(h.Server.URL + tc.path)
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode/100 != 4 {
+				t.Errorf("status = %d, want 4xx", resp.StatusCode)
+			}
+		})
+	}
+}
