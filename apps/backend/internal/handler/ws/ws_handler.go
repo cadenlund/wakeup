@@ -109,6 +109,17 @@ func (h *Handler) Mount(r chi.Router) {
 
 // Upgrade is the /v1/ws handler. Auth is enforced before the upgrade
 // — an unauthenticated request gets 401 and never opens a socket.
+//
+// @Summary      Open the realtime WebSocket connection
+// @Description  Upgrades the request to a WebSocket. Auth is enforced before the upgrade via the same session cookie used for REST. The server subscribes the connection to `user:<id>:events` plus `conv:<id>:messages` for every conversation the caller is a member of, and routes inbound `heartbeat` / `typing.*` / `presence.set` events per §7.3. See §7.1 for the JSON envelope format.
+// @Tags         realtime
+// @Produce      json
+// @Security     CookieAuth
+// @Success      101  "Switching Protocols (WebSocket established)"
+// @Failure      401  "Not authenticated"
+// @Failure      429  "Rate limited"
+// @Failure      500  "Internal error"
+// @Router       /v1/ws [get]
 func (h *Handler) Upgrade(w http.ResponseWriter, r *http.Request) {
 	uid, err := h.auth.CurrentUser(r.Context())
 	if err != nil {
@@ -118,7 +129,7 @@ func (h *Handler) Upgrade(w http.ResponseWriter, r *http.Request) {
 
 	channels, err := h.channelsForUser(r.Context(), uid)
 	if err != nil {
-		h.writeError(w, r, err)
+		h.writeError(w, r, apierror.Internal("ws: list user channels").WithCause(err))
 		return
 	}
 
@@ -212,6 +223,13 @@ func (h *Handler) makeOnMessage(uid uuid.UUID) func(ctx context.Context, raw []b
 // handleTyping re-publishes a typing event on the conversation
 // channel with the server-stamped user_id, so other replicas' bridges
 // fan it out to the other members.
+//
+// Membership gate: without this check a malicious client could blast
+// typing.start across every conversation in the database — they'd
+// know the conv_id from any prior interaction or just guessing.
+// convs.Get returns RESOURCE_NOT_FOUND for non-members, which we
+// surface to the caller's onMessage as an error (the read pump logs
+// it but keeps the conn open). CodeRabbit PR #49.
 func (h *Handler) handleTyping(ctx context.Context, uid uuid.UUID, env wsproto.Envelope) error {
 	var p wsproto.TypingPayload
 	if err := wsproto.UnmarshalData(env, &p); err != nil {
@@ -219,6 +237,9 @@ func (h *Handler) handleTyping(ctx context.Context, uid uuid.UUID, env wsproto.E
 	}
 	if p.ConversationID == uuid.Nil {
 		return errors.New("ws: typing payload missing conversation_id")
+	}
+	if _, err := h.convs.Get(ctx, uid, p.ConversationID); err != nil {
+		return fmt.Errorf("ws: typing membership check: %w", err)
 	}
 	stamped := wsproto.TypingPayload{ConversationID: p.ConversationID, UserID: &uid}
 	encoded, err := wsproto.Encode(env.Type, stamped)

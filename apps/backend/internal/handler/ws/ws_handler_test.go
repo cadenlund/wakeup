@@ -199,6 +199,63 @@ func TestWSHandler_TypingFansOutToOtherConvMembers(t *testing.T) {
 	}
 }
 
+// Membership gate on typing: a client cannot publish typing events
+// on a conversation they're not a member of. The handler must reject
+// without re-publishing, even if the client knows the conv_id from a
+// prior interaction. (CodeRabbit PR #49.)
+func TestWSHandler_TypingRejectsNonMember(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	aliceClient, alice := h.AuthClient(t)
+	_, bob := h.AuthClient(t)
+	strangerClient, _ := h.AuthClient(t)
+
+	// alice + bob make a direct; stranger isn't a member.
+	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
+		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
+	})
+	if err != nil {
+		t.Fatalf("Create direct: %v", err)
+	}
+	convID := res.Conversation.ID
+
+	// Alice connects so she would receive a real typing.start broadcast
+	// if the stranger's send had been honored.
+	aliceConn, aResp, err := dialWS(t, aliceClient, h.Server.URL+"/v1/ws")
+	if aResp != nil && aResp.Body != nil {
+		_ = aResp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("alice dial: %v", err)
+	}
+	t.Cleanup(func() { _ = aliceConn.Close(websocket.StatusNormalClosure, "") })
+
+	// Stranger connects + tries to type into alice/bob's direct.
+	strangerConn, sResp, err := dialWS(t, strangerClient, h.Server.URL+"/v1/ws")
+	if sResp != nil && sResp.Body != nil {
+		_ = sResp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("stranger dial: %v", err)
+	}
+	t.Cleanup(func() { _ = strangerConn.Close(websocket.StatusNormalClosure, "") })
+
+	typing, _ := wsproto.Encode(wsproto.EventTypingStart, wsproto.TypingPayload{
+		ConversationID: convID,
+	})
+	if err := strangerConn.Write(context.Background(), websocket.MessageText, typing); err != nil {
+		t.Fatalf("stranger Write: %v", err)
+	}
+
+	// Alice must NOT receive a typing event.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, frame, err := aliceConn.Read(ctx)
+	if err == nil {
+		t.Errorf("alice received a typing event from a non-member: %s", frame)
+	}
+}
+
 // Disconnect cleanup: when a client closes the conn, the hub clears
 // the registration AND the bridge clears every channel subscription
 // for that user.
