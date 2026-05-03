@@ -9,17 +9,20 @@
 package httpapi_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
 // TestUnauthenticatedSweep verifies every authenticated route returns
-// 401 when invoked without a session cookie. Each entry pairs a method
-// + path; the body is fixed at empty/nullable JSON because we expect
-// to short-circuit at the auth guard before any decoder touches it.
+// 401 + apierror.CodeUnauthorized when invoked without a session
+// cookie. Each entry pairs a method + path; the body is fixed at
+// empty/nullable JSON because we expect to short-circuit at the auth
+// guard before any decoder touches it.
 func TestUnauthenticatedSweep(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
@@ -33,9 +36,17 @@ func TestUnauthenticatedSweep(t *testing.T) {
 		{http.MethodPost, "/v1/auth/logout-all", "", ""},
 		{http.MethodGet, "/v1/auth/me", "", ""},
 
+		// Users — every endpoint authenticated.
+		{http.MethodGet, "/v1/users", "", ""},
+		{http.MethodGet, "/v1/users/00000000-0000-0000-0000-000000000000", "", ""},
+		{http.MethodPatch, "/v1/users/me", `{}`, "application/json"},
+		{http.MethodDelete, "/v1/users/me", "", ""},
+		{http.MethodGet, "/v1/users/me/notifications", "", ""},
+
 		// Conversations — every endpoint authenticated.
 		{http.MethodGet, "/v1/conversations", "", ""},
 		{http.MethodGet, "/v1/conversations/00000000-0000-0000-0000-000000000000", "", ""},
+		{http.MethodPost, "/v1/conversations", `{"type":"direct","member_ids":["00000000-0000-0000-0000-000000000000"]}`, "application/json"},
 		{http.MethodPatch, "/v1/conversations/00000000-0000-0000-0000-000000000000", `{}`, "application/json"},
 		{http.MethodDelete, "/v1/conversations/00000000-0000-0000-0000-000000000000/members/me", "", ""},
 		{http.MethodPost, "/v1/conversations/00000000-0000-0000-0000-000000000000/members", `{"user_ids":[]}`, "application/json"},
@@ -55,6 +66,12 @@ func TestUnauthenticatedSweep(t *testing.T) {
 		// Messages.
 		{http.MethodGet, "/v1/conversations/00000000-0000-0000-0000-000000000000/messages", "", ""},
 		{http.MethodPost, "/v1/conversations/00000000-0000-0000-0000-000000000000/messages", `{"body":"hi"}`, "application/json"},
+		{http.MethodPatch, "/v1/messages/00000000-0000-0000-0000-000000000000", `{"body":"hi"}`, "application/json"},
+		{http.MethodDelete, "/v1/messages/00000000-0000-0000-0000-000000000000", "", ""},
+		{http.MethodGet, "/v1/messages/00000000-0000-0000-0000-000000000000/reads", "", ""},
+
+		// Attachments.
+		{http.MethodGet, "/v1/attachments/00000000-0000-0000-0000-000000000000", "", ""},
 
 		// Devices.
 		{http.MethodPost, "/v1/devices", `{"expo_token":"x","platform":"ios"}`, "application/json"},
@@ -62,7 +79,11 @@ func TestUnauthenticatedSweep(t *testing.T) {
 
 		// Presence + rooms.
 		{http.MethodGet, "/v1/presence/friends", "", ""},
+		{http.MethodGet, "/v1/widget/friends", "", ""},
+		{http.MethodPost, "/v1/presence/status", `{"status":"online"}`, "application/json"},
+		{http.MethodGet, "/v1/conversations/00000000-0000-0000-0000-000000000000/room", "", ""},
 		{http.MethodPost, "/v1/conversations/00000000-0000-0000-0000-000000000000/room/join", "", ""},
+		{http.MethodPost, "/v1/conversations/00000000-0000-0000-0000-000000000000/room/leave", "", ""},
 	}
 
 	for _, r := range routes {
@@ -83,6 +104,22 @@ func TestUnauthenticatedSweep(t *testing.T) {
 			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusUnauthorized {
 				t.Errorf("status = %d, want 401 for unauthenticated %s %s", resp.StatusCode, r.method, r.path)
+				return
+			}
+			// Decode the body and verify the apierror envelope carries
+			// the UNAUTHORIZED code — a regression that swaps in a
+			// different sentinel (FORBIDDEN, AUTH_REQUIRED) wouldn't
+			// trip the status-only assertion above.
+			var env struct {
+				Error apierror.Error `json:"error"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+				t.Errorf("decode body: %v", err)
+				return
+			}
+			if env.Error.Code != apierror.CodeUnauthorized {
+				t.Errorf("code = %q, want %q for %s %s",
+					env.Error.Code, apierror.CodeUnauthorized, r.method, r.path)
 			}
 		})
 	}

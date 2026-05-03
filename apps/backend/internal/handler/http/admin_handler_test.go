@@ -408,19 +408,22 @@ func TestAdminListAudit_HappyPath(t *testing.T) {
 
 // Bad-query-param sweep for the paginated admin endpoints. q exceeding
 // 200 chars + bad limit + bad cursor each trip a distinct guard
-// inside ListUsers / ListAudit before any service call.
+// inside ListUsers / ListAudit before any service call. The "bad q"
+// case fires apierror.BadRequest in the handler; the limit/cursor
+// cases come from pagination's parsers.
 func TestAdminListUsers_BadQueryParams(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
 	adminC, _ := h.AdminClient(t)
 
 	cases := []struct {
-		name string
-		path string
+		name     string
+		path     string
+		wantCode apierror.Code
 	}{
-		{"q over 200 chars", "/v1/admin/users?q=" + strings.Repeat("x", 201)},
-		{"bad limit", "/v1/admin/users?limit=abc"},
-		{"bad cursor", "/v1/admin/users?cursor=not-base64"},
+		{"q over 200 chars", "/v1/admin/users?q=" + strings.Repeat("x", 201), apierror.CodeBadRequest},
+		{"bad limit", "/v1/admin/users?limit=abc", apierror.CodeBadRequest},
+		{"bad cursor", "/v1/admin/users?cursor=not-base64", apierror.CodeBadRequest},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -431,9 +434,7 @@ func TestAdminListUsers_BadQueryParams(t *testing.T) {
 				t.Fatalf("GET: %v", err)
 			}
 			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode/100 != 4 {
-				t.Errorf("status = %d, want 4xx", resp.StatusCode)
-			}
+			assertCode(t, resp, http.StatusBadRequest, tc.wantCode)
 		})
 	}
 }
@@ -443,9 +444,12 @@ func TestAdminListAudit_BadQueryParams(t *testing.T) {
 	h := testutil.New(t)
 	adminC, _ := h.AdminClient(t)
 
-	cases := []struct{ name, path string }{
-		{"bad limit", "/v1/admin/audit?limit=abc"},
-		{"bad cursor", "/v1/admin/audit?cursor=not-base64"},
+	cases := []struct {
+		name, path string
+		wantCode   apierror.Code
+	}{
+		{"bad limit", "/v1/admin/audit?limit=abc", apierror.CodeBadRequest},
+		{"bad cursor", "/v1/admin/audit?cursor=not-base64", apierror.CodeBadRequest},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -456,9 +460,7 @@ func TestAdminListAudit_BadQueryParams(t *testing.T) {
 				t.Fatalf("GET: %v", err)
 			}
 			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode/100 != 4 {
-				t.Errorf("status = %d, want 4xx", resp.StatusCode)
-			}
+			assertCode(t, resp, http.StatusBadRequest, tc.wantCode)
 		})
 	}
 }
