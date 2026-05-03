@@ -739,6 +739,21 @@ func TestListUsers_PaginatesPastLimit(t *testing.T) {
 	if !second.HasMore || second.NextCursor == nil {
 		t.Fatalf("page 2 expected HasMore=true with cursor")
 	}
+	cursor2, err := pagination.Decode(*second.NextCursor)
+	if err != nil {
+		t.Fatalf("decode page 2 cursor: %v", err)
+	}
+	third, err := st.svc.ListUsers(ctx, admin.ListUsersParams{Limit: 5, Cursor: cursor2})
+	if err != nil {
+		t.Fatalf("ListUsers page 3: %v", err)
+	}
+	// 12 users − 5 − 5 = 2 remaining on the terminal page.
+	if len(third.Users) != 2 {
+		t.Errorf("page 3 len = %d, want 2", len(third.Users))
+	}
+	if third.HasMore || third.NextCursor != nil {
+		t.Errorf("page 3 expected terminal pagination, got hasMore=%v cursor=%v", third.HasMore, third.NextCursor)
+	}
 }
 
 // Closed-pool sweep — every public method's apierror.Internal wrap
@@ -838,6 +853,21 @@ func TestListAudit_PaginatesPastLimit(t *testing.T) {
 	}
 	if !first.HasMore || first.NextCursor == nil {
 		t.Fatalf("page 1 expected HasMore=true with cursor")
+	}
+	cursor, err := pagination.Decode(*first.NextCursor)
+	if err != nil {
+		t.Fatalf("decode page 1 cursor: %v", err)
+	}
+	second, err := st.svc.ListAudit(ctx, admin.ListAuditParams{Limit: 2, Cursor: cursor})
+	if err != nil {
+		t.Fatalf("ListAudit page 2: %v", err)
+	}
+	// 4 audit rows − 2 = 2 remaining on the terminal page.
+	if len(second.Entries) != 2 {
+		t.Errorf("page 2 len = %d, want 2", len(second.Entries))
+	}
+	if second.HasMore || second.NextCursor != nil {
+		t.Errorf("page 2 expected terminal pagination, got hasMore=%v cursor=%v", second.HasMore, second.NextCursor)
 	}
 }
 
