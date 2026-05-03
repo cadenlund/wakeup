@@ -219,9 +219,17 @@ func NewConn(cfg ConnConfig) (*Conn, error) {
 // drop-oldest then enqueue (§7.4). Each successful enqueue resets the
 // consecutive-drop counter; reaching kickThreshold triggers Close so
 // the client reconnects fresh.
+//
+// Defensive copy: callers (BroadcastToUser, the pubsub subscriber loop
+// in 8.2) often reuse the payload buffer or hand us a slice backed by
+// a pubsub.Message that goes back into a pool. If we sent the same
+// backing array onto the channel, writePump would race with the next
+// caller-side mutation. Always own the bytes we hand off.
 func (c *Conn) Send(payload []byte) {
+	cp := make([]byte, len(payload))
+	copy(cp, payload)
 	select {
-	case c.out <- payload:
+	case c.out <- cp:
 		c.drops.Store(0)
 		return
 	default:
@@ -234,7 +242,7 @@ func (c *Conn) Send(payload []byte) {
 	default:
 	}
 	select {
-	case c.out <- payload:
+	case c.out <- cp:
 	default:
 		// In the unlikely race where another sender refilled the slot
 		// between the receive and the send, count this as a hard drop.

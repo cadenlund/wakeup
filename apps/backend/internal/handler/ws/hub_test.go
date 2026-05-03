@@ -213,15 +213,17 @@ func TestHub_BroadcastDoesNotLeakAcrossUsers(t *testing.T) {
 
 	// cA gets the frame.
 	_ = readWithTimeout(t, cA, 2*time.Second)
-	// cB must NOT — wait briefly and assert no frame arrived.
+	// cB must NOT — wait briefly and assert no frame arrived. Anything
+	// other than the expected DeadlineExceeded means the cross-user
+	// isolation broke OR the connection died unexpectedly; either way
+	// the test should fail rather than silently logging.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, _, err := cB.Read(ctx)
 	if err == nil {
 		t.Errorf("cB received a frame meant for uidA")
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Logf("cB read err = %v (want DeadlineExceeded)", err)
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("cB read err = %v, want context.DeadlineExceeded (any other error means a broadcast leaked or the conn died)", err)
 	}
 }
 
@@ -345,18 +347,21 @@ func TestSend_DropsOldestPreservesNewest(t *testing.T) {
 		t.Fatalf("NewConn: %v", err)
 	}
 	hub.Register(c)
-	t.Cleanup(func() { hub.Unregister(c) })
+	// Run with a cancellable context so the goroutine doesn't outlive
+	// the test if the fakeWS's Read blocks forever — Cleanup runs
+	// LIFO, so cancel fires before Unregister, which fires before the
+	// fake's Close, which unblocks Read and lets Run return.
+	runCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		hub.Unregister(c)
+	})
 
 	// Fill 64 + push 1 more: the 65th send should still land in the
 	// channel (after dropping the oldest), so length stays at 64.
 	for i := 0; i < 65; i++ {
 		c.Send([]byte(fmt.Sprintf("msg-%d", i)))
 	}
-	// We can't peek the chan length safely without exposing internals;
-	// instead, drain via the write pump path. Start Run with a fake
-	// context so writePump can pull from out.
-	runCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	go func() { _ = c.Run(runCtx) }()
 
 	// Collect every payload the writePump shipped to fake.WriteCalls.
