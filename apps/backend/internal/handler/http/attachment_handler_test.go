@@ -138,6 +138,28 @@ func TestUploadAttachment_RejectsBadMIME(t *testing.T) {
 	assertCode(t, resp, http.StatusUnprocessableEntity, apierror.CodeValidation)
 }
 
+// Boundary check: a payload exactly at the 50 MiB cap must be accepted.
+// Pairs with TestUploadAttachment_RejectsTooLarge below — together they
+// guard against an off-by-one in the MaxBytesReader / multipart framing
+// math.
+func TestUploadAttachment_AcceptsExactCapBoundary(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, _ := h.AuthClient(t)
+
+	// 50 MiB body. The PDF magic in the first bytes is what makes
+	// http.DetectContentType return application/pdf, so MIME detection
+	// passes and we exercise only the size guard at this boundary.
+	body := make([]byte, 50<<20)
+	copy(body, minimalPDF)
+	resp := uploadAttachment(t, c, h.Server.URL+"/v1/attachments", "limit.pdf", body)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusCreated {
+		rb, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, rb)
+	}
+}
+
 func TestUploadAttachment_RejectsTooLarge(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)

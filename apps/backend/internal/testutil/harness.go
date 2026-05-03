@@ -148,7 +148,10 @@ func New(t *testing.T) *Harness {
 		SecretKey:      MinIOSecretKey,
 		Bucket:         bucket,
 		ForcePathStyle: true,
-		MaxUploadBytes: usersvc.MaxAvatarBytes + (256 << 10),
+		// Sized to fit both avatars (5 MiB) and attachments (50 MiB) so
+		// the same harness exercises both upload routes; +1 KiB slack
+		// matches the handler-side multipart framing budget.
+		MaxUploadBytes: attsvc.MaxAttachmentBytes + (1 << 10),
 	})
 	if err != nil {
 		t.Fatalf("Harness: build objectstore: %v", err)

@@ -82,6 +82,15 @@ func (h *AttachmentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, apierror.BadRequest("malformed multipart form"))
 		return
 	}
+	// 50 MiB cap means parts can spill from memory to /tmp; RemoveAll
+	// ensures we don't leak the spilled files on the host. Safe to defer
+	// after a successful ParseMultipartForm: the form is non-nil and
+	// RemoveAll is idempotent. (CodeRabbit PR #44.)
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		WriteError(w, r, apierror.BadRequest("missing `file` form field"))
