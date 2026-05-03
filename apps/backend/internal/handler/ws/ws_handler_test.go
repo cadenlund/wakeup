@@ -158,13 +158,19 @@ func TestWSHandler_TypingFansOutToOtherConvMembers(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bobConn.Close(websocket.StatusNormalClosure, "") })
 
-	// Wait for both registrations.
+	// Wait for both registrations. Fail-fast on timeout — letting the
+	// test continue with one or zero registered conns would surface
+	// later as a misleading "Read timed out" instead of "registration
+	// never landed". (CodeRabbit PR #49.)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if h.WSHub.ConnCount(alice.ID) == 1 && h.WSHub.ConnCount(bob.ID) == 1 {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	if gotA, gotB := h.WSHub.ConnCount(alice.ID), h.WSHub.ConnCount(bob.ID); gotA != 1 || gotB != 1 {
+		t.Fatalf("hub registration not ready: alice=%d bob=%d, want 1 and 1", gotA, gotB)
 	}
 
 	// Alice sends typing.start. Bob must receive a typing.start with
