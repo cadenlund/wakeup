@@ -2871,6 +2871,37 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/v1/ws": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Upgrades the request to a WebSocket. Auth is enforced before the upgrade via the same session cookie used for REST. The server subscribes the connection to ` + "`" + `user:\u003cid\u003e:events` + "`" + ` plus ` + "`" + `conv:\u003cid\u003e:messages` + "`" + ` for every conversation the caller is a member of, and routes inbound ` + "`" + `heartbeat` + "`" + ` / ` + "`" + `typing.*` + "`" + ` / ` + "`" + `presence.set` + "`" + ` events per §7.3. See §7.1 for the JSON envelope format.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "realtime"
+                ],
+                "summary": "Open the realtime WebSocket connection",
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols (WebSocket established)"
+                    },
+                    "401": {
+                        "description": "Not authenticated"
+                    },
+                    "429": {
+                        "description": "Rate limited"
+                    },
+                    "500": {
+                        "description": "Internal error"
+                    }
+                }
+            }
         }
     },
     "definitions": {

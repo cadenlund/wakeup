@@ -18,6 +18,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
+	wshandler "github.com/cadenlund/wakeup/apps/backend/internal/handler/ws"
 	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
@@ -58,6 +59,7 @@ type routerDeps struct {
 	ConversationHandler *httpapi.ConversationHandler
 	MessageHandler      *httpapi.MessageHandler
 	AttachmentHandler   *httpapi.AttachmentHandler
+	WSHandler           *wshandler.Handler
 
 	// Rate-limit tier overrides. Zero values fall back to the
 	// production §8.3 defaults (10/min auth, 60/min writes, 300/min
@@ -104,7 +106,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
 		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil ||
-		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil {
+		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.WSHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
 
@@ -209,6 +211,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Get("/v1/conversations/{id}/messages", d.MessageHandler.List)
 				r.Get("/v1/messages/{id}/reads", d.MessageHandler.ListReads)
 				r.Get("/v1/attachments/{id}", d.AttachmentHandler.Get)
+				r.Get("/v1/ws", d.WSHandler.Upgrade)
 			})
 		})
 	})

@@ -30,6 +30,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
+	wshandler "github.com/cadenlund/wakeup/apps/backend/internal/handler/ws"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	attrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/attachment"
@@ -97,6 +98,12 @@ type Harness struct {
 	MsgSvc       *msgsvc.Service
 	AttSvc       *attsvc.Service
 	Broker       pubsub.Broker
+
+	// WS plumbing surfaced for handler-level tests that want to assert
+	// pubsub fan-out into a connected client without re-constructing
+	// the wiring.
+	WSHub    *wshandler.Hub
+	WSBridge *wshandler.Bridge
 
 	serverURL *url.URL
 }
@@ -216,6 +223,24 @@ func New(t *testing.T) *Harness {
 		t.Fatalf("Harness: build attachment handler: %v", err)
 	}
 
+	// §8 WebSocket: build hub + bridge + upgrade handler so harness
+	// users can dial /v1/ws like any other route. The bridge owns one
+	// dispatcher goroutine for the lifetime of the harness.
+	wsHub := wshandler.NewHub(nil)
+	wsBridge, err := wshandler.NewBridge(wsHub, broker, nil)
+	if err != nil {
+		t.Fatalf("Harness: build ws bridge: %v", err)
+	}
+	t.Cleanup(wsBridge.Close)
+	wsHandler, err := wshandler.NewHandler(wshandler.HandlerConfig{
+		Hub: wsHub, Bridge: wsBridge, Broker: broker,
+		Auth: authSvc, Convs: convSvc,
+		AllowedOrigins: []string{"*"},
+	})
+	if err != nil {
+		t.Fatalf("Harness: build ws handler: %v", err)
+	}
+
 	router := chi.NewRouter()
 	router.Use(requestIDMiddleware) // §4.7 entry — full chain lands in 3.8.
 	authHandler.Mount(router)
@@ -224,6 +249,7 @@ func New(t *testing.T) *Harness {
 	convHandler.Mount(router)
 	msgHandler.Mount(router)
 	attHandler.Mount(router)
+	wsHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
 	t.Cleanup(server.Close)
@@ -260,6 +286,8 @@ func New(t *testing.T) *Harness {
 		MsgSvc:       msgSvc,
 		AttSvc:       attSvc,
 		Broker:       broker,
+		WSHub:        wsHub,
+		WSBridge:     wsBridge,
 		serverURL:    srvURL,
 	}
 }

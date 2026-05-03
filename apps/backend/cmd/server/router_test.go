@@ -14,6 +14,7 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/config"
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
+	wshandler "github.com/cadenlund/wakeup/apps/backend/internal/handler/ws"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
@@ -59,6 +60,15 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("attachment handler: %v", err)
 	}
+	wsHandler, err := wshandler.NewHandler(wshandler.HandlerConfig{
+		Hub: h.WSHub, Bridge: h.WSBridge, Broker: h.Broker,
+		Auth: h.AuthSvc, Convs: h.ConvSvc,
+		AllowedOrigins: []string{"*"},
+		WriteError:     httpapi.WriteError,
+	})
+	if err != nil {
+		t.Fatalf("ws handler: %v", err)
+	}
 
 	// Each test gets a unique rate-limit scope so parallel smoke tests
 	// (all bound to 127.0.0.1, all sharing the testcontainer redis)
@@ -85,6 +95,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		ConversationHandler: convHandler,
 		MessageHandler:      msgHandler,
 		AttachmentHandler:   attHandler,
+		WSHandler:           wsHandler,
 		RateLimitAuth:       rateLimitTier{Scope: "auth" + suffix, Limit: 10000, Window: time.Minute},
 		RateLimitWrites:     rateLimitTier{Scope: "writes" + suffix, Limit: 10000, Window: time.Minute},
 		RateLimitReads:      rateLimitTier{Scope: "reads" + suffix, Limit: 10000, Window: time.Minute},
