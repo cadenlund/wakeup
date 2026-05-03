@@ -109,20 +109,22 @@ func TestRunner_KeepsTickingAfterError(t *testing.T) {
 func TestRunner_StartIsIdempotent(t *testing.T) {
 	t.Parallel()
 	r := job.New(nil)
-	j := newFakeJob("idem", 30*time.Millisecond)
+	// Longer interval so the "single goroutine vs two goroutines"
+	// signal is clear even under -race -count=10 scheduler jitter.
+	// Original 30ms / 80ms-window combo flaked on loaded CI when a
+	// 4th tick fit inside the window for a single goroutine.
+	j := newFakeJob("idem", 100*time.Millisecond)
 	r.Register(j)
 	r.Start(context.Background())
 	r.Start(context.Background())
 	defer r.Stop()
 	<-j.ranAt
-	// If Start spawned a second goroutine, runCount would tick at twice
-	// the natural rate. Wait two intervals (≈ 60 ms; +slack for
-	// scheduler jitter) and assert at most three ticks have happened —
-	// "≤ 3" leaves headroom for one extra tick under load while still
-	// catching the duplicate-loop regression where we'd see ≥ 4.
-	time.Sleep(80 * time.Millisecond)
-	if got := j.runCount.Load(); got > 3 {
-		t.Errorf("runCount = %d (want ≤ 3) — Start may have spawned duplicate goroutines", got)
+	// 250ms / 100ms = 2-3 natural ticks; a duplicate goroutine produces
+	// 5-6. Threshold "≤ 4" sits between the two signals so jitter
+	// can't trip it.
+	time.Sleep(250 * time.Millisecond)
+	if got := j.runCount.Load(); got > 4 {
+		t.Errorf("runCount = %d (want ≤ 4) — Start may have spawned duplicate goroutines", got)
 	}
 }
 
