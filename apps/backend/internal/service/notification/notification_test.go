@@ -195,11 +195,10 @@ func TestNew_RejectsMissingDeps(t *testing.T) {
 		"all empty":       {},
 	}
 	for name, cfg := range cases {
-		cfg := cfg
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if _, err := notification.New(cfg); err == nil {
-				t.Errorf("%s: expected error", name)
+				t.Error("expected error")
 			}
 		})
 	}
