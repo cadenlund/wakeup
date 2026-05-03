@@ -2,6 +2,10 @@ package sentry_test
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,5 +53,98 @@ func TestFlush_NilReceiverReturnsTrue(t *testing.T) {
 	var c *sentryclient.Client
 	if !c.Flush(time.Second) {
 		t.Error("nil-receiver Flush should return true")
+	}
+}
+
+// End-to-end happy path: New with a real DSN pointed at a local
+// recorder, Capture an event, Flush, and assert the upstream received
+// the payload. Exercises the New success branch, Capture's
+// hub.WithScope path, and Flush's hub.Flush path that the nil-receiver
+// tests above can't reach.
+//
+// Not parallel: sentry.Init mutates package-global state in the
+// upstream SDK, so concurrent New() calls in the same process step on
+// each other.
+func TestNew_CaptureFlushE2E(t *testing.T) {
+	received := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Sentry posts to /api/<project>/envelope/ — we accept
+		// anything so a future SDK version that changes the path
+		// still fires this handler.
+		if r.Body != nil {
+			_ = r.Body.Close()
+		}
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse httptest URL: %v", err)
+	}
+	// DSN form: <scheme>://<key>@<host>/<projectid>
+	dsn := u.Scheme + "://k@" + u.Host + "/1"
+
+	c, err := sentryclient.New(sentryclient.Config{
+		DSN:         dsn,
+		Environment: "test",
+		Release:     "test-release",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if c == nil {
+		t.Fatal("New returned nil client")
+	}
+
+	c.Capture(errors.New("boom"), map[string]string{"request_id": "abc"})
+
+	if !c.Flush(5 * time.Second) {
+		t.Error("Flush returned false (event still queued after timeout)")
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Error("upstream never received the captured event")
+	}
+}
+
+// Capture with a nil tags map must still send (no scope tags) — the
+// recovery middleware passes nil when no per-request context is
+// available, and that path must not panic or short-circuit.
+func TestCapture_NilTagsDoesNotPanic(t *testing.T) {
+	received := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			_ = r.Body.Close()
+		}
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse httptest URL: %v", err)
+	}
+	dsn := strings.Join([]string{u.Scheme, "://k@", u.Host, "/1"}, "")
+	c, err := sentryclient.New(sentryclient.Config{DSN: dsn})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c.Capture(errors.New("boom"), nil)
+	if !c.Flush(5 * time.Second) {
+		t.Error("Flush returned false (event still queued after timeout)")
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Error("upstream never received the captured event")
 	}
 }
