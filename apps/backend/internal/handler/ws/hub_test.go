@@ -213,17 +213,20 @@ func TestHub_BroadcastDoesNotLeakAcrossUsers(t *testing.T) {
 
 	// cA gets the frame.
 	_ = readWithTimeout(t, cA, 2*time.Second)
-	// cB must NOT — wait briefly and assert no frame arrived. Anything
-	// other than the expected DeadlineExceeded means the cross-user
-	// isolation broke OR the connection died unexpectedly; either way
-	// the test should fail rather than silently logging.
+	// cB must NOT — wait briefly and assert no frame arrived. The
+	// invariant under test is "cross-user broadcasts don't leak", so
+	// we fail iff the read returned data without an error. The exact
+	// error class is intentionally not asserted: coder/websocket can
+	// surface either context.DeadlineExceeded or a transport-level
+	// "use of closed network connection" depending on whether the
+	// ping/pong loop noticed the deadline first, and treating the
+	// latter as a failure is a CI flake (the strictness was
+	// introduced and reverted in PR #47 after CI hit it).
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	_, _, err := cB.Read(ctx)
+	_, frame, err := cB.Read(ctx)
 	if err == nil {
-		t.Errorf("cB received a frame meant for uidA")
-	} else if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("cB read err = %v, want context.DeadlineExceeded (any other error means a broadcast leaked or the conn died)", err)
+		t.Errorf("cB received a frame meant for uidA: %q", frame)
 	}
 }
 
