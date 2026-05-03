@@ -62,10 +62,13 @@ func TestStartLiveKit_RejectsBadToken(t *testing.T) {
 }
 
 // LiveKitClient connects via the harness so callers don't have to
-// manage Disconnect manually.
+// manage Disconnect manually. Uses a zero-value Harness because the
+// helper only needs t.Cleanup wiring; spinning up the full DB / Redis
+// / MinIO stack via testutil.New would be wasted work here.
+// (CodeRabbit PR #55.)
 func TestHarness_LiveKitClient(t *testing.T) {
 	t.Parallel()
-	h := testutil.New(t)
+	h := &testutil.Harness{}
 	env := testutil.StartLiveKit(t, "")
 	tok := testutil.IssueLiveKitToken(t, env, "harness-room", "harness-user")
 	room := h.LiveKitClient(t, env, "harness-user", tok)

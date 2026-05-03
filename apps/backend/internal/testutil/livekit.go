@@ -73,6 +73,16 @@ func StartLiveKit(t *testing.T, _ string) LiveKitTestEnv {
 			livekitErr = fmt.Errorf("StartLiveKit: run container: %w", err)
 			return
 		}
+		// Container leak guard: if Host/MappedPort fails after the
+		// container is up, terminate so we don't strand it on the
+		// host. Cleared on success so the long-running container
+		// survives for the rest of the test binary. (CodeRabbit PR #55.)
+		started := false
+		defer func() {
+			if !started {
+				_ = c.Terminate(ctx)
+			}
+		}()
 		host, err := c.Host(ctx)
 		if err != nil {
 			livekitErr = fmt.Errorf("StartLiveKit: host: %w", err)
@@ -83,6 +93,7 @@ func StartLiveKit(t *testing.T, _ string) LiveKitTestEnv {
 			livekitErr = fmt.Errorf("StartLiveKit: port: %w", err)
 			return
 		}
+		started = true
 		// KeyProvider feeds webhook.Receive's signature check —
 		// constructed with the same dev keys the container ships
 		// with so a synthesized webhook signed via
