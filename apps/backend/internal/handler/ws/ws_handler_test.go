@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -106,7 +105,10 @@ func TestWSHandler_HeartbeatIsNoOp(t *testing.T) {
 
 	// Send a heartbeat envelope. The handler must accept it without
 	// closing the connection, but no S→C frame is expected back.
-	payload, _ := wsproto.Encode(wsproto.EventHeartbeat, wsproto.HeartbeatPayload{})
+	payload, err := wsproto.Encode(wsproto.EventHeartbeat, wsproto.HeartbeatPayload{})
+	if err != nil {
+		t.Fatalf("Encode heartbeat: %v", err)
+	}
 	if err := conn.Write(context.Background(), websocket.MessageText, payload); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -167,9 +169,12 @@ func TestWSHandler_TypingFansOutToOtherConvMembers(t *testing.T) {
 
 	// Alice sends typing.start. Bob must receive a typing.start with
 	// alice's user_id stamped server-side.
-	typing, _ := wsproto.Encode(wsproto.EventTypingStart, wsproto.TypingPayload{
+	typing, err := wsproto.Encode(wsproto.EventTypingStart, wsproto.TypingPayload{
 		ConversationID: convID,
 	})
+	if err != nil {
+		t.Fatalf("Encode typing: %v", err)
+	}
 	if err := aliceConn.Write(context.Background(), websocket.MessageText, typing); err != nil {
 		t.Fatalf("alice Write: %v", err)
 	}
@@ -240,9 +245,12 @@ func TestWSHandler_TypingRejectsNonMember(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = strangerConn.Close(websocket.StatusNormalClosure, "") })
 
-	typing, _ := wsproto.Encode(wsproto.EventTypingStart, wsproto.TypingPayload{
+	typing, err := wsproto.Encode(wsproto.EventTypingStart, wsproto.TypingPayload{
 		ConversationID: convID,
 	})
+	if err != nil {
+		t.Fatalf("Encode typing: %v", err)
+	}
 	if err := strangerConn.Write(context.Background(), websocket.MessageText, typing); err != nil {
 		t.Fatalf("stranger Write: %v", err)
 	}
@@ -273,8 +281,7 @@ func TestWSHandler_DisconnectClearsBridgeSubscriptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create direct: %v", err)
 	}
-	convID := res.Conversation.ID
-	channel := fmt.Sprintf("conv:%s:messages", convID)
+	_ = res
 
 	conn, resp, err := dialWS(t, aliceClient, h.Server.URL+"/v1/ws")
 	if resp != nil && resp.Body != nil {
@@ -283,39 +290,39 @@ func TestWSHandler_DisconnectClearsBridgeSubscriptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	// Wait until registered.
+	// Wait until registered AND the bridge has subscribed her to her
+	// conversation channels (user:<id>:events + at least one conv:*).
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if h.WSHub.ConnCount(alice.ID) == 1 {
+		if h.WSHub.ConnCount(alice.ID) == 1 && h.WSBridge.SubscriptionCount(alice.ID) >= 2 {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	if got := h.WSBridge.SubscriptionCount(alice.ID); got < 2 {
+		t.Fatalf("pre-close SubscriptionCount = %d, want >= 2 (user channel + conv channel)", got)
 	}
 
 	// Close the client side. Server-side Run unwinds and the deferred
 	// bridge.UnsubscribeAll runs.
 	_ = conn.Close(websocket.StatusNormalClosure, "bye")
 
-	// Hub count drops to 0.
+	// Hub count drops to 0 AND bridge subscription count drops to 0
+	// — the latter is the real assertion CodeRabbit asked for: stale
+	// pubsub interest left behind a closed conn would hold the broker
+	// keyspace open for a ghost subscriber.
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if h.WSHub.ConnCount(alice.ID) == 0 {
-			break
+		if h.WSHub.ConnCount(alice.ID) == 0 && h.WSBridge.SubscriptionCount(alice.ID) == 0 {
+			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	if got := h.WSHub.ConnCount(alice.ID); got != 0 {
 		t.Errorf("ConnCount after disconnect = %d, want 0", got)
 	}
-	// And a publish on alice's old channel doesn't reach a freshly
-	// registered hub conn (because the bridge is no longer holding
-	// alice's interest on that channel). We can't read alice's frames
-	// — she's gone — so we instead assert via a side-channel: another
-	// dial registers fresh subs, and the prior subscription is gone.
-	// (A weaker but reasonable end-to-end guard: a subsequent Publish
-	// doesn't error.)
-	if err := h.Broker.Publish(context.Background(), channel, []byte(`{"type":"message.new"}`)); err != nil {
-		t.Fatalf("Publish post-disconnect: %v", err)
+	if got := h.WSBridge.SubscriptionCount(alice.ID); got != 0 {
+		t.Errorf("SubscriptionCount after disconnect = %d, want 0", got)
 	}
 }
 

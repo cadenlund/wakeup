@@ -167,6 +167,21 @@ func (b *Bridge) UnsubscribeAll(ctx context.Context, userID uuid.UUID) []string 
 	return emptied
 }
 
+// SubscriptionCount returns the number of channels userID is currently
+// subscribed to. Intended for tests and ops introspection — production
+// callers should not need to peek at this state.
+func (b *Bridge) SubscriptionCount(userID uuid.UUID) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, set := range b.subs {
+		if _, ok := set[userID]; ok {
+			n++
+		}
+	}
+	return n
+}
+
 // Close stops the dispatcher and drops every subscription. Safe to
 // call multiple times AND safe to call before any Subscribe (the
 // dispatcher is started lazily, so Close-before-Subscribe must not
