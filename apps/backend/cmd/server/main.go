@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,6 +47,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	presrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/presence"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	sentryclient "github.com/cadenlund/wakeup/apps/backend/internal/sentry"
 	adminsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
@@ -124,6 +126,22 @@ func run() error {
 	pusher, err := buildPusher(cfg)
 	if err != nil {
 		return fmt.Errorf("pushnotif: %w", err)
+	}
+	sentryClient, err := buildSentry(cfg)
+	if err != nil {
+		return fmt.Errorf("sentry: %w", err)
+	}
+	if sentryClient != nil {
+		// SIGTERM path drains the queue before exit so in-flight
+		// captures don't get dropped on graceful shutdown. A timeout
+		// here (2s isn't enough to flush the queue) is rare but worth
+		// surfacing — silently dropping events on shutdown would mean
+		// the worst-failure cluster of errors never reaches Sentry.
+		defer func() {
+			if ok := sentryClient.Flush(2 * time.Second); !ok {
+				logger.Warn("sentry flush timed out before exit; some events may be dropped")
+			}
+		}()
 	}
 
 	users := userrepo.New(pool)
@@ -319,7 +337,7 @@ func run() error {
 		return fmt.Errorf("ws handler: %w", err)
 	}
 
-	router, err := buildRouter(routerDeps{
+	deps := routerDeps{
 		Cfg:                   cfg,
 		Logger:                logger,
 		Pool:                  pool,
@@ -349,7 +367,14 @@ func run() error {
 		AdminHandler:          adminHandler,
 		LiveKitWebhookHandler: livekitWebhookHandler,
 		WSHandler:             wsHandler,
-	})
+	}
+	// Avoid the typed-nil-as-interface gotcha: only assign Sentry when
+	// we actually have a concrete client. A nil `*sentryclient.Client`
+	// stored into an interface field would compare != nil downstream.
+	if sentryClient != nil {
+		deps.Sentry = sentryClient
+	}
+	router, err := buildRouter(deps)
 	if err != nil {
 		return fmt.Errorf("router: %w", err)
 	}
@@ -438,6 +463,31 @@ type noopPusher struct{}
 
 func (noopPusher) Send(_ context.Context, _ []string, _ pushnotif.Notification) error {
 	return nil
+}
+
+// buildSentry returns a §13.1 Sentry client when a DSN is configured.
+// Mirrors the buildMailer / buildPusher pattern: blank DSN in
+// local/test envs is allowed (returns nil so the recovery middleware
+// skips capture); blank DSN in any other env is fatal so a missing
+// secret rollout doesn't silently kill error visibility.
+//
+// Whitespace-only DSNs are treated as blank — copy-pasting a DSN with
+// trailing whitespace would otherwise sail past the empty check and
+// then fail at SDK Init with a less obvious error.
+func buildSentry(cfg *config.Config) (*sentryclient.Client, error) {
+	dsn := strings.TrimSpace(cfg.SentryDSN)
+	if dsn == "" {
+		switch cfg.Env {
+		case "local", "test":
+			return nil, nil
+		default:
+			return nil, fmt.Errorf("sentry: SENTRY_DSN is required in env=%s", cfg.Env)
+		}
+	}
+	return sentryclient.New(sentryclient.Config{
+		DSN:         dsn,
+		Environment: cfg.SentryEnvironment,
+	})
 }
 
 // lazyFriendList is the §11.5 wire-up adapter that breaks the
