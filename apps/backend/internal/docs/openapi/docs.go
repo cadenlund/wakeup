@@ -1282,7 +1282,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Creates a new message in the conversation. The caller must be a member. ` + "`" + `attachment_ids` + "`" + ` link previously-uploaded attachments; ` + "`" + `reply_to_message_id` + "`" + ` must live in the same conversation (cross-conversation replies are rejected at 422). On success, fans out a ` + "`" + `message.created` + "`" + ` event on ` + "`" + `conv:\u003cid\u003e:messages` + "`" + ` per §4.5.",
+                "description": "Creates a new message in the conversation. The caller must be a member. ` + "`" + `attachment_ids` + "`" + ` link previously-uploaded attachments; ` + "`" + `reply_to_message_id` + "`" + ` must live in the same conversation (cross-conversation replies are rejected at 422). On success, fans out a ` + "`" + `message.new` + "`" + ` event on ` + "`" + `conv:\u003cid\u003e:messages` + "`" + ` per §4.5 / §7.2.",
                 "consumes": [
                     "application/json"
                 ],

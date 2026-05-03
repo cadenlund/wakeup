@@ -251,7 +251,7 @@ func TestSend_PublishesEvent(t *testing.T) {
 
 	select {
 	case msg := <-ch:
-		if !strings.Contains(string(msg.Payload), "message.created") {
+		if !strings.Contains(string(msg.Payload), "message.new") {
 			t.Errorf("payload missing event type: %s", msg.Payload)
 		}
 	case <-time.After(2 * time.Second):

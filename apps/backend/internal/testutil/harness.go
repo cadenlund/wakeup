@@ -22,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	coderws "github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -443,11 +444,28 @@ func WithPassword(s string) AuthClientOpt { return func(o *authClientOpts) { o.p
 // after registration since the public Register endpoint always creates `user`.
 func WithRole(s string) AuthClientOpt { return func(o *authClientOpts) { o.role = s } }
 
-// WSDial dials /v1/ws authenticated as the given user. Lands in Phase 8.1
-// when the WebSocket hub exists.
-func (h *Harness) WSDial(t *testing.T, _ *http.Client) any {
+// WSDial dials /v1/ws using the cookie jar from c so the WebSocket
+// upgrade carries the same session cookie REST endpoints accept.
+// Returns the *websocket.Conn the test can Read/Write on; on failure
+// fails the test with t.Fatalf. The test is responsible for closing
+// the returned conn.
+func (h *Harness) WSDial(t *testing.T, c *http.Client) *coderws.Conn {
 	t.Helper()
-	panic("Harness.WSDial: wire me in Phase 8.1 (websocket hub) — milestone 1.9 only ships scaffolding")
+	wsURL := "ws" + strings.TrimPrefix(h.Server.URL, "http") + "/v1/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tr, _ := c.Transport.(*http.Transport)
+	dialClient := &http.Client{Transport: tr, Jar: c.Jar}
+	conn, resp, err := coderws.Dial(ctx, wsURL, &coderws.DialOptions{
+		HTTPClient: dialClient,
+	})
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("WSDial: %v", err)
+	}
+	return conn
 }
 
 // requestIDMiddleware is the §4.7 minimal version: read X-Request-ID from
