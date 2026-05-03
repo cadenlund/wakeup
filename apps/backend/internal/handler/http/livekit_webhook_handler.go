@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/livekit/protocol/auth"
@@ -137,8 +138,13 @@ func (h *LiveKitWebhookHandler) handleRoomStarted(ctx context.Context, convID uu
 		// At-least-once delivery: room already known to be started.
 		return nil
 	}
-	h.publish(ctx, convID, wsproto.EventRoomStarted, map[string]any{
-		"conversation_id": convID,
+	// LiveKit's room_started event doesn't carry an initiator —
+	// that surfaces in the subsequent participant_joined event. We
+	// emit room.started with the conversation_id only and zero-value
+	// InitiatorID; the typed payload still gives schema-safe encoding
+	// vs. a map[string]any. (CodeRabbit PR #58.)
+	h.publish(ctx, convID, wsproto.EventRoomStarted, wsproto.RoomStartedPayload{
+		ConversationID: convID,
 	})
 	return nil
 }
@@ -177,8 +183,25 @@ func (h *LiveKitWebhookHandler) handleParticipantJoined(
 		ConversationID: convID,
 		UserID:         userID,
 		Video:          participantHasVideo(p),
+		JoinedAt:       participantJoinedAt(p),
 	})
 	return nil
+}
+
+// participantJoinedAt extracts the participant's join timestamp from
+// the LiveKit webhook event. Prefers JoinedAtMs (millisecond precision)
+// and falls back to the seconds-resolution JoinedAt. (CodeRabbit PR #58.)
+func participantJoinedAt(p *livekit.ParticipantInfo) time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	if p.JoinedAtMs > 0 {
+		return time.UnixMilli(p.JoinedAtMs)
+	}
+	if p.JoinedAt > 0 {
+		return time.Unix(p.JoinedAt, 0)
+	}
+	return time.Time{}
 }
 
 func (h *LiveKitWebhookHandler) handleParticipantLeft(
