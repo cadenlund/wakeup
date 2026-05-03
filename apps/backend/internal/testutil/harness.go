@@ -32,12 +32,14 @@ import (
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
 	"github.com/cadenlund/wakeup/apps/backend/internal/objectstore"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
+	attrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/attachment"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
@@ -86,12 +88,14 @@ type Harness struct {
 	FriendRepo   *friendrepo.Queries
 	ConvRepo     *convrepo.Queries
 	MsgRepo      *msgrepo.Queries
+	AttRepo      *attrepo.Queries
 	NotifPrefSvc *notifprefsvc.Service
 	AuthSvc      *auth.Service
 	UserSvc      *usersvc.Service
 	FriendSvc    *friendsvc.Service
 	ConvSvc      *convsvc.Service
 	MsgSvc       *msgsvc.Service
+	AttSvc       *attsvc.Service
 	Broker       pubsub.Broker
 
 	serverURL *url.URL
@@ -128,6 +132,7 @@ func New(t *testing.T) *Harness {
 	friends := friendrepo.New(pool)
 	convs := convrepo.New(pool)
 	msgs := msgrepo.New(pool)
+	atts := attrepo.New(pool)
 	sm := session.New(pool)
 
 	broker := pubsub.NewInProc(pubsub.NewRegistry())
@@ -177,6 +182,10 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build message service: %v", err)
 	}
+	attSvc, err := attsvc.New(attsvc.Config{Repo: atts, Storage: objStore})
+	if err != nil {
+		t.Fatalf("Harness: build attachment service: %v", err)
+	}
 
 	v := httpapi.NewValidator()
 	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
@@ -199,6 +208,10 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build message handler: %v", err)
 	}
+	attHandler, err := httpapi.NewAttachmentHandler(attSvc, authSvc)
+	if err != nil {
+		t.Fatalf("Harness: build attachment handler: %v", err)
+	}
 
 	router := chi.NewRouter()
 	router.Use(requestIDMiddleware) // §4.7 entry — full chain lands in 3.8.
@@ -207,6 +220,7 @@ func New(t *testing.T) *Harness {
 	friendHandler.Mount(router)
 	convHandler.Mount(router)
 	msgHandler.Mount(router)
+	attHandler.Mount(router)
 
 	server := httptest.NewTLSServer(sm.LoadAndSave(router))
 	t.Cleanup(server.Close)
@@ -234,12 +248,14 @@ func New(t *testing.T) *Harness {
 		FriendRepo:   friends,
 		ConvRepo:     convs,
 		MsgRepo:      msgs,
+		AttRepo:      atts,
 		NotifPrefSvc: notifSvc,
 		AuthSvc:      authSvc,
 		UserSvc:      userSvc,
 		FriendSvc:    friendSvc,
 		ConvSvc:      convSvc,
 		MsgSvc:       msgSvc,
+		AttSvc:       attSvc,
 		Broker:       broker,
 		serverURL:    srvURL,
 	}

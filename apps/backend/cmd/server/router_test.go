@@ -55,6 +55,10 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("message handler: %v", err)
 	}
+	attHandler, err := httpapi.NewAttachmentHandler(h.AttSvc, h.AuthSvc)
+	if err != nil {
+		t.Fatalf("attachment handler: %v", err)
+	}
 
 	// Each test gets a unique rate-limit scope so parallel smoke tests
 	// (all bound to 127.0.0.1, all sharing the testcontainer redis)
@@ -74,11 +78,13 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		FriendSvc:           h.FriendSvc,
 		ConvSvc:             h.ConvSvc,
 		MsgSvc:              h.MsgSvc,
+		AttSvc:              h.AttSvc,
 		UserHandler:         userHandler,
 		AuthHandler:         authHandler,
 		FriendHandler:       friendHandler,
 		ConversationHandler: convHandler,
 		MessageHandler:      msgHandler,
+		AttachmentHandler:   attHandler,
 		RateLimitAuth:       rateLimitTier{Scope: "auth" + suffix, Limit: 10000, Window: time.Minute},
 		RateLimitWrites:     rateLimitTier{Scope: "writes" + suffix, Limit: 10000, Window: time.Minute},
 		RateLimitReads:      rateLimitTier{Scope: "reads" + suffix, Limit: 10000, Window: time.Minute},
