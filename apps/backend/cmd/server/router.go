@@ -298,7 +298,7 @@ func corsMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"},
-		ExposedHeaders:   []string{"X-Request-ID", "Retry-After"},
+		ExposedHeaders:   []string{"X-Request-ID", "Retry-After", "Idempotent-Replay"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	})

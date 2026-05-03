@@ -2,12 +2,13 @@ package middleware_test
 
 import (
 	"context"
-	"errors"
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -41,14 +42,13 @@ func (m *memStore) Put(_ context.Context, p idemrepo.PutParams) (idemrepo.Entry,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.entries[m.k(p.Key, p.UserID)]; ok {
-		// Mirror pgx's primary-key violation. The middleware logs and
-		// continues, so we never assert on this path explicitly — but
-		// the behaviour matters if a future change rewires it.
-		return idemrepo.Entry{}, errors.New("duplicate")
+		return idemrepo.Entry{}, idemrepo.ErrConflict
 	}
 	e := idemrepo.Entry{
 		Key: p.Key, UserID: p.UserID, RequestHash: p.RequestHash,
-		ResponseStatus: p.ResponseStatus, ResponseBody: p.ResponseBody,
+		ResponseStatus:  p.ResponseStatus,
+		ResponseHeaders: p.ResponseHeaders,
+		ResponseBody:    p.ResponseBody,
 	}
 	m.entries[m.k(p.Key, p.UserID)] = e
 	return e, nil
@@ -291,6 +291,121 @@ func TestIdempotency_NoUserReturns401(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
+}
+
+// Replay must restore the response headers the handler set on the
+// first call. Without this, the cached body would surface with a
+// default Content-Type and clients would parse JSON as text/plain.
+func TestIdempotency_ReplayRestoresHeaders(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	h := newIdempotencyStack(t, store, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-Custom", "first-call")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"x":1}`))
+	})
+	uid := uuid.New()
+	first := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{}`)).
+		WithContext(ctxWithUser(uid))
+	req1.Header.Set(mw.IdempotencyKeyHeader, "key-headers")
+	h.ServeHTTP(first, req1)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status = %d", first.Code)
+	}
+
+	// Second request: cached replay. Headers must round-trip.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{}`)).
+		WithContext(ctxWithUser(uid))
+	req.Header.Set(mw.IdempotencyKeyHeader, "key-headers")
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Errorf("replayed Content-Type = %q, want json", got)
+	}
+	if got := rec.Header().Get("X-Custom"); got != "first-call" {
+		t.Errorf("replayed X-Custom = %q, want first-call", got)
+	}
+	if got := rec.Header().Get(mw.IdempotentReplayHeader); got != "true" {
+		t.Errorf("Idempotent-Replay = %q, want true", got)
+	}
+}
+
+// Concurrent writers race: simulate two requests with the same key
+// where the *second* Put hits a PK conflict. The middleware must log
+// the race and not corrupt the in-flight response (the first request
+// already wrote one). We verify the Idempotent-Replay header on the
+// racing request stays "false" since the handler did execute.
+func TestIdempotency_PutConflictDoesNotFailRequest(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	uid := uuid.New()
+
+	// Pre-seed an entry so the next Put trips ErrConflict.
+	if _, err := store.Put(context.Background(), idemrepo.PutParams{
+		Key: "race-key", UserID: uid,
+		RequestHash:    requestHashHelper("POST", "/v1/x", []byte(`{"a":1}`)),
+		ResponseStatus: http.StatusCreated,
+		ResponseBody:   []byte(`{"first":true}`),
+		TTL:            time.Hour,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// stub Get to miss so the middleware falls into the Put path
+	// and trips ErrConflict on the way out.
+	racing := &raceStore{base: store}
+	called := 0
+	h := mw.Idempotency(mw.IdempotencyConfig{
+		Store: racing, WriteError: fakeWriteError,
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called++
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"second":true}`))
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader(`{"a":1}`)).
+		WithContext(ctxWithUser(uid))
+	req.Header.Set(mw.IdempotencyKeyHeader, "race-key")
+	h.ServeHTTP(rec, req)
+
+	if called != 1 {
+		t.Errorf("handler should have run despite race, calls = %d", called)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status = %d, want 201", rec.Code)
+	}
+	if got := rec.Header().Get(mw.IdempotentReplayHeader); got != "false" {
+		t.Errorf("racing request is fresh, Idempotent-Replay = %q, want false", got)
+	}
+}
+
+// raceStore returns ErrNotFound on Get even when the underlying memStore
+// has the key — simulates a race where two goroutines both miss Get
+// before either has written. Put delegates to the base so the
+// pre-seeded conflict surfaces normally.
+type raceStore struct{ base *memStore }
+
+func (r *raceStore) Get(_ context.Context, _ string, _ uuid.UUID) (idemrepo.Entry, error) {
+	return idemrepo.Entry{}, idemrepo.ErrNotFound
+}
+
+func (r *raceStore) Put(ctx context.Context, p idemrepo.PutParams) (idemrepo.Entry, error) {
+	return r.base.Put(ctx, p)
+}
+
+// requestHashHelper duplicates the unexported requestHash so tests can
+// pre-seed the memStore with the exact bytes the middleware will compute.
+func requestHashHelper(method, path string, body []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte(method))
+	h.Write([]byte(" "))
+	h.Write([]byte(path))
+	h.Write([]byte("\n"))
+	h.Write(body)
+	return h.Sum(nil)
 }
 
 func TestIdempotency_PanicsOnBadConfig(t *testing.T) {

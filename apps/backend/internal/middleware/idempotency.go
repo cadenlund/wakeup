@@ -118,7 +118,14 @@ func Idempotency(cfg IdempotencyConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			body, err := io.ReadAll(io.LimitReader(r.Body, MaxIdempotentBodyBytes+1))
+			// Read the FULL body so we can both (a) hash the first
+			// MaxIdempotentBodyBytes for the cache key check and
+			// (b) hand the complete payload to the downstream handler.
+			// io.LimitReader(MaxIdempotentBodyBytes+1) would truncate the
+			// downstream handler's view — CodeRabbit caught this on PR #74.
+			// Upstream chi has a max-body cap (http.MaxBytesReader at the
+			// route level) so io.ReadAll is bounded.
+			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				cfg.WriteError(w, r, apierror.BadRequest("read body").WithCause(err))
 				return
@@ -145,16 +152,7 @@ func Idempotency(cfg IdempotencyConfig) func(http.Handler) http.Handler {
 					cfg.WriteError(w, r, apierror.IdempotencyKeyReused())
 					return
 				}
-				// Hash match → cached replay. Stream the cached body
-				// straight to the wire with the original status code
-				// and the Idempotent-Replay flag.
-				w.Header().Set(IdempotentReplayHeader, "true")
-				w.WriteHeader(entry.ResponseStatus)
-				if _, writeErr := w.Write(entry.ResponseBody); writeErr != nil {
-					logger.WarnContext(r.Context(), "idempotency: write cached response",
-						slog.String("error", writeErr.Error()),
-					)
-				}
+				replayCached(r.Context(), w, entry, logger)
 				return
 
 			case errors.Is(getErr, idemrepo.ErrNotFound):
@@ -185,19 +183,77 @@ func Idempotency(cfg IdempotencyConfig) func(http.Handler) http.Handler {
 			if rec.status >= 500 {
 				return
 			}
+			// Copy the captured headers map so a future caller mutation
+			// of rec doesn't bleed into the cached entry. Strip the
+			// Idempotent-Replay header — replay sets that itself based
+			// on whether it was a fresh hit or a cache replay.
+			snapshot := snapshotHeaders(rec.Header())
 			if _, putErr := cfg.Store.Put(r.Context(), idemrepo.PutParams{
 				Key: key, UserID: user.ID, RequestHash: hash,
-				ResponseStatus: rec.status, ResponseBody: rec.body.Bytes(),
-				TTL: IdempotencyTTL,
+				ResponseStatus: rec.status, ResponseHeaders: snapshot,
+				ResponseBody: rec.body.Bytes(),
+				TTL:          IdempotencyTTL,
 			}); putErr != nil {
-				// Cache failure is logged but never fails the request —
-				// the handler already produced a real response.
+				if errors.Is(putErr, idemrepo.ErrConflict) {
+					// Concurrent insert: another request with the same
+					// (key, user_id) wrote first. Their entry is now
+					// authoritative — we don't overwrite it with ours,
+					// and we don't fail the current request because the
+					// handler already produced a real response on the
+					// wire. Log so an unexpectedly hot key surfaces.
+					logger.InfoContext(r.Context(), "idempotency: concurrent insert raced",
+						slog.String("key", key),
+					)
+					return
+				}
+				// Other cache failures are logged but never fail the
+				// request — the handler already produced a real response.
 				logger.WarnContext(r.Context(), "idempotency: put",
 					slog.String("error", putErr.Error()),
 				)
 			}
 		})
 	}
+}
+
+// replayCached streams a cached entry to w. Pulled out of the main flow
+// so the call site stays readable; also a single place to evolve the
+// replay format (e.g. Idempotent-Replay-Age in a future milestone).
+func replayCached(ctx context.Context, w http.ResponseWriter, entry idemrepo.Entry, logger *slog.Logger) {
+	for k, vs := range entry.ResponseHeaders {
+		// Idempotent-Replay is set by the middleware itself, not the
+		// handler — drop it from the snapshot if any past row carried
+		// it (rows written before this commit might have).
+		if k == IdempotentReplayHeader {
+			continue
+		}
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.Header().Set(IdempotentReplayHeader, "true")
+	w.WriteHeader(entry.ResponseStatus)
+	if _, writeErr := w.Write(entry.ResponseBody); writeErr != nil {
+		logger.WarnContext(ctx, "idempotency: write cached response",
+			slog.String("error", writeErr.Error()),
+		)
+	}
+}
+
+// snapshotHeaders returns a deep-ish copy of h with the Idempotent-Replay
+// header stripped — the middleware owns that header, never the handler.
+// Multi-value headers (Set-Cookie, etc.) round-trip via the slice copy.
+func snapshotHeaders(h http.Header) map[string][]string {
+	out := make(map[string][]string, len(h))
+	for k, vs := range h {
+		if k == IdempotentReplayHeader {
+			continue
+		}
+		copyVs := make([]string, len(vs))
+		copy(copyVs, vs)
+		out[k] = copyVs
+	}
+	return out
 }
 
 // isWriteMethod reports whether m is one of the §4.8 write verbs.

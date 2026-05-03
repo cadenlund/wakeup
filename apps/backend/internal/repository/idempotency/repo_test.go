@@ -79,6 +79,64 @@ func TestPut_ThenGet_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestPut_RoundTripsResponseHeaders(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	userID := makeUser(ctx, t, pool)
+
+	headers := map[string][]string{
+		"Content-Type":  {"application/json"},
+		"X-Custom-Hint": {"a", "b"}, // multi-value round-trip
+	}
+	want := idempotency.PutParams{
+		Key: "key-h", UserID: userID,
+		RequestHash:     hash32("POST /v1/foo body=1"),
+		ResponseStatus:  201,
+		ResponseHeaders: headers,
+		ResponseBody:    []byte(`{"ok":true}`),
+		TTL:             time.Hour,
+	}
+	if _, err := repo.Put(ctx, want); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	got, err := repo.Get(ctx, want.Key, want.UserID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.ResponseHeaders["Content-Type"][0] != "application/json" {
+		t.Errorf("Content-Type lost: %+v", got.ResponseHeaders)
+	}
+	xh := got.ResponseHeaders["X-Custom-Hint"]
+	if len(xh) != 2 || xh[0] != "a" || xh[1] != "b" {
+		t.Errorf("multi-value header lost order or values: %+v", xh)
+	}
+}
+
+func TestPut_ConflictReturnsErrConflict(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := idempotency.New(pool)
+	userID := makeUser(ctx, t, pool)
+
+	first := idempotency.PutParams{
+		Key: "race-key", UserID: userID,
+		RequestHash: hash32("a"), ResponseStatus: 200,
+		ResponseBody: []byte("A"), TTL: time.Hour,
+	}
+	if _, err := repo.Put(ctx, first); err != nil {
+		t.Fatalf("first Put: %v", err)
+	}
+	second := first
+	second.RequestHash = hash32("b")
+	second.ResponseBody = []byte("B")
+	if _, err := repo.Put(ctx, second); !errors.Is(err, idempotency.ErrConflict) {
+		t.Fatalf("expected ErrConflict on duplicate (key, user_id), got %v", err)
+	}
+}
+
 func TestGet_MissReturnsErrNotFound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
