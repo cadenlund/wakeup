@@ -234,6 +234,112 @@ type SoftDeleteParams struct {
 	UserID  uuid.UUID
 }
 
+// UpdateUserParams is the input to UpdateUser. Pointer fields use
+// nil-means-unchanged semantics; pass at least one non-nil field.
+type UpdateUserParams struct {
+	ActorID    uuid.UUID
+	UserID     uuid.UUID
+	Role       *string
+	SoftDelete bool // true → soft-delete in this tx
+}
+
+// UpdateUser is the §12.5 PATCH-shaped admin update. Runs role update
+// (if Role != nil) AND soft-delete (if SoftDelete) in a single
+// transaction so a partial failure can't leave the user in a half-
+// updated state. Each branch writes its own audit row inside the tx.
+//
+// Validation matches UpdateRole / SoftDeleteUser when each is enabled
+// (unknown role → 422, missing user → 404, etc.). At least one field
+// must be set; an all-nil params errors with 422.
+func (s *Service) UpdateUser(ctx context.Context, p UpdateUserParams) (domain.User, error) {
+	if p.Role == nil && !p.SoftDelete {
+		return domain.User{}, apierror.Validation([]apierror.FieldError{{
+			Field: "request", Code: "REQUIRED",
+			Message: "at least one of role / deleted_at must be supplied",
+		}})
+	}
+	if p.Role != nil && *p.Role != "user" && *p.Role != roleAdmin {
+		return domain.User{}, apierror.Validation([]apierror.FieldError{{
+			Field: "role", Code: "INVALID_VALUE",
+			Message: `role must be one of: "user", "admin"`,
+		}})
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return domain.User{}, apierror.Internal("admin: begin tx").WithCause(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	users := s.users.WithTx(tx)
+	audit := s.audit.WithTx(tx)
+
+	// Resolve target inside the tx so the prev_role / existence check is
+	// consistent with the rest of the writes (CodeRabbit caught the
+	// outside-tx race on PR #68).
+	prev, err := users.GetByID(ctx, p.UserID)
+	if err != nil {
+		if errors.Is(err, userrepo.ErrNotFound) {
+			return domain.User{}, apierror.NotFound("user")
+		}
+		return domain.User{}, apierror.Internal("admin: lookup target").WithCause(err)
+	}
+
+	if p.Role != nil {
+		if err := users.UpdateRole(ctx, p.UserID, *p.Role); err != nil {
+			if errors.Is(err, userrepo.ErrNotFound) {
+				return domain.User{}, apierror.NotFound("user")
+			}
+			return domain.User{}, apierror.Internal("admin: update role").WithCause(err)
+		}
+		auditID, err := uuid.NewV7()
+		if err != nil {
+			return domain.User{}, apierror.Internal("admin: uuid").WithCause(err)
+		}
+		if err := audit.Create(ctx, auditrepo.CreateParams{
+			ID: auditID, ActorID: &p.ActorID, Action: ActionUserUpdateRole,
+			TargetType: ptrStr("user"), TargetID: &p.UserID,
+			Metadata: map[string]any{
+				MetadataPrevRole: prev.Role,
+				MetadataNewRole:  *p.Role,
+			},
+		}); err != nil {
+			return domain.User{}, apierror.Internal("admin: write audit").WithCause(err)
+		}
+	}
+
+	if p.SoftDelete {
+		// SoftDelete WHERE excludes already-deleted rows; in the tx-
+		// branch we tolerate that and skip the audit so the call stays
+		// idempotent (matches SoftDeleteUser's behavior).
+		if err := users.SoftDelete(ctx, p.UserID); err != nil {
+			if !errors.Is(err, userrepo.ErrNotFound) {
+				return domain.User{}, apierror.Internal("admin: soft delete").WithCause(err)
+			}
+		} else {
+			auditID, err := uuid.NewV7()
+			if err != nil {
+				return domain.User{}, apierror.Internal("admin: uuid").WithCause(err)
+			}
+			if err := audit.Create(ctx, auditrepo.CreateParams{
+				ID: auditID, ActorID: &p.ActorID, Action: ActionUserSoftDelete,
+				TargetType: ptrStr("user"), TargetID: &p.UserID,
+			}); err != nil {
+				return domain.User{}, apierror.Internal("admin: write audit").WithCause(err)
+			}
+		}
+	}
+
+	updated, err := users.GetByIDIncludingDeleted(ctx, p.UserID)
+	if err != nil {
+		return domain.User{}, apierror.Internal("admin: re-fetch user").WithCause(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, apierror.Internal("admin: commit").WithCause(err)
+	}
+	return updated, nil
+}
+
 // SoftDeleteUser sets deleted_at = now() on the target. Idempotent:
 // re-deleting an already-deleted user returns the row without writing
 // a duplicate audit entry, since the underlying SoftDelete is a no-op

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,16 +34,39 @@ type AdminUserListResponse struct {
 
 // UpdateAdminUserRequest is the body of PATCH /v1/admin/users/{id}.
 //
-// Both fields are optional and may be sent in the same request:
-//   - `role`       : promote/demote between "user" and "admin"
-//   - `deleted_at` : pointer-to-pointer semantics:
-//     omitted              → no change
-//     present + null       → restore (NOT supported in this milestone — 422)
-//     present + non-null   → soft-delete now (the value is ignored; we
-//     stamp now() server-side per the schema column)
+// Both fields are optional and may appear in the same request. The
+// `deleted_at` field uses *json.RawMessage so the handler can tell
+// three states apart that `*time.Time` collapses into nil:
+//
+//	field omitted        → DeletedAt == nil               → no change
+//	"deleted_at": null   → DeletedAt points at "null"     → 422 (restore not supported in this milestone)
+//	"deleted_at": "<ts>" → DeletedAt points at quoted ts  → soft-delete (server stamps now(); the value the client sends is ignored)
+//
+// Type-system note: a sibling `*time.Time` field cannot distinguish the
+// first two cases, which is why we drop down to RawMessage here.
 type UpdateAdminUserRequest struct {
-	Role      *string    `json:"role,omitempty"       validate:"omitempty,oneof=user admin" example:"admin"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"                                       example:"2026-05-02T09:31:21.810Z"`
+	Role      *string          `json:"role,omitempty"       validate:"omitempty,oneof=user admin" example:"admin"`
+	DeletedAt *json.RawMessage `json:"deleted_at,omitempty" swaggertype:"string"                  example:"2026-05-02T09:31:21.810Z"`
+}
+
+// IsRestoreAttempt reports whether the request asked for `"deleted_at": null`.
+// Restore isn't supported in milestone 12.5; the handler maps this to 422.
+func (r UpdateAdminUserRequest) IsRestoreAttempt() bool {
+	if r.DeletedAt == nil {
+		return false
+	}
+	// json.RawMessage of `null` is the literal four bytes "null".
+	return string(*r.DeletedAt) == "null"
+}
+
+// WantsSoftDelete reports whether the caller asked to set deleted_at
+// to a concrete (non-null) value. The actual timestamp the caller sends
+// is ignored — the repo stamps now() server-side.
+func (r UpdateAdminUserRequest) WantsSoftDelete() bool {
+	if r.DeletedAt == nil {
+		return false
+	}
+	return !r.IsRestoreAttempt()
 }
 
 // toAdminUserResponse converts a domain.User into the admin-view shape.

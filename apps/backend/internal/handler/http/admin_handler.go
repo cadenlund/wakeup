@@ -171,35 +171,25 @@ func (h *AdminHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, e)
 		return
 	}
-	if req.Role == nil && req.DeletedAt == nil {
+	// Restoring a soft-deleted user is not supported in 12.5; reject
+	// `"deleted_at": null` explicitly so callers see a clear 422 instead
+	// of silently no-oping the field.
+	if req.IsRestoreAttempt() {
 		WriteError(w, r, apierror.Validation([]apierror.FieldError{{
-			Field: "request", Code: "REQUIRED",
-			Message: "at least one of role / deleted_at must be supplied",
+			Field: "deleted_at", Code: "INVALID_VALUE",
+			Message: "restoring soft-deleted users is not supported",
 		}}))
 		return
 	}
 
-	if req.Role != nil {
-		updated, err := h.admin.UpdateRole(r.Context(), adminsvc.UpdateRoleParams{
-			ActorID: actor.ID, UserID: id, Role: *req.Role,
-		})
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
-		// If only role was patched, return now. Otherwise fall through to
-		// the soft-delete branch so the same call can do both.
-		if req.DeletedAt == nil {
-			WriteJSON(w, http.StatusOK, toAdminUserResponse(updated))
-			return
-		}
-	}
-
-	// deleted_at non-nil → soft-delete now (server stamps now() inside
-	// the repo regardless of the timestamp the client sent — it's a
-	// trigger, not a value we let the client choose).
-	updated, err := h.admin.SoftDeleteUser(r.Context(), adminsvc.SoftDeleteParams{
-		ActorID: actor.ID, UserID: id,
+	// Role + soft-delete commit in one transaction inside the service so
+	// a partial failure can't leave the row half-updated. The service
+	// also enforces "at least one field must be supplied" → 422.
+	updated, err := h.admin.UpdateUser(r.Context(), adminsvc.UpdateUserParams{
+		ActorID:    actor.ID,
+		UserID:     id,
+		Role:       req.Role,
+		SoftDelete: req.WantsSoftDelete(),
 	})
 	if err != nil {
 		WriteError(w, r, err)

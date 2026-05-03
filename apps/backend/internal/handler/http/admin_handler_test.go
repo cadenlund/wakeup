@@ -16,10 +16,19 @@ import (
 )
 
 // patchUser is a small wrapper around c.Do for PATCH /v1/admin/users/{id}.
+// Errors from json.Marshal and http.NewRequest are surfaced as t.Fatalf
+// so a malformed test body fails the test loudly instead of producing
+// an unrelated downstream failure.
 func patchUser(t *testing.T, c *http.Client, urlStr string, body any) *http.Response {
 	t.Helper()
-	bs, _ := json.Marshal(body)
-	req, _ := http.NewRequest(http.MethodPatch, urlStr, strings.NewReader(string(bs)))
+	bs, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("patchUser: marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPatch, urlStr, strings.NewReader(string(bs)))
+	if err != nil {
+		t.Fatalf("patchUser: new request: %v", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.Do(req)
 	if err != nil {
@@ -179,6 +188,45 @@ func TestAdminPatchUser_EmptyBodyRejected(t *testing.T) {
 	assertCode(t, resp, http.StatusUnprocessableEntity, apierror.CodeValidation)
 }
 
+// `"deleted_at": null` is "restore me" — not supported in 12.5, so it
+// should surface as a clear 422 rather than silently no-op.
+func TestAdminPatchUser_ExplicitNullDeletedAtRejected(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	adminC, _ := h.AdminClient(t)
+	_, target := h.AuthClient(t)
+
+	// json.Marshal of map[string]any{"deleted_at": nil} produces "null"
+	// for the value, which is exactly the wire shape we want to reject.
+	resp := patchUser(t, adminC, h.Server.URL+"/v1/admin/users/"+target.ID.String(),
+		map[string]any{"deleted_at": nil})
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	assertCode(t, resp, http.StatusUnprocessableEntity, apierror.CodeValidation)
+}
+
+// Combined role + soft-delete in one PATCH commits in a single tx.
+func TestAdminPatchUser_RoleAndDeleteAtomically(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	adminC, _ := h.AdminClient(t)
+	_, target := h.AuthClient(t)
+
+	resp := patchUser(t, adminC, h.Server.URL+"/v1/admin/users/"+target.ID.String(),
+		map[string]any{"role": "admin", "deleted_at": "2026-05-02T09:31:21.810Z"})
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	if got["role"] != "admin" {
+		t.Errorf("role = %v, want admin", got["role"])
+	}
+	if got["deleted_at"] == nil {
+		t.Errorf("deleted_at should be populated: %+v", got)
+	}
+}
+
 // --- POST /v1/admin/users/{id}/impersonate ------------------------------
 
 func TestAdminImpersonate_HappyPath(t *testing.T) {
@@ -209,6 +257,9 @@ func TestAdminImpersonate_HappyPath(t *testing.T) {
 	meResp, err := adminC.Get(h.Server.URL + "/v1/auth/me")
 	if err != nil {
 		t.Fatalf("GET /me: %v", err)
+	}
+	if meResp == nil {
+		t.Fatal("GET /me returned nil response")
 	}
 	t.Cleanup(func() { _ = meResp.Body.Close() })
 	me := mustDecode(t, meResp.Body)
@@ -287,7 +338,10 @@ func TestAdminEndImpersonation_StartThenEndRoundtrip(t *testing.T) {
 	}
 
 	// Subsequent /me should return admin again.
-	meResp, _ := adminC.Get(h.Server.URL + "/v1/auth/me")
+	meResp, err := adminC.Get(h.Server.URL + "/v1/auth/me")
+	if err != nil {
+		t.Fatalf("GET /me: %v", err)
+	}
 	t.Cleanup(func() { _ = meResp.Body.Close() })
 	me := mustDecode(t, meResp.Body)
 	if me["role"] != "admin" {

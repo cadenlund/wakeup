@@ -281,6 +281,106 @@ func TestSoftDeleteUser_MissingReturns404(t *testing.T) {
 	}
 }
 
+// --- UpdateUser (combined role + soft-delete in one tx) ----------------
+
+func TestUpdateUser_RoleAndSoftDeleteInOneTx(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	actor := makeUser(ctx, t, st.pool, "admin")
+	target := makeUser(ctx, t, st.pool, "user")
+
+	role := "admin"
+	got, err := st.svc.UpdateUser(ctx, admin.UpdateUserParams{
+		ActorID: actor, UserID: target,
+		Role: &role, SoftDelete: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUser: %v", err)
+	}
+	if got.Role != "admin" {
+		t.Errorf("Role = %q, want admin", got.Role)
+	}
+	if got.DeletedAt == nil {
+		t.Errorf("DeletedAt should be set")
+	}
+	// Two audit rows: update_role + soft_delete (same tx).
+	rows, err := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List audit: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 audit rows in one tx, got %d", len(rows))
+	}
+	seen := map[string]bool{}
+	for _, r := range rows {
+		seen[r.Action] = true
+	}
+	if !seen[admin.ActionUserUpdateRole] || !seen[admin.ActionUserSoftDelete] {
+		t.Errorf("expected both update_role and soft_delete audit rows, got %+v", seen)
+	}
+}
+
+func TestUpdateUser_AllNilParamsRejected(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	actor := makeUser(ctx, t, st.pool, "admin")
+	target := makeUser(ctx, t, st.pool, "user")
+
+	_, err := st.svc.UpdateUser(ctx, admin.UpdateUserParams{
+		ActorID: actor, UserID: target,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if asAPIError(t, err).Code != apierror.CodeValidation {
+		t.Errorf("Code = %q", asAPIError(t, err).Code)
+	}
+}
+
+func TestUpdateUser_BogusRoleRejected(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	actor := makeUser(ctx, t, st.pool, "admin")
+	target := makeUser(ctx, t, st.pool, "user")
+
+	bogus := "superadmin"
+	_, err := st.svc.UpdateUser(ctx, admin.UpdateUserParams{
+		ActorID: actor, UserID: target, Role: &bogus,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if asAPIError(t, err).Code != apierror.CodeValidation {
+		t.Errorf("Code = %q", asAPIError(t, err).Code)
+	}
+	// And no audit row should have been written for a rejected request.
+	rows, _ := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if len(rows) != 0 {
+		t.Errorf("rejected UpdateUser must not write audit; got %+v", rows)
+	}
+}
+
+func TestUpdateUser_MissingTargetReturns404(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	actor := makeUser(ctx, t, st.pool, "admin")
+
+	role := "admin"
+	_, err := st.svc.UpdateUser(ctx, admin.UpdateUserParams{
+		ActorID: actor, UserID: uuid.New(), Role: &role,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q", asAPIError(t, err).Code)
+	}
+}
+
 // --- ListAudit ---------------------------------------------------------
 
 func TestListAudit_NewestFirst(t *testing.T) {
