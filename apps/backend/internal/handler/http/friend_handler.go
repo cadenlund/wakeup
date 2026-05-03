@@ -198,6 +198,7 @@ func (h *FriendHandler) SendRequest(w http.ResponseWriter, r *http.Request) {
 // addressee may accept.
 //
 // @Summary      Accept a friend request
+// @Description  Transitions a pending friendship to accepted. Only the addressee of the request may accept; the requester gets 403. Returns the rendered friendship envelope per §6.2.
 // @Tags         friends
 // @Produce      json
 // @Security     CookieAuth
@@ -239,6 +240,7 @@ func (h *FriendHandler) AcceptRequest(w http.ResponseWriter, r *http.Request) {
 // DeclineRequest deletes a pending row. Only the addressee may decline.
 //
 // @Summary      Decline a friend request
+// @Description  Deletes a pending friendship row. Only the addressee may decline; the requester gets 403. Idempotent in spirit — calling on an already-decided request surfaces 409 because the row no longer exists.
 // @Tags         friends
 // @Produce      json
 // @Security     CookieAuth
@@ -274,6 +276,7 @@ func (h *FriendHandler) DeclineRequest(w http.ResponseWriter, r *http.Request) {
 // Unfriend deletes an accepted friendship. Either side can unfriend.
 //
 // @Summary      Unfriend a user
+// @Description  Removes an accepted friendship between the caller and `user_id`. Either side can unfriend; pending or blocked relationships surface as 409. Self-unfriend is a 422 since no such row exists.
 // @Tags         friends
 // @Produce      json
 // @Security     CookieAuth

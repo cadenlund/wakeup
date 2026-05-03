@@ -1207,6 +1207,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
+                "description": "Returns the conversation row with its full member list. Caller must be a member; non-members surface as 404 so the existence of the conversation isn't leaked across the friend graph.",
                 "produces": [
                     "application/json"
                 ],
@@ -2501,6 +2502,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
+                "description": "Transitions a pending friendship to accepted. Only the addressee of the request may accept; the requester gets 403. Returns the rendered friendship envelope per §6.2.",
                 "produces": [
                     "application/json"
                 ],
@@ -2583,6 +2585,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
+                "description": "Deletes a pending friendship row. Only the addressee may decline; the requester gets 403. Idempotent in spirit — calling on an already-decided request surfaces 409 because the row no longer exists.",
                 "produces": [
                     "application/json"
                 ],
@@ -2662,6 +2665,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
+                "description": "Removes an accepted friendship between the caller and ` + "`" + `user_id` + "`" + `. Either side can unfriend; pending or blocked relationships surface as 409. Self-unfriend is a 422 since no such row exists.",
                 "produces": [
                     "application/json"
                 ],
