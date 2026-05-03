@@ -75,10 +75,19 @@ gen-docs-check: gen-docs
 # definitions → components.schemas. Avoids a Node dependency for
 # this one step.
 gen-client:
-    @mkdir -p apps/mobile/lib/wakeupapi
-    @python3 scripts/dev/swagger2-to-openapi3.py docs/openapi/swagger.json /tmp/wakeup-openapi3.json
-    oapi-codegen -package wakeupapi -generate types,client /tmp/wakeup-openapi3.json > apps/mobile/lib/wakeupapi/client.go
-    @rm -f /tmp/wakeup-openapi3.json
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # mktemp + trap so concurrent invocations don't collide on a fixed
+    # /tmp path and the intermediate file gets cleaned up even if
+    # oapi-codegen exits non-zero. (CodeRabbit on PR #81.) The
+    # leading shebang turns this whole recipe into one bash script
+    # under `just` so the trap survives across the python + oapi-codegen
+    # steps.
+    mkdir -p apps/mobile/lib/wakeupapi
+    tmp=$(mktemp -t wakeup-openapi3.XXXXXX.json)
+    trap 'rm -f "$tmp"' EXIT
+    python3 scripts/dev/swagger2-to-openapi3.py docs/openapi/swagger.json "$tmp"
+    oapi-codegen -package wakeupapi -generate types,client "$tmp" > apps/mobile/lib/wakeupapi/client.go
 
 # Verify all (used in CI and as the final acceptance gate)
 verify: lint test gen-docs-check
