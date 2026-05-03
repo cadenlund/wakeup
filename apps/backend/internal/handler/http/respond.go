@@ -40,18 +40,26 @@ type ErrorResponse struct {
 }
 
 // ErrorBody mirrors apierror.Error's wire shape.
+//
+// Examples are intentionally generic placeholders: swag attaches one
+// example to the schema and every `@Failure` annotation that
+// references ErrorResponse renders the same example. Hard-coding a
+// specific code/message (e.g. RESOURCE_NOT_FOUND / "user not found")
+// would make 401, 422, 500 responses all show the same misleading
+// 404 example. Keep these descriptive of the SHAPE so readers grok
+// the contract without being lied to about the value.
 type ErrorBody struct {
-	Code              string       `json:"code"                          example:"RESOURCE_NOT_FOUND"`
-	Message           string       `json:"message"                       example:"user not found"`
+	Code              string       `json:"code"                          example:"ERROR_CODE"`
+	Message           string       `json:"message"                       example:"human-readable description"`
 	Fields            []ErrorField `json:"fields,omitempty"`
-	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty" example:"30"`
+	RetryAfterSeconds int          `json:"retry_after_seconds,omitempty" example:"0"`
 }
 
 // ErrorField mirrors apierror.FieldError's wire shape.
 type ErrorField struct {
-	Field   string `json:"field"   example:"email"`
-	Code    string `json:"code"    example:"INVALID_FORMAT"`
-	Message string `json:"message" example:"must be a valid email"`
+	Field   string `json:"field"   example:"field_name"`
+	Code    string `json:"code"    example:"FIELD_ERROR_CODE"`
+	Message string `json:"message" example:"human-readable field-level reason"`
 }
 
 // toErrorResponse converts an *apierror.Error to its wire envelope. The
