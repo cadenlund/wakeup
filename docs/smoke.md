@@ -22,25 +22,31 @@ own session cookie via Swagger UI.
 
 ## 1. Register two users
 
+The username + email columns are unique, so re-running the smoke
+against the same database needs a fresh suffix per run. Pick a short
+suffix once at the top of the script — a unix timestamp works
+(`SUFFIX=$(date +%s)`) — and substitute it into every step below.
+For the rest of this doc the suffix is rendered as `<TS>`.
+
 In **A**'s Swagger UI, run `POST /v1/auth/register` with:
 
 ```json
 {
-  "username": "alice",
-  "email": "alice@x.test",
+  "username": "alice<TS>",
+  "email": "alice+<TS>@x.test",
   "display_name": "Alice",
   "password": "Password123!"
 }
 ```
 
 Expect `201 Created`. The session cookie should be set by the response.
-Confirm with `GET /v1/auth/me` → 200 with `username: "alice"`.
+Confirm with `GET /v1/auth/me` → 200 with `username: "alice<TS>"`.
 
-Repeat in **B** with `bob` / `bob@x.test`.
+Repeat in **B** with `bob<TS>` / `bob+<TS>@x.test`.
 
 ## 2. Become friends
 
-In **A**: `POST /v1/friends/requests` with `{"username": "bob"}`.
+In **A**: `POST /v1/friends/requests` with `{"username": "bob<TS>"}`.
 Expect `201 Created` with the friendship row.
 
 In **B**: `GET /v1/friends/requests` → expect one incoming row.
@@ -57,7 +63,7 @@ In **A**: `POST /v1/conversations` with:
 {
   "type": "group",
   "name": "Smoke Group",
-  "member_ids": ["<bob-uuid-from-step-2>"]
+  "member_ids": ["<bob's-uuid-from-step-2>"]
 }
 ```
 
