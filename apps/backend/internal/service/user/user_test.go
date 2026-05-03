@@ -430,3 +430,61 @@ func TestSearch_EmptyQueryReturnsAllNonDeletedUsers(t *testing.T) {
 		t.Fatalf("expected at least 1 user, got none")
 	}
 }
+
+// ListByIDs returns every requested user in a single round-trip,
+// regardless of input order. Soft-deleted users are still included
+// so handler-side rendering can show the §4.6 placeholder for
+// vanished accounts in message history.
+func TestListByIDs_BatchLoad(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	a := makeUser(t, st)
+	b := makeUser(t, st)
+	c := makeUser(t, st)
+
+	got, err := st.svc.ListByIDs(context.Background(), []uuid.UUID{c, a, b})
+	if err != nil {
+		t.Fatalf("ListByIDs: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	gotSet := make(map[uuid.UUID]struct{}, len(got))
+	for _, u := range got {
+		gotSet[u.ID] = struct{}{}
+	}
+	for _, want := range []uuid.UUID{a, b, c} {
+		if _, ok := gotSet[want]; !ok {
+			t.Errorf("missing %s from result", want)
+		}
+	}
+}
+
+// UploadAvatar against a non-existent user uploads to S3 then surfaces
+// NotFound at the DB Update step. The orphan object is documented as
+// acceptable for v1 (the comment in user.go calls this out).
+func TestUploadAvatar_NonExistentUserSurfacesNotFound(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	_, err := st.svc.UploadAvatar(context.Background(), uuid.New(),
+		bytes.NewReader(minimalPNG), int64(len(minimalPNG)))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND", asAPIError(t, err).Code)
+	}
+}
+
+// Empty input is a fast path — no DB round-trip, returns empty.
+func TestListByIDs_EmptyInputReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	got, err := st.svc.ListByIDs(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListByIDs(nil): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+}
