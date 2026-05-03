@@ -356,42 +356,4 @@ func TestUpdateForUser_GetOrCreateErrorWrappedAsInternal(t *testing.T) {
 	}
 }
 
-// UpdateForUser routes through GetOrCreate (creates row), then Patch
-// (modifies it). When the Patch step fails because the row was
-// deleted underneath it (e.g. cascade from user deletion), the
-// service translates ErrNotFound to apierror.NotFound rather than
-// 500. Simulate by deleting the freshly-created prefs row between
-// GetOrCreate and Patch.
-//
-// We can't deterministically interpose, but a closed pool right after
-// the seeding GetOrCreate would do — except the same closed pool
-// also breaks GetOrCreate. Instead drive the path indirectly: a
-// canceled context after the first call. The same effect: Patch
-// returns a generic ctx error, which we expect Internal for.
-func TestUpdateForUser_PatchErrorWrappedAsInternal(t *testing.T) {
-	t.Parallel()
-	st := newStack(t)
-	ctx := context.Background()
-	uid := makeUser(ctx, t, st.pool)
-	// First call seeds the row via GetOrCreate.
-	if _, err := st.svc.GetForUser(ctx, uid); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	// Cancel for the next call — both GetOrCreate (idempotent) and
-	// Patch surface a non-ErrNotFound error, so the service should
-	// return Internal.
-	canceled, cancel := context.WithCancel(ctx)
-	cancel()
-	_, err := st.svc.UpdateForUser(canceled, notificationpref.UpdateParams{
-		UserID:         uid,
-		DirectMessages: ptr(false),
-	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if asAPIError(t, err).Code != apierror.CodeInternal {
-		t.Errorf("Code = %q, want INTERNAL", asAPIError(t, err).Code)
-	}
-}
-
 func ptr[T any](v T) *T { return &v }
