@@ -431,6 +431,161 @@ func TestCascadeDeleteWithUser(t *testing.T) {
 	}
 }
 
+// GetByID success returns the inserted row (the existing
+// TestGetByID_NotFound only covered the not-found branch).
+func TestGetByID_Success(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := friendship.New(pool)
+	a, b := newPair(ctx, t, pool)
+	created, err := repo.Create(ctx, friendship.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), RequesterID: a, AddresseeID: b,
+		Status: domain.FriendshipPending,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := repo.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.ID != created.ID || got.RequesterID != a || got.AddresseeID != b {
+		t.Errorf("got %+v, want id=%s requester=%s addressee=%s", got, created.ID, a, b)
+	}
+}
+
+// ListAllAcceptedFriendIDs returns every accepted friend id without
+// pagination — used by the §9 presence fan-out which can't afford to
+// walk pages per state change.
+func TestListAllAcceptedFriendIDs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := friendship.New(pool)
+	me := makeUser(ctx, t, pool)
+	other := makeUser(ctx, t, pool)
+	another := makeUser(ctx, t, pool)
+	pending := makeUser(ctx, t, pool)
+
+	for _, target := range []uuid.UUID{other, another} {
+		id := uuid.Must(uuid.NewV7())
+		if _, err := repo.Create(ctx, friendship.CreateParams{
+			ID: id, RequesterID: me, AddresseeID: target, Status: domain.FriendshipPending,
+		}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if _, err := repo.Accept(ctx, id); err != nil {
+			t.Fatalf("Accept: %v", err)
+		}
+	}
+	if _, err := repo.Create(ctx, friendship.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), RequesterID: me, AddresseeID: pending,
+		Status: domain.FriendshipPending,
+	}); err != nil {
+		t.Fatalf("Create pending: %v", err)
+	}
+
+	got, err := repo.ListAllAcceptedFriendIDs(ctx, me)
+	if err != nil {
+		t.Fatalf("ListAllAcceptedFriendIDs: %v", err)
+	}
+	gotSet := make(map[uuid.UUID]struct{}, len(got))
+	for _, id := range got {
+		gotSet[id] = struct{}{}
+	}
+	if len(gotSet) != 2 {
+		t.Fatalf("len = %d, want 2: %v", len(gotSet), got)
+	}
+	if _, ok := gotSet[other]; !ok {
+		t.Errorf("missing %s", other)
+	}
+	if _, ok := gotSet[another]; !ok {
+		t.Errorf("missing %s", another)
+	}
+	if _, leaked := gotSet[pending]; leaked {
+		t.Errorf("pending friend leaked: %s", pending)
+	}
+}
+
+// WithTx returns a Queries bound to the supplied tx; reads/writes
+// through the new instance see the tx's view. Verifies that a row
+// inserted inside a rolled-back tx does NOT show up after rollback.
+func TestWithTx_RollsBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := friendship.New(pool)
+	a, b := newPair(ctx, t, pool)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	txRepo := repo.WithTx(tx)
+	created, err := txRepo.Create(ctx, friendship.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), RequesterID: a, AddresseeID: b,
+		Status: domain.FriendshipPending,
+	})
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("Create in tx: %v", err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if _, err := repo.GetByID(ctx, created.ID); !errors.Is(err, friendship.ErrNotFound) {
+		t.Errorf("after Rollback, GetByID = %v, want ErrNotFound", err)
+	}
+}
+
+// Closing the pool before the call surfaces every method's wrapped
+// error path. The repo wraps with fmt.Errorf("friendship: ...: %w") —
+// none should panic, all should return non-nil errors.
+func TestRepo_DBClosedErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := friendship.New(pool)
+	a, b := newPair(ctx, t, pool)
+	pool.Close()
+
+	expectErr := func(t *testing.T, name string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Errorf("%s: expected error against closed pool", name)
+		}
+	}
+	if _, err := repo.Create(ctx, friendship.CreateParams{
+		ID: uuid.Must(uuid.NewV7()), RequesterID: a, AddresseeID: b, Status: domain.FriendshipPending,
+	}); err == nil {
+		t.Error("Create: want error")
+	}
+	if _, err := repo.GetByID(ctx, uuid.New()); err == nil {
+		t.Error("GetByID: want error")
+	} else if errors.Is(err, friendship.ErrNotFound) {
+		// Closed pool shouldn't masquerade as not-found.
+		t.Errorf("GetByID returned ErrNotFound on closed pool: %v", err)
+	}
+	if _, err := repo.GetByPair(ctx, a, b); err == nil {
+		t.Error("GetByPair: want error")
+	}
+	if _, err := repo.Accept(ctx, uuid.New()); err == nil {
+		t.Error("Accept: want error")
+	}
+	expectErr(t, "Delete", repo.Delete(ctx, uuid.New()))
+	expectErr(t, "DeleteByPair", repo.DeleteByPair(ctx, a, b))
+	if _, err := repo.ListAllAcceptedFriendIDs(ctx, a); err == nil {
+		t.Error("ListAllAcceptedFriendIDs: want error")
+	}
+	if _, err := repo.ListAcceptedByUser(ctx, a, nil, 10); err == nil {
+		t.Error("ListAcceptedByUser: want error")
+	}
+	if _, err := repo.ListPendingByUser(ctx, a); err == nil {
+		t.Error("ListPendingByUser: want error")
+	}
+}
+
 // --- domain helper -----------------------------------------------------
 
 func TestOtherID_ReturnsCounterparty(t *testing.T) {
