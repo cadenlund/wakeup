@@ -50,6 +50,7 @@ type routerDeps struct {
 	Redis                 *redis.Client
 	Sessions              *scs.SessionManager
 	Limiter               *ratelimit.Limiter
+	Sentry                mw.Capturer // optional — nil disables Sentry capture in dev
 	UserSvc               *usersvc.Service
 	AuthSvc               *auth.Service
 	NotifPrefSvc          *notifprefsvc.Service
@@ -130,7 +131,9 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 	r := chi.NewRouter()
 
 	// §4.7 outer middleware chain.
-	r.Use(mw.Recovery(d.Logger, httpapi.WriteError))
+	r.Use(mw.Recovery(mw.RecoveryConfig{
+		Logger: d.Logger, WriteError: httpapi.WriteError, Sentry: d.Sentry,
+	}))
 	r.Use(mw.RequestID)
 	r.Use(mw.Logger(d.Logger))
 	r.Use(corsMiddleware(d.Cfg))
