@@ -48,11 +48,13 @@ const (
 	ActionImpersonateEnded   = "impersonate.ended"
 )
 
-// MetadataKey constants for the audit_log.metadata jsonb column.
+// Metadata key constants for the audit_log.metadata jsonb column.
+// Exported so the §12.5 admin handlers and tests can assert on the
+// same strings the service writes.
 const (
-	metadataImpersonating = "impersonating_user_id"
-	metadataNewRole       = "new_role"
-	metadataPrevRole      = "prev_role"
+	MetadataImpersonatingUserID = "impersonating_user_id"
+	MetadataNewRole             = "new_role"
+	MetadataPrevRole            = "prev_role"
 )
 
 // Service composes the user + audit repositories. Every mutation that
@@ -177,13 +179,6 @@ func (s *Service) UpdateRole(ctx context.Context, p UpdateRoleParams) (domain.Us
 			Message: `role must be one of: "user", "admin"`,
 		}})
 	}
-	prev, err := s.users.GetByID(ctx, p.UserID)
-	if err != nil {
-		if errors.Is(err, userrepo.ErrNotFound) {
-			return domain.User{}, apierror.NotFound("user")
-		}
-		return domain.User{}, apierror.Internal("admin: lookup target").WithCause(err)
-	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -194,6 +189,15 @@ func (s *Service) UpdateRole(ctx context.Context, p UpdateRoleParams) (domain.Us
 	users := s.users.WithTx(tx)
 	audit := s.audit.WithTx(tx)
 
+	// Read prev INSIDE the tx so a concurrent role update can't race
+	// the audit row with a stale prev_role. (CodeRabbit PR #68.)
+	prev, err := users.GetByID(ctx, p.UserID)
+	if err != nil {
+		if errors.Is(err, userrepo.ErrNotFound) {
+			return domain.User{}, apierror.NotFound("user")
+		}
+		return domain.User{}, apierror.Internal("admin: lookup target").WithCause(err)
+	}
 	if err := users.UpdateRole(ctx, p.UserID, p.Role); err != nil {
 		if errors.Is(err, userrepo.ErrNotFound) {
 			return domain.User{}, apierror.NotFound("user")
@@ -208,8 +212,8 @@ func (s *Service) UpdateRole(ctx context.Context, p UpdateRoleParams) (domain.Us
 		ID: auditID, ActorID: &p.ActorID, Action: ActionUserUpdateRole,
 		TargetType: ptrStr("user"), TargetID: &p.UserID,
 		Metadata: map[string]any{
-			metadataPrevRole: prev.Role,
-			metadataNewRole:  p.Role,
+			MetadataPrevRole: prev.Role,
+			MetadataNewRole:  p.Role,
 		},
 	}); err != nil {
 		return domain.User{}, apierror.Internal("admin: write audit").WithCause(err)
@@ -360,7 +364,7 @@ func (s *Service) writeImpersonationBookend(ctx context.Context, actor, target u
 	}
 	if err := s.audit.Create(ctx, auditrepo.CreateParams{
 		ID: auditID, ActorID: &actor, Action: action,
-		Metadata: map[string]any{metadataImpersonating: target.String()},
+		Metadata: map[string]any{MetadataImpersonatingUserID: target.String()},
 	}); err != nil {
 		return apierror.Internal(fmt.Sprintf("admin: write %s audit", action)).WithCause(err)
 	}

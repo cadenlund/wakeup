@@ -74,15 +74,29 @@ func TestListUsers_ReturnsActiveUsers(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	st := newStack(t)
-	makeUser(ctx, t, st.pool, "user")
-	makeUser(ctx, t, st.pool, "user")
+	a1 := makeUser(ctx, t, st.pool, "user")
+	a2 := makeUser(ctx, t, st.pool, "user")
+	deleted := makeUser(ctx, t, st.pool, "user")
+	if err := st.users.SoftDelete(ctx, deleted); err != nil {
+		t.Fatalf("seed soft delete: %v", err)
+	}
 
 	got, err := st.svc.ListUsers(ctx, admin.ListUsersParams{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}
 	if len(got.Users) != 2 {
-		t.Errorf("expected 2 users, got %d", len(got.Users))
+		t.Errorf("expected 2 active users, got %d", len(got.Users))
+	}
+	seen := make(map[uuid.UUID]bool, len(got.Users))
+	for _, u := range got.Users {
+		seen[u.ID] = true
+	}
+	if !seen[a1] || !seen[a2] {
+		t.Errorf("active users missing from list: %+v", got.Users)
+	}
+	if seen[deleted] {
+		t.Errorf("soft-deleted user must be excluded from admin list, got %v", deleted)
 	}
 }
 
@@ -213,7 +227,10 @@ func TestSoftDeleteUser_DeletesAndAudits(t *testing.T) {
 	if got.DeletedAt == nil {
 		t.Error("DeletedAt should be set")
 	}
-	rows, _ := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	rows, err := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List audit: %v", err)
+	}
 	if len(rows) != 1 || rows[0].Action != admin.ActionUserSoftDelete {
 		t.Errorf("expected single soft_delete audit row, got %+v", rows)
 	}
@@ -238,7 +255,10 @@ func TestSoftDeleteUser_IdempotentOnSecondCall(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("second delete: %v", err)
 	}
-	rows, _ := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	rows, err := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List audit: %v", err)
+	}
 	if len(rows) != 1 {
 		t.Errorf("expected 1 audit row (no duplicate), got %d", len(rows))
 	}
@@ -269,8 +289,10 @@ func TestListAudit_NewestFirst(t *testing.T) {
 	st := newStack(t)
 	actor := makeUser(ctx, t, st.pool, "admin")
 
+	targets := make([]uuid.UUID, 0, 3)
 	for i := 0; i < 3; i++ {
 		target := makeUser(ctx, t, st.pool, "user")
+		targets = append(targets, target)
 		if _, err := st.svc.UpdateRole(ctx, admin.UpdateRoleParams{
 			ActorID: actor, UserID: target, Role: "admin",
 		}); err != nil {
@@ -282,11 +304,17 @@ func TestListAudit_NewestFirst(t *testing.T) {
 		t.Fatalf("ListAudit: %v", err)
 	}
 	if len(got.Entries) != 3 {
-		t.Errorf("expected 3 entries, got %d", len(got.Entries))
+		t.Fatalf("expected 3 entries, got %d", len(got.Entries))
 	}
-	for _, e := range got.Entries {
+	// Newest-first: index 0 is the LAST mutation (targets[2]),
+	// index 2 is the FIRST mutation (targets[0]).
+	for i, want := range []uuid.UUID{targets[2], targets[1], targets[0]} {
+		e := got.Entries[i]
 		if e.Action != admin.ActionUserUpdateRole {
-			t.Errorf("unexpected action %q", e.Action)
+			t.Errorf("entries[%d].Action = %q, want %q", i, e.Action, admin.ActionUserUpdateRole)
+		}
+		if e.TargetID == nil || *e.TargetID != want {
+			t.Errorf("entries[%d].TargetID = %v, want %v (proves newest-first)", i, e.TargetID, want)
 		}
 	}
 }
@@ -309,7 +337,10 @@ func TestStartImpersonation_HappyPath(t *testing.T) {
 	if got.ID != target {
 		t.Errorf("returned user is wrong: %v", got.ID)
 	}
-	rows, _ := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	rows, err := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List audit: %v", err)
+	}
 	if len(rows) != 1 || rows[0].Action != admin.ActionImpersonateStarted {
 		t.Fatalf("expected impersonate.started audit row, got %+v", rows)
 	}
@@ -339,7 +370,10 @@ func TestStartImpersonation_NonAdminActorForbidden(t *testing.T) {
 		t.Errorf("Code = %q, want FORBIDDEN", asAPIError(t, err).Code)
 	}
 	// And no audit row should have been written for a denied call.
-	rows, _ := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	rows, err := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List audit: %v", err)
+	}
 	if len(rows) != 0 {
 		t.Errorf("denied StartImpersonation must not write audit; got %+v", rows)
 	}
@@ -432,7 +466,10 @@ func TestEndImpersonation_WritesBookend(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("EndImpersonation: %v", err)
 	}
-	rows, _ := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	rows, err := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List audit: %v", err)
+	}
 	if len(rows) != 1 || rows[0].Action != admin.ActionImpersonateEnded {
 		t.Fatalf("expected impersonate.ended audit row, got %+v", rows)
 	}
