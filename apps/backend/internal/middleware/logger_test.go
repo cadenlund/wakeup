@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -121,7 +122,7 @@ func TestLogger_HijackForwardsToUnderlying(t *testing.T) {
 	}
 	select {
 	case <-hijacked:
-	default:
+	case <-time.After(time.Second):
 		t.Error("Hijack handler never fired")
 	}
 }
@@ -158,7 +159,7 @@ func TestLogger_FlushForwardsToUnderlying(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	select {
 	case <-flushed:
-	default:
+	case <-time.After(time.Second):
 		t.Error("Flush handler never fired")
 	}
 }

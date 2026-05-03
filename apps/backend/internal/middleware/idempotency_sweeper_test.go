@@ -1,8 +1,10 @@
 package middleware_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -62,12 +64,18 @@ func TestNewIdempotencySweeper_HonorsCustomInterval(t *testing.T) {
 	}
 }
 
-// Run on a row-yielding repo returns nil — exercises the
-// rows-deleted log branch.
+// Run on a row-yielding repo returns nil and emits the
+// rows-deleted log line. Capturing the log output catches a
+// regression that drops the InfoContext call.
 func TestSweeper_Run_LogsAndReturnsNilOnDeletes(t *testing.T) {
 	t.Parallel()
+	buf := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(buf, nil))
 	repo := &fakeSweeperRepo{rows: 7}
-	s, err := middleware.NewIdempotencySweeper(middleware.IdempotencySweeperConfig{Repo: repo})
+	s, err := middleware.NewIdempotencySweeper(middleware.IdempotencySweeperConfig{
+		Repo:   repo,
+		Logger: logger,
+	})
 	if err != nil {
 		t.Fatalf("NewIdempotencySweeper: %v", err)
 	}
@@ -77,15 +85,31 @@ func TestSweeper_Run_LogsAndReturnsNilOnDeletes(t *testing.T) {
 	if repo.calls.Load() != 1 {
 		t.Errorf("DeleteExpired calls = %d, want 1", repo.calls.Load())
 	}
+	if !bytes.Contains(buf.Bytes(), []byte(`"count":7`)) {
+		t.Errorf("expected delete-count log with count=7, got %s", buf.String())
+	}
 }
 
-// Zero deletes — covers the n==0 (no log) branch.
+// Zero deletes — covers the n==0 (no log) branch. Captures the log
+// buffer as well so the negative assertion (NO log line emitted) is
+// observable, not just implied.
 func TestSweeper_Run_NoOpReturnsNil(t *testing.T) {
 	t.Parallel()
+	buf := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(buf, nil))
 	repo := &fakeSweeperRepo{rows: 0}
-	s, _ := middleware.NewIdempotencySweeper(middleware.IdempotencySweeperConfig{Repo: repo})
+	s, err := middleware.NewIdempotencySweeper(middleware.IdempotencySweeperConfig{
+		Repo:   repo,
+		Logger: logger,
+	})
+	if err != nil {
+		t.Fatalf("NewIdempotencySweeper: %v", err)
+	}
 	if err := s.Run(context.Background()); err != nil {
 		t.Errorf("Run: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("zero-deletes path should not log, got %s", buf.String())
 	}
 }
 
@@ -95,7 +119,10 @@ func TestSweeper_Run_PropagatesError(t *testing.T) {
 	t.Parallel()
 	want := errors.New("db down")
 	repo := &fakeSweeperRepo{err: want}
-	s, _ := middleware.NewIdempotencySweeper(middleware.IdempotencySweeperConfig{Repo: repo})
+	s, err := middleware.NewIdempotencySweeper(middleware.IdempotencySweeperConfig{Repo: repo})
+	if err != nil {
+		t.Fatalf("NewIdempotencySweeper: %v", err)
+	}
 	if err := s.Run(context.Background()); !errors.Is(err, want) {
 		t.Errorf("Run: got %v, want %v", err, want)
 	}
