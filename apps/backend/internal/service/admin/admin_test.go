@@ -11,6 +11,7 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	auditrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/audit"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
@@ -63,8 +64,24 @@ func asAPIError(t *testing.T, err error) *apierror.Error {
 
 func TestNew_RejectsMissingDeps(t *testing.T) {
 	t.Parallel()
-	if _, err := admin.New(admin.Config{}); err == nil {
-		t.Error("expected error for empty config")
+	pool := &pgxpool.Pool{}
+	cases := []struct {
+		name string
+		cfg  admin.Config
+	}{
+		{"all nil", admin.Config{}},
+		{"missing pool", admin.Config{Users: &userrepo.Queries{}, Audit: &auditrepo.Queries{}}},
+		{"missing users", admin.Config{Pool: pool, Audit: &auditrepo.Queries{}}},
+		{"missing audit", admin.Config{Pool: pool, Users: &userrepo.Queries{}}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := admin.New(tc.cfg); err == nil {
+				t.Error("expected error")
+			}
+		})
 	}
 }
 
@@ -318,6 +335,66 @@ func TestUpdateUser_RoleAndSoftDeleteInOneTx(t *testing.T) {
 	}
 	if !seen[admin.ActionUserUpdateRole] || !seen[admin.ActionUserSoftDelete] {
 		t.Errorf("expected both update_role and soft_delete audit rows, got %+v", seen)
+	}
+}
+
+// UpdateUser with only Role (SoftDelete=false) skips the soft-delete
+// branch entirely. Asserts exactly one audit row (the role change)
+// and that DeletedAt remains nil.
+func TestUpdateUser_RoleOnlySkipsSoftDeleteBranch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	actor := makeUser(ctx, t, st.pool, "admin")
+	target := makeUser(ctx, t, st.pool, "user")
+
+	role := "admin"
+	got, err := st.svc.UpdateUser(ctx, admin.UpdateUserParams{
+		ActorID: actor, UserID: target, Role: &role,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUser: %v", err)
+	}
+	if got.Role != "admin" {
+		t.Errorf("Role = %q, want admin", got.Role)
+	}
+	if got.DeletedAt != nil {
+		t.Errorf("DeletedAt should be nil for role-only update")
+	}
+	rows, err := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List audit: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Action != admin.ActionUserUpdateRole {
+		t.Errorf("expected 1 update_role audit row, got %+v", rows)
+	}
+}
+
+// UpdateUser with only SoftDelete (Role=nil) skips the role branch.
+// Asserts exactly one audit row (the soft-delete) and that the user
+// row carries the DeletedAt stamp.
+func TestUpdateUser_SoftDeleteOnlySkipsRoleBranch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	actor := makeUser(ctx, t, st.pool, "admin")
+	target := makeUser(ctx, t, st.pool, "user")
+
+	got, err := st.svc.UpdateUser(ctx, admin.UpdateUserParams{
+		ActorID: actor, UserID: target, SoftDelete: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUser: %v", err)
+	}
+	if got.DeletedAt == nil {
+		t.Errorf("DeletedAt should be set")
+	}
+	rows, err := st.auditrep.List(ctx, auditrepo.ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("List audit: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Action != admin.ActionUserSoftDelete {
+		t.Errorf("expected 1 soft_delete audit row, got %+v", rows)
 	}
 }
 
@@ -606,6 +683,161 @@ func TestImpersonation_BookendPairOrdered(t *testing.T) {
 	// List is newest-first → impersonate.ended at index 0, started at 1.
 	if rows[0].Action != admin.ActionImpersonateEnded || rows[1].Action != admin.ActionImpersonateStarted {
 		t.Errorf("ordering wrong: %q then %q", rows[0].Action, rows[1].Action)
+	}
+}
+
+// Missing actor (not in users table) treated as Forbidden — same
+// shape as the non-admin actor case so the response doesn't leak
+// "actor doesn't exist" vs "actor isn't admin". Covers the
+// GetByID-NotFound branch that the existing tests skip (they always
+// pass a real user id for ActorID).
+func TestStartImpersonation_MissingActorIsForbidden(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	target := makeUser(ctx, t, st.pool, "user")
+	_, err := st.svc.StartImpersonation(ctx, admin.StartImpersonationParams{
+		ActorID: uuid.New(), TargetID: target,
+	})
+	if asAPIError(t, err).Code != apierror.CodeForbidden {
+		t.Errorf("Code = %q, want FORBIDDEN", asAPIError(t, err).Code)
+	}
+}
+
+// ListUsers pagination: 12 users, request limit=5 → page 1 has
+// HasMore=true with cursor; page 2 walks the cursor to the next 5;
+// the third call returns the remainder with HasMore=false. Covers
+// the over-fetch and terminal-page branches across the cursor.
+func TestListUsers_PaginatesPastLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	for i := 0; i < 12; i++ {
+		makeUser(ctx, t, st.pool, "user")
+	}
+	first, err := st.svc.ListUsers(ctx, admin.ListUsersParams{Limit: 5})
+	if err != nil {
+		t.Fatalf("ListUsers page 1: %v", err)
+	}
+	if len(first.Users) != 5 {
+		t.Errorf("page 1 len = %d, want 5", len(first.Users))
+	}
+	if !first.HasMore || first.NextCursor == nil {
+		t.Fatalf("page 1 expected HasMore=true with cursor; got hasMore=%v cursor=%v", first.HasMore, first.NextCursor)
+	}
+	cursor, err := pagination.Decode(*first.NextCursor)
+	if err != nil {
+		t.Fatalf("decode page 1 cursor: %v", err)
+	}
+	second, err := st.svc.ListUsers(ctx, admin.ListUsersParams{Limit: 5, Cursor: cursor})
+	if err != nil {
+		t.Fatalf("ListUsers page 2: %v", err)
+	}
+	if len(second.Users) != 5 {
+		t.Errorf("page 2 len = %d, want 5", len(second.Users))
+	}
+	if !second.HasMore || second.NextCursor == nil {
+		t.Fatalf("page 2 expected HasMore=true with cursor")
+	}
+}
+
+// Closed-pool sweep — every public method's apierror.Internal wrap
+// fires once. Pool.Close() makes every repo query fail-fast across
+// both the read methods and the tx-driven write methods.
+func TestService_DBClosedReturnsInternal(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	actor := makeUser(ctx, t, st.pool, "admin")
+	target := makeUser(ctx, t, st.pool, "user")
+	st.pool.Close()
+
+	role := "admin"
+	checks := []struct {
+		name string
+		fn   func() error
+	}{
+		{"ListUsers", func() error {
+			_, err := st.svc.ListUsers(ctx, admin.ListUsersParams{Limit: 10})
+			return err
+		}},
+		{"GetUser", func() error {
+			_, err := st.svc.GetUser(ctx, target)
+			return err
+		}},
+		{"ListAudit", func() error {
+			_, err := st.svc.ListAudit(ctx, admin.ListAuditParams{Limit: 10})
+			return err
+		}},
+		{"UpdateRole", func() error {
+			_, err := st.svc.UpdateRole(ctx, admin.UpdateRoleParams{
+				ActorID: actor, UserID: target, Role: "admin",
+			})
+			return err
+		}},
+		{"UpdateUser", func() error {
+			_, err := st.svc.UpdateUser(ctx, admin.UpdateUserParams{
+				ActorID: actor, UserID: target, Role: &role,
+			})
+			return err
+		}},
+		{"SoftDeleteUser", func() error {
+			_, err := st.svc.SoftDeleteUser(ctx, admin.SoftDeleteParams{
+				ActorID: actor, UserID: target,
+			})
+			return err
+		}},
+		{"StartImpersonation", func() error {
+			_, err := st.svc.StartImpersonation(ctx, admin.StartImpersonationParams{
+				ActorID: actor, TargetID: target,
+			})
+			return err
+		}},
+		{"EndImpersonation", func() error {
+			return st.svc.EndImpersonation(ctx, admin.EndImpersonationParams{
+				ActorID: actor, TargetID: target,
+			})
+		}},
+	}
+	for _, c := range checks {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			err := c.fn()
+			if err == nil {
+				t.Fatalf("%s: expected error against closed pool", c.name)
+			}
+			if asAPIError(t, err).Code != apierror.CodeInternal {
+				t.Errorf("%s: Code = %q, want INTERNAL_ERROR", c.name, asAPIError(t, err).Code)
+			}
+		})
+	}
+}
+
+// ListAudit pagination: produces several audit rows via SoftDelete +
+// UpdateRole and walks the cursor. Covers ListAudit's HasMore branch.
+func TestListAudit_PaginatesPastLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	actor := makeUser(ctx, t, st.pool, "admin")
+	for i := 0; i < 4; i++ {
+		target := makeUser(ctx, t, st.pool, "user")
+		if _, err := st.svc.UpdateRole(ctx, admin.UpdateRoleParams{
+			ActorID: actor, UserID: target, Role: "admin",
+		}); err != nil {
+			t.Fatalf("UpdateRole %d: %v", i, err)
+		}
+	}
+	first, err := st.svc.ListAudit(ctx, admin.ListAuditParams{Limit: 2})
+	if err != nil {
+		t.Fatalf("ListAudit page 1: %v", err)
+	}
+	if len(first.Entries) != 2 {
+		t.Errorf("page 1 len = %d, want 2", len(first.Entries))
+	}
+	if !first.HasMore || first.NextCursor == nil {
+		t.Fatalf("page 1 expected HasMore=true with cursor")
 	}
 }
 
