@@ -67,9 +67,18 @@ gen-docs-check: gen-docs
         exit 1; \
     fi
 
-# Generate mobile client from OpenAPI
+# Generate mobile client from OpenAPI. swag emits Swagger 2.0 but
+# oapi-codegen v2 only consumes OpenAPI 3.x, so we run the spec
+# through a small Python converter (scripts/dev/swagger2-to-openapi3.py)
+# first. The converter handles the v2→v3 subset we actually use:
+# parameter type → schema.type, formData → multipart requestBody,
+# definitions → components.schemas. Avoids a Node dependency for
+# this one step.
 gen-client:
-    oapi-codegen -package wakeupapi -generate types,client docs/openapi/swagger.json > apps/mobile/lib/wakeupapi/client.go
+    @mkdir -p apps/mobile/lib/wakeupapi
+    @python3 scripts/dev/swagger2-to-openapi3.py docs/openapi/swagger.json /tmp/wakeup-openapi3.json
+    oapi-codegen -package wakeupapi -generate types,client /tmp/wakeup-openapi3.json > apps/mobile/lib/wakeupapi/client.go
+    @rm -f /tmp/wakeup-openapi3.json
 
 # Verify all (used in CI and as the final acceptance gate)
 verify: lint test gen-docs-check
