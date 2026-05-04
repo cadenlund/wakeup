@@ -1,0 +1,210 @@
+/* Tailwind v4 entry. The three imports replace v3's `@tailwind base/utilities`
+ * directives — v4 is CSS-first so layer ordering is explicit.
+ *
+ * NativeWind v5 reads this file at Metro build time and rewrites every
+ * `className=...` prop on a useCssElement-wrapped component into a
+ * style object. See lib/tw/index.tsx for the wrappers.
+ *
+ * The 10 sleep-cycle schemes per WAKEUPEXPO.md §4.5 are layered on
+ * top of a `daylight` default. Other schemes apply via
+ * `[data-theme="<name>"] { … }` selectors; lib/theme/provider toggles
+ * that attribute on the root view (NativeWind v5's mechanism).
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css";
+
+/* Platform fonts — picked from native system fonts so the app feels
+ * native by default. Per-scheme blocks below leave fonts alone. */
+@media android {
+  :root {
+    --font-mono: monospace;
+    --font-rounded: normal;
+    --font-serif: serif;
+    --font-sans: normal;
+  }
+}
+
+@media ios {
+  :root {
+    --font-mono: ui-monospace;
+    --font-serif: ui-serif;
+    --font-sans: system-ui;
+    --font-rounded: ui-rounded;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+ * Default scheme: daylight (light). Tailwind v4's `@theme` registers
+ * each --color-* variable as a Tailwind color, so a className like
+ * `bg-bg` resolves to `var(--color-bg)`.
+ *
+ * Tokens per WAKEUPEXPO.md §4.5:
+ *   background / foreground / muted / border / accent /
+ *   accent-foreground / destructive / ring / success
+ *
+ * Schemes other than daylight override these inside their
+ * [data-theme] block below.
+ * ────────────────────────────────────────────────────────────────── */
+@layer theme {
+  @theme {
+    --color-bg: #fafafa;
+    --color-fg: #0f172a;
+    --color-muted: #f1f5f9;
+    --color-muted-fg: #64748b;
+    --color-border: #e2e8f0;
+    --color-accent: #1e40af;
+    --color-accent-fg: #ffffff;
+    --color-destructive: #dc2626;
+    --color-destructive-fg: #ffffff;
+    --color-ring: #1e40af;
+    --color-success: #16a34a;
+    --color-success-fg: #ffffff;
+  }
+}
+
+/* sunrise — light, peach on cream, accent salmon */
+[data-theme="sunrise"] {
+  --color-bg: #fff8ee;
+  --color-fg: #4a2511;
+  --color-muted: #ffe8d4;
+  --color-muted-fg: #8a4f2a;
+  --color-border: #f7d2b1;
+  --color-accent: #ff8c5a;
+  --color-accent-fg: #ffffff;
+  --color-destructive: #dc2626;
+  --color-destructive-fg: #ffffff;
+  --color-ring: #ff8c5a;
+  --color-success: #16a34a;
+  --color-success-fg: #ffffff;
+}
+
+/* daylight is the default — see @theme block above. */
+
+/* noon — bleached light, butter accent */
+[data-theme="noon"] {
+  --color-bg: #ffffff;
+  --color-fg: #1a1a1a;
+  --color-muted: #fffcf0;
+  --color-muted-fg: #6b6b6b;
+  --color-border: #f4eedb;
+  --color-accent: #fbbf24;
+  --color-accent-fg: #1a1a1a;
+  --color-destructive: #dc2626;
+  --color-destructive-fg: #ffffff;
+  --color-ring: #fbbf24;
+  --color-success: #16a34a;
+  --color-success-fg: #ffffff;
+}
+
+/* golden — honey on cream, deep amber accent */
+[data-theme="golden"] {
+  --color-bg: #fffbea;
+  --color-fg: #3b2103;
+  --color-muted: #fef3c7;
+  --color-muted-fg: #92400e;
+  --color-border: #fde68a;
+  --color-accent: #b45309;
+  --color-accent-fg: #fffbea;
+  --color-destructive: #dc2626;
+  --color-destructive-fg: #ffffff;
+  --color-ring: #b45309;
+  --color-success: #15803d;
+  --color-success-fg: #f0fdf4;
+}
+
+/* meadow — sage on pale green, deep green accent */
+[data-theme="meadow"] {
+  --color-bg: #f0fdf4;
+  --color-fg: #052e16;
+  --color-muted: #dcfce7;
+  --color-muted-fg: #166534;
+  --color-border: #bbf7d0;
+  --color-accent: #15803d;
+  --color-accent-fg: #f0fdf4;
+  --color-destructive: #dc2626;
+  --color-destructive-fg: #ffffff;
+  --color-ring: #15803d;
+  --color-success: #16a34a;
+  --color-success-fg: #ffffff;
+}
+
+/* dusk — amber on slate, deep amber accent (dark) */
+[data-theme="dusk"] {
+  --color-bg: #1e293b;
+  --color-fg: #f1f5f9;
+  --color-muted: #334155;
+  --color-muted-fg: #cbd5e1;
+  --color-border: #475569;
+  --color-accent: #d97706;
+  --color-accent-fg: #fffbeb;
+  --color-destructive: #f87171;
+  --color-destructive-fg: #1e293b;
+  --color-ring: #f59e0b;
+  --color-success: #4ade80;
+  --color-success-fg: #052e16;
+}
+
+/* twilight — indigo on charcoal (dark) */
+[data-theme="twilight"] {
+  --color-bg: #0f172a;
+  --color-fg: #e2e8f0;
+  --color-muted: #1e293b;
+  --color-muted-fg: #94a3b8;
+  --color-border: #334155;
+  --color-accent: #4f46e5;
+  --color-accent-fg: #eef2ff;
+  --color-destructive: #f87171;
+  --color-destructive-fg: #0f172a;
+  --color-ring: #818cf8;
+  --color-success: #4ade80;
+  --color-success-fg: #052e16;
+}
+
+/* aurora — teal on deep blue (dark) */
+[data-theme="aurora"] {
+  --color-bg: #082f49;
+  --color-fg: #f0f9ff;
+  --color-muted: #0c4a6e;
+  --color-muted-fg: #7dd3fc;
+  --color-border: #075985;
+  --color-accent: #22d3ee;
+  --color-accent-fg: #082f49;
+  --color-destructive: #f87171;
+  --color-destructive-fg: #082f49;
+  --color-ring: #5eead4;
+  --color-success: #4ade80;
+  --color-success-fg: #082f49;
+}
+
+/* midnight — navy on near-black, blue accent (dark) */
+[data-theme="midnight"] {
+  --color-bg: #020617;
+  --color-fg: #e2e8f0;
+  --color-muted: #0f172a;
+  --color-muted-fg: #94a3b8;
+  --color-border: #1e293b;
+  --color-accent: #3b82f6;
+  --color-accent-fg: #020617;
+  --color-destructive: #f87171;
+  --color-destructive-fg: #020617;
+  --color-ring: #60a5fa;
+  --color-success: #4ade80;
+  --color-success-fg: #020617;
+}
+
+/* rem — violet on plum, pink accent (dark) */
+[data-theme="rem"] {
+  --color-bg: #1e1b4b;
+  --color-fg: #ede9fe;
+  --color-muted: #312e81;
+  --color-muted-fg: #c4b5fd;
+  --color-border: #4c1d95;
+  --color-accent: #ec4899;
+  --color-accent-fg: #1e1b4b;
+  --color-destructive: #f87171;
+  --color-destructive-fg: #1e1b4b;
+  --color-ring: #a855f7;
+  --color-success: #4ade80;
+  --color-success-fg: #1e1b4b;
+}

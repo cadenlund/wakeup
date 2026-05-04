@@ -1,11 +1,23 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native";
+import {
+  DarkTheme,
+  DefaultTheme,
+  ThemeProvider as NavigationThemeProvider,
+} from "@react-navigation/native";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import "react-native-reanimated";
 
+// Tailwind v4 entry. Importing global.css at the root layout module
+// ensures NativeWind v5's Metro transform sees the file before any
+// component tries to render with className. Per the
+// `expo:expo-tailwind-setup` skill — must be imported once, anywhere
+// in the dependency graph that the bundler picks up first.
+import "../global.css";
+
+import { ThemeProvider } from "@/lib/theme/provider";
 import { useColorScheme } from "@/components/useColorScheme";
 
 export {
@@ -46,14 +58,21 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
+  // useColorScheme drives @react-navigation/native's bundled theme
+  // (the navigator's own dark/light surfaces — header bg, default
+  // text, etc.). The Wakeup ThemeProvider is the source of truth for
+  // app content; navigation chrome follows the OS dark/light hint
+  // because the spec leaves the navigator's own surfaces to the OS.
   const colorScheme = useColorScheme();
 
   return (
-    <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-      </Stack>
+    <ThemeProvider>
+      <NavigationThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="modal" options={{ presentation: "modal" }} />
+        </Stack>
+      </NavigationThemeProvider>
     </ThemeProvider>
   );
 }
