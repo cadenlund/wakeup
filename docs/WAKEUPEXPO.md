@@ -1263,16 +1263,21 @@ pre-commit:
   commands:
     # ... (existing Go entries) ...
     mobile-format:
-      glob: "apps/mobile/**/*.{ts,tsx,js,jsx,json,md}"
-      run: cd apps/mobile && bunx prettier --write --ignore-path .prettierignore {staged_files}
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx,js,jsx,json,md}"
+      run: bunx prettier --write --ignore-path .prettierignore {staged_files}
       stage_fixed: true
     mobile-lint:
-      glob: "apps/mobile/**/*.{ts,tsx,js,jsx}"
-      run: cd apps/mobile && bunx eslint --max-warnings 0 {staged_files}
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx,js,jsx}"
+      run: bunx eslint --max-warnings 0 {staged_files}
     mobile-tsc:
-      glob: "apps/mobile/**/*.{ts,tsx}"
-      run: cd apps/mobile && bunx tsc --noEmit
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx}"
+      run: bunx tsc --noEmit
 ```
+
+`root: apps/mobile/` scopes `{staged_files}` to that subtree AND strips the prefix, so `apps/mobile/app/foo.tsx` arrives at the command as just `app/foo.tsx`. Without `root`, the `cd apps/mobile && eslint apps/mobile/foo.tsx` form fails to resolve the file.
 
 Component tests run in CI only — the jest-expo suite is small enough that the latency hit on every commit isn't worth the catch rate, and a slow pre-commit hook gets bypassed (`--no-verify`) which defeats the point. The §13.7 GitHub Actions workflow runs the full battery (tsc + eslint + prettier --check + expo-doctor) on every push to `main` and every PR.
 
