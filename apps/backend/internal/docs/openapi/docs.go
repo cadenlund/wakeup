@@ -15,6 +15,61 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/.well-known/apple-app-site-association": {
+            "get": {
+                "description": "Static JSON consumed by iOS to enable Universal Links to ` + "`" + `app.wakeup.client` + "`" + `. Returns 404 when ` + "`" + `IOS_APP_ID` + "`" + ` isn't configured. Apple's CDN caches this; clients should not rely on dynamic content.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Apple App Site Association",
+                "responses": {
+                    "200": {
+                        "description": "Apple universal-links manifest",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "404": {
+                        "description": "Not configured",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/.well-known/assetlinks.json": {
+            "get": {
+                "description": "Static JSON consumed by Android to enable App Links to ` + "`" + `app.wakeup.client` + "`" + `. Returns 404 when ` + "`" + `ANDROID_PACKAGE` + "`" + ` or ` + "`" + `ANDROID_SHA256_FINGERPRINTS` + "`" + ` aren't configured. The fingerprints array supports signing-key rotation.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Android Asset Links",
+                "responses": {
+                    "200": {
+                        "description": "Android app-links manifest",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not configured",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/admin/audit": {
             "get": {
                 "security": [
@@ -1019,6 +1074,55 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/blocks": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns the caller's block list as public profile rows. Only the blocker sees this; the blocked party never knows. Used by the mobile settings/blocked screen (WAKEUPEXPO.md §5.1).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "friends"
+                ],
+                "summary": "List blocked users",
+                "responses": {
+                    "200": {
+                        "description": "Block list",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.BlockListResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_http.ErrorResponse"
                         }
@@ -2407,6 +2511,53 @@ const docTemplate = `{
             }
         },
         "/v1/devices": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Returns every device token registered to the authenticated user, newest first. Pair with ` + "`" + `DELETE /v1/devices/{id}` + "`" + ` to revoke.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "devices"
+                ],
+                "summary": "List my device tokens",
+                "responses": {
+                    "200": {
+                        "description": "Device tokens",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.DeviceTokenListResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
@@ -2456,6 +2607,93 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/devices/voip": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Stores (or refreshes) the caller's iOS PushKit token. Idempotent on (user_id, voip_token): re-registering the same token bumps ` + "`" + `last_seen_at` + "`" + `. Required for the §8.6 CallKit incoming-call ring on iOS — Apple's PushKit transport wakes the app from a fully-killed state, which APNS / Expo push can't do.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "devices"
+                ],
+                "summary": "Register an iOS PushKit (VoIP) token",
+                "parameters": [
+                    {
+                        "description": "PushKit token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.RegisterVoIPTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Persisted token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.VoIPTokenResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "VoIP storage not configured (server-side)",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_http.ErrorResponse"
                         }
@@ -3103,7 +3341,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Removes the caller's block on the target user. The target party can't call this — only the original blocker can.",
+                "description": "Removes the caller's block on the target user. The target party can't call this — only the original blocker can. Reachable via both ` + "`" + `DELETE /v1/friends/{user_id}/block` + "`" + ` and ` + "`" + `DELETE /v1/blocks/{user_id}` + "`" + `.",
                 "produces": [
                     "application/json"
                 ],
@@ -3172,9 +3410,9 @@ const docTemplate = `{
         },
         "/v1/healthz": {
             "get": {
-                "description": "Returns 200 unconditionally. The load balancer uses this to confirm the process is running; it does not check downstream dependencies (use readyz for that).",
+                "description": "Returns 200 with the process status and the minimum mobile-app version the server accepts. The load balancer uses this to confirm the process is running; it does not check downstream dependencies (use readyz for that). Mobile clients also read ` + "`" + `min_client_version` + "`" + ` for force-upgrade gating.",
                 "produces": [
-                    "text/plain"
+                    "application/json"
                 ],
                 "tags": [
                     "system"
@@ -3182,9 +3420,9 @@ const docTemplate = `{
                 "summary": "Liveness probe",
                 "responses": {
                     "200": {
-                        "description": "ok",
+                        "description": "Status + min client version",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/github_com_cadenlund_wakeup_apps_backend_internal_handler_http.HealthzResponse"
                         }
                     }
                 }
@@ -4329,6 +4567,19 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_cadenlund_wakeup_apps_backend_internal_handler_http.HealthzResponse": {
+            "type": "object",
+            "properties": {
+                "min_client_version": {
+                    "type": "string",
+                    "example": "1.0.0"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
         "internal_handler_http.AddMembersRequest": {
             "type": "object",
             "required": [
@@ -4500,6 +4751,17 @@ const docTemplate = `{
             "properties": {
                 "user": {
                     "$ref": "#/definitions/internal_handler_http.MeResponse"
+                }
+            }
+        },
+        "internal_handler_http.BlockListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.UserResponse"
+                    }
                 }
             }
         },
@@ -4686,6 +4948,17 @@ const docTemplate = `{
                         "group"
                     ],
                     "example": "group"
+                }
+            }
+        },
+        "internal_handler_http.DeviceTokenListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.DeviceTokenResponse"
+                    }
                 }
             }
         },
@@ -5206,6 +5479,18 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.RegisterVoIPTokenRequest": {
+            "type": "object",
+            "required": [
+                "voip_token"
+            ],
+            "properties": {
+                "voip_token": {
+                    "type": "string",
+                    "example": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+                }
+            }
+        },
         "internal_handler_http.RoomParticipantRow": {
             "type": "object",
             "properties": {
@@ -5527,6 +5812,27 @@ const docTemplate = `{
                 "username": {
                     "type": "string",
                     "example": "caden"
+                }
+            }
+        },
+        "internal_handler_http.VoIPTokenResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "last_seen_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "voip_token": {
+                    "type": "string",
+                    "example": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
                 }
             }
         },

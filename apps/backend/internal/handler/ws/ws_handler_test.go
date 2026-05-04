@@ -90,7 +90,7 @@ func TestWSHandler_AuthenticatedDialSucceeds(t *testing.T) {
 
 // --- Inbound event routing -------------------------------------------
 
-func TestWSHandler_HeartbeatIsNoOp(t *testing.T) {
+func TestWSHandler_HeartbeatRepliesWithUnreadTotal(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
 	c, _ := h.AuthClient(t)
@@ -103,8 +103,9 @@ func TestWSHandler_HeartbeatIsNoOp(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
 
-	// Send a heartbeat envelope. The handler must accept it without
-	// closing the connection, but no S→C frame is expected back.
+	// Send a heartbeat envelope. The handler now replies with a
+	// heartbeat ack carrying unread_total (WAKEUPEXPO.md §7.5). For a
+	// fresh user with no conversations, unread_total is 0.
 	payload, err := wsproto.Encode(wsproto.EventHeartbeat, wsproto.HeartbeatPayload{})
 	if err != nil {
 		t.Fatalf("Encode heartbeat: %v", err)
@@ -112,18 +113,26 @@ func TestWSHandler_HeartbeatIsNoOp(t *testing.T) {
 	if err := conn.Write(context.Background(), websocket.MessageText, payload); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	// Briefly verify no echo frame arrives. Check ctx.Err() so we
-	// distinguish "deadline tripped (success)" from "conn died for an
-	// unrelated reason" — the latter is a real failure worth catching
-	// instead of treating any read error as a pass. (CodeRabbit PR #49.)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, frame, err := conn.Read(ctx)
-	if err == nil {
-		t.Errorf("got unexpected frame after heartbeat: %s", frame)
+	if err != nil {
+		t.Fatalf("expected heartbeat ack, got read err: %v", err)
 	}
-	if ctx.Err() == nil {
-		t.Fatalf("read failed before deadline (conn may have closed unexpectedly): %v", err)
+	env, err := wsproto.Decode(frame)
+	if err != nil {
+		t.Fatalf("decode ack: %v", err)
+	}
+	if env.Type != wsproto.EventHeartbeat {
+		t.Errorf("ack type = %q, want heartbeat", env.Type)
+	}
+	var ack wsproto.HeartbeatPayload
+	if err := wsproto.UnmarshalData(env, &ack); err != nil {
+		t.Fatalf("unmarshal ack data: %v", err)
+	}
+	if ack.UnreadTotal != 0 {
+		t.Errorf("unread_total = %d, want 0 for a brand-new user", ack.UnreadTotal)
 	}
 }
 

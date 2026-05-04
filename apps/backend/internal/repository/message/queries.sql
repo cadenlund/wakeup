@@ -95,3 +95,25 @@ WHERE m.deleted_at IS NULL
   AND m.body_tsv @@ plainto_tsquery('english', $2::text)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $3;
+
+-- name: CountUnreadForUser :one
+-- Sum of unread messages across every conversation the user is a
+-- member of. "Unread" = the message wasn't authored by the user AND
+-- (the user has no read pointer yet OR the message was sent after
+-- their last_read_message_id row's created_at). Soft-deleted messages
+-- are excluded. Used by GET /v1/auth/me's X-Unread-Total response
+-- header and by the WS heartbeat's unread_total payload.
+WITH last_read AS (
+    SELECT cm.conversation_id,
+           cm.user_id,
+           lr.created_at AS last_read_at
+    FROM conversation_members cm
+    LEFT JOIN messages lr ON lr.id = cm.last_read_message_id
+    WHERE cm.user_id = $1
+)
+SELECT COUNT(*)::bigint
+FROM messages m
+JOIN last_read r ON r.conversation_id = m.conversation_id
+WHERE m.sender_id <> $1
+  AND m.deleted_at IS NULL
+  AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at);

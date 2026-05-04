@@ -50,6 +50,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	presrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/presence"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	voiprepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/voiptoken"
 	sentryclient "github.com/cadenlund/wakeup/apps/backend/internal/sentry"
 	adminsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
@@ -158,6 +159,7 @@ func run() error {
 	attsRepo := attrepo.New(pool)
 	presRepo := presrepo.New(pool)
 	devicesRepo := devicerepo.New(pool)
+	voipRepo := voiprepo.New(pool)
 	auditsRepo := auditrepo.New(pool)
 	idemKeysRepo := idemrepo.New(pool)
 
@@ -253,7 +255,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("room service: %w", err)
 	}
-	deviceSvc, err := devicesvc.New(devicesvc.Config{Devices: devicesRepo})
+	deviceSvc, err := devicesvc.New(devicesvc.Config{Devices: devicesRepo, VoIP: voipRepo})
 	if err != nil {
 		return fmt.Errorf("device service: %w", err)
 	}
@@ -298,7 +300,7 @@ func run() error {
 	defer jobRunner.Stop()
 
 	v := httpapi.NewValidator()
-	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
+	authHandler, err := httpapi.NewAuthHandler(authSvc, msgsRepo, v)
 	if err != nil {
 		return fmt.Errorf("auth handler: %w", err)
 	}
@@ -382,7 +384,8 @@ func run() error {
 	defer wsBridge.Close()
 	wsHandler, err := wshandler.NewHandler(wshandler.HandlerConfig{
 		Hub: wsHub, Bridge: wsBridge, Broker: broker,
-		Auth: authSvc, Convs: convSvc, Logger: logger,
+		Auth: authSvc, Convs: convSvc, Unread: msgsRepo,
+		Logger:         logger,
 		AllowedOrigins: cfg.CORSOriginList(),
 		WriteError:     httpapi.WriteError,
 	})

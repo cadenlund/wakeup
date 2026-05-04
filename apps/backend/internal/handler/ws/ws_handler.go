@@ -51,9 +51,18 @@ type Handler struct {
 	broker         pubsub.Broker
 	auth           *auth.Service
 	convs          *convsvc.Service
+	unread         UnreadCounter
 	logger         *slog.Logger
 	allowedOrigins []string
 	writeError     errorWriter
+}
+
+// UnreadCounter is the slice of message-repo this handler needs to
+// embed `unread_total` in heartbeat acks (WAKEUPEXPO.md §7.5). Defining
+// it locally keeps the dep small + stub-friendly. Production wiring
+// passes *messagerepo.Queries.
+type UnreadCounter interface {
+	CountUnreadForUser(ctx context.Context, userID uuid.UUID) (int64, error)
 }
 
 // HandlerConfig builds the upgrade handler.
@@ -65,6 +74,10 @@ type HandlerConfig struct {
 	Convs          *convsvc.Service
 	Logger         *slog.Logger
 	AllowedOrigins []string
+	// Unread is optional. When nil, heartbeat acks are sent without
+	// the unread_total field — clients that want the count fall back
+	// to the X-Unread-Total header on /v1/auth/me.
+	Unread UnreadCounter
 	// WriteError is the §4.4 envelope writer. Pass httpapi.WriteError
 	// from the router. Nil makes auth failures write a bare 401.
 	WriteError errorWriter
@@ -97,7 +110,8 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	}
 	return &Handler{
 		hub: cfg.Hub, bridge: cfg.Bridge, broker: cfg.Broker,
-		auth: cfg.Auth, convs: cfg.Convs, logger: logger,
+		auth: cfg.Auth, convs: cfg.Convs, unread: cfg.Unread,
+		logger:         logger,
 		allowedOrigins: cfg.AllowedOrigins, writeError: we,
 	}, nil
 }
@@ -204,6 +218,7 @@ func (h *Handler) makeOnMessage(uid uuid.UUID) func(ctx context.Context, raw []b
 		}
 		switch env.Type {
 		case wsproto.EventHeartbeat:
+			h.replyHeartbeat(ctx, uid)
 			return nil
 		case wsproto.EventTypingStart, wsproto.EventTypingStop:
 			return h.handleTyping(ctx, uid, env)
@@ -230,6 +245,35 @@ func (h *Handler) makeOnMessage(uid uuid.UUID) func(ctx context.Context, raw []b
 // convs.Get returns RESOURCE_NOT_FOUND for non-members, which we
 // surface to the caller's onMessage as an error (the read pump logs
 // it but keeps the conn open). CodeRabbit PR #49.
+// replyHeartbeat sends a heartbeat ack back to the client carrying the
+// caller's current unread message total — mobile uses it to keep the
+// app icon badge accurate without a REST round-trip per heartbeat
+// (WAKEUPEXPO.md §7.5). Best-effort: a count or encode failure logs
+// but doesn't surface to the caller (the heartbeat itself succeeded).
+func (h *Handler) replyHeartbeat(ctx context.Context, uid uuid.UUID) {
+	payload := wsproto.HeartbeatPayload{}
+	if h.unread != nil {
+		n, err := h.unread.CountUnreadForUser(ctx, uid)
+		if err != nil {
+			h.logger.Warn("ws: heartbeat unread count failed",
+				slog.String("user_id", uid.String()),
+				slog.String("error", err.Error()),
+			)
+		} else {
+			payload.UnreadTotal = n
+		}
+	}
+	encoded, err := wsproto.Encode(wsproto.EventHeartbeat, payload)
+	if err != nil {
+		h.logger.Warn("ws: heartbeat encode failed",
+			slog.String("user_id", uid.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	h.hub.BroadcastToUser(uid, encoded)
+}
+
 func (h *Handler) handleTyping(ctx context.Context, uid uuid.UUID, env wsproto.Envelope) error {
 	var p wsproto.TypingPayload
 	if err := wsproto.UnmarshalData(env, &p); err != nil {

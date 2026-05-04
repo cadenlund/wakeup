@@ -145,7 +145,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 	// /v1/healthz, /v1/readyz, /v1/openapi.json, /v1/docs/* live OUTSIDE
 	// auth/session/idempotency so the load balancer + browser can reach
 	// them without state.
-	r.Get("/v1/healthz", healthz)
+	r.Get("/v1/healthz", healthz(d))
 	r.Get("/v1/readyz", readyz(d))
 
 	// /webhooks/livekit is also OUTSIDE auth: §10.4 specifies LiveKit
@@ -160,6 +160,17 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 		httpswagger.URL("/v1/openapi.json"),
 		httpswagger.DocExpansion("none"),
 	))
+
+	// Universal-link manifests (WAKEUPEXPO.md §10.5). No auth, no v1
+	// prefix — Apple + Google fetch these with fixed user agents and
+	// don't follow redirects. Both return 404 if their config is empty.
+	wellKnown := httpapi.NewWellKnownHandler(
+		d.Cfg.IOSAppID,
+		d.Cfg.AndroidPackage,
+		d.Cfg.AndroidSHA256Fingerprints,
+	)
+	r.Get("/.well-known/apple-app-site-association", wellKnown.AppleAppSiteAssociation)
+	r.Get("/.well-known/assetlinks.json", wellKnown.AssetLinks)
 
 	// Routes that need the session + per-route auth gating.
 	r.Group(func(r chi.Router) {
@@ -230,6 +241,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Delete("/v1/friends/{user_id}", d.FriendHandler.Unfriend)
 				r.Post("/v1/friends/{user_id}/block", d.FriendHandler.Block)
 				r.Delete("/v1/friends/{user_id}/block", d.FriendHandler.Unblock)
+				r.Delete("/v1/blocks/{user_id}", d.FriendHandler.Unblock)
 				r.Post("/v1/conversations", d.ConversationHandler.Create)
 				r.Patch("/v1/conversations/{id}", d.ConversationHandler.Update)
 				r.Delete("/v1/conversations/{id}", d.ConversationHandler.Leave)
@@ -244,6 +256,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Post("/v1/conversations/{id}/room/join", d.RoomHandler.Join)
 				r.Post("/v1/conversations/{id}/room/leave", d.RoomHandler.Leave)
 				r.Post("/v1/devices", d.DeviceHandler.Register)
+				r.Post("/v1/devices/voip", d.DeviceHandler.RegisterVoIP)
 				r.Delete("/v1/devices/{id}", d.DeviceHandler.Delete)
 				r.Post("/v1/contacts/match", d.ContactsHandler.Match)
 
@@ -278,6 +291,8 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Get("/v1/widget/friends", d.PresenceHandler.WidgetFriends)
 				r.Get("/v1/conversations/{id}/room", d.RoomHandler.Get)
 				r.Get("/v1/search", d.SearchHandler.Search)
+				r.Get("/v1/devices", d.DeviceHandler.List)
+				r.Get("/v1/blocks", d.FriendHandler.ListBlocks)
 				r.Get("/v1/ws", d.WSHandler.Upgrade)
 				// §12.5 admin read endpoints — RequireAdmin gate.
 				r.Group(func(r chi.Router) {
@@ -310,15 +325,24 @@ func corsMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 
 // healthz is the unauthenticated liveness probe — process is up.
 //
+// Returns JSON with the process status and the configured minimum
+// client version. The mobile force-upgrade gate (WAKEUPEXPO.md §4.10)
+// polls this on every authenticated foreground; an empty
+// `min_client_version` means "no minimum, every client is OK."
+//
 // @Summary      Liveness probe
-// @Description  Returns 200 unconditionally. The load balancer uses this to confirm the process is running; it does not check downstream dependencies (use readyz for that).
+// @Description  Returns 200 with the process status and the minimum mobile-app version the server accepts. The load balancer uses this to confirm the process is running; it does not check downstream dependencies (use readyz for that). Mobile clients also read `min_client_version` for force-upgrade gating.
 // @Tags         system
-// @Produce      plain
-// @Success      200  {string}  string  "ok"
+// @Produce      json
+// @Success      200  {object}  httpapi.HealthzResponse  "Status + min client version"
 // @Router       /v1/healthz [get]
-func healthz(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
+func healthz(d routerDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		httpapi.WriteJSON(w, http.StatusOK, httpapi.HealthzResponse{
+			Status:           "ok",
+			MinClientVersion: d.Cfg.MinClientVersion,
+		})
+	}
 }
 
 // readyz checks downstreams: Postgres + Redis. Each ping gets its own
