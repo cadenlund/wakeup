@@ -42,10 +42,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // The data-theme attribute on this root View is what NativeWind v5
   // matches against in the [data-theme="…"] selectors in global.css.
-  // The flex-1 + bg-bg keeps the wrapper edge-to-edge so per-scheme
-  // backgrounds reach every corner.
+  // The flex-1 + bg-background keeps the wrapper edge-to-edge so
+  // per-scheme backgrounds reach every corner.
   return (
-    <View data-theme={effective} className="flex-1 bg-bg">
+    <View data-theme={effective} className="flex-1 bg-background">
       {children}
     </View>
   );

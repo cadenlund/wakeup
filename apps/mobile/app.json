@@ -89,7 +89,6 @@
       "expo-secure-store",
       "expo-tracking-transparency",
       ["@sentry/react-native/expo", { "organization": "wakeup", "project": "mobile" }],
-      "@livekit/react-native-expo-plugin",
       ["react-native-android-widget", { "widgets": [] }]
     ],
     "experiments": {

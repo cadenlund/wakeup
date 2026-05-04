@@ -1,0 +1,28 @@
+diff --git a/index.js b/index.js
+index c737c93a6dcf7423a148e8650b748c521d4bf3c7..49955d8085f689def6ce236efbdaedc3b4734092 100644
+--- a/index.js
++++ b/index.js
+@@ -270,15 +270,15 @@ module.exports = {
+     return require('./Libraries/StyleSheet/PlatformColorValueTypes')
+       .PlatformColor;
+   },
++  // Legacy PushNotificationIOS getter removed locally — its lazy-load
++  // path tries `new NativeEventEmitter(NativePushNotificationManager)`
++  // and the underlying TurboModule isn't registered when only
++  // expo-notifications is in the build, so Fast Refresh's export
++  // enumeration crashed every dev-client boot. Restore via the
++  // `@react-native-community/push-notification-ios` import directly
++  // when push UI lands (Phase 11).
+   get PushNotificationIOS() {
+-    warnOnce(
+-      'pushNotificationIOS-moved',
+-      'PushNotificationIOS has been extracted from react-native core and will be removed in a future release. ' +
+-        "It can now be installed and imported from '@react-native-community/push-notification-ios' instead of 'react-native'. " +
+-        'See https://github.com/react-native-push-notification/ios',
+-    );
+-    return require('./Libraries/PushNotificationIOS/PushNotificationIOS')
+-      .default;
++    return undefined;
+   },
+   get processColor() {
+     return require('./Libraries/StyleSheet/processColor').default;
