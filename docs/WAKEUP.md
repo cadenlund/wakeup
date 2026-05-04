@@ -1095,7 +1095,7 @@ auth
   POST   /v1/auth/login                       body: { identifier, password }   identifier = username|email
   POST   /v1/auth/logout
   POST   /v1/auth/logout-all
-  GET    /v1/auth/me
+  GET    /v1/auth/me                         response also sets X-Unread-Total header (mobile §7.5 badge)
   POST   /v1/auth/password-reset/request      body: { email }                  always 204 (no enumeration)
   POST   /v1/auth/password-reset/confirm      body: { token, new_password }
 
@@ -1117,6 +1117,10 @@ friends
   DELETE /v1/friends/{user_id}                unfriend
   POST   /v1/friends/{user_id}/block
   DELETE /v1/friends/{user_id}/block
+
+blocks  (alias surface for the mobile settings/blocked screen — same blocking primitive as friends/{id}/block)
+  GET    /v1/blocks                           public profiles of every user the caller has blocked
+  DELETE /v1/blocks/{user_id}                 alias of DELETE /v1/friends/{user_id}/block
 
 conversations
   GET    /v1/conversations?limit=&cursor=     sorted by pinned_at DESC NULLS LAST, last_message_at DESC
@@ -1175,6 +1179,7 @@ webhooks (no auth — verified by LiveKit signature)
   POST   /webhooks/livekit                    LiveKit fires room/participant events here
 
 device tokens (push)
+  GET    /v1/devices                          list the caller's registered tokens (mobile settings/devices)
   POST   /v1/devices                          body: { expo_token, platform }
   DELETE /v1/devices/{id}
 
@@ -1194,8 +1199,14 @@ websocket
 
 system
   GET    /v1/healthz                          liveness, no auth
+                                              Body: { status: "ok", min_client_version: "<semver>" }.
+                                              min_client_version is the minimum mobile-app version the
+                                              server accepts; mobile uses it for the §10.5 force-upgrade
+                                              gate. Empty = no minimum.
   GET    /v1/readyz                           checks db + redis
   GET    /v1/openapi.json                     spec
+  GET    /.well-known/apple-app-site-association   iOS Universal Links manifest (no auth, no v1 prefix)
+  GET    /.well-known/assetlinks.json              Android App Links manifest (no auth, no v1 prefix)
   GET    /v1/docs                             Swagger UI
 ```
 
@@ -1412,12 +1423,13 @@ return ListMessagesResponse{Data: toMessageResponses(data), NextCursor: next, Ha
 | `room.participant_left` | `{ conversation_id, user_id }` |
 | `room.video_changed` | `{ conversation_id, user_id, video }` — relayed from LiveKit track-published/unpublished |
 | `room.ended` | `{ conversation_id }` — fired when last participant leaves and room empties |
+| `heartbeat` (ack) | `{ unread_total: int64 }` | server reply to a client `heartbeat` — carries the user's current unread message total so mobile can keep the app icon badge accurate without an extra REST call (WAKEUPEXPO.md §7.5) |
 
 ### 7.3 Client → server events
 
 | Event | Payload | Notes |
 |---|---|---|
-| `heartbeat` | `{}` | every 30s, foreground only |
+| `heartbeat` | `{}` | every 30s, foreground only. Server replies with the §7.2 `heartbeat` ack carrying `unread_total`. |
 | `typing.start` | `{ conversation_id }` | server debounces and re-broadcasts |
 | `typing.stop` | `{ conversation_id }` | |
 | `presence.set` | `{ status: 'online'|'sleeping' }` | manual override |

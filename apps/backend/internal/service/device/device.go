@@ -63,6 +63,17 @@ func (s *Service) Register(ctx context.Context, userID uuid.UUID, expoToken stri
 	return tok, nil
 }
 
+// ListForUser returns every device token registered to userID, ordered
+// by created_at DESC (newest first — what the mobile settings/devices
+// screen wants). Empty slice when the user has never registered.
+func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]domain.DeviceToken, error) {
+	tokens, err := s.devices.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, apierror.Internal("list device tokens").WithCause(err)
+	}
+	return tokens, nil
+}
+
 // Delete removes the user's device token by id. Returns 404 NotFound if
 // the row doesn't exist OR belongs to a different user (the repo's
 // Delete is scoped to (id, userID), so the two cases are

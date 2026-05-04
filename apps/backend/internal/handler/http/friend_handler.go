@@ -59,6 +59,14 @@ func (h *FriendHandler) Mount(r chi.Router) {
 		r.Post("/{user_id}/block", h.Block)
 		r.Delete("/{user_id}/block", h.Unblock)
 	})
+	// /v1/blocks/* mirrors the friends-side block routes for the mobile
+	// settings/blocked screen (WAKEUPEXPO.md §5.1). GET is the new list
+	// endpoint; DELETE aliases the existing /v1/friends/{user_id}/block
+	// so the client can speak a single URL family.
+	r.Route("/v1/blocks", func(r chi.Router) {
+		r.Get("/", h.ListBlocks)
+		r.Delete("/{user_id}", h.Unblock)
+	})
 }
 
 // List returns the authenticated user's accepted friendships.
@@ -352,10 +360,48 @@ func (h *FriendHandler) Block(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, rendered)
 }
 
+// ListBlocks returns the public profiles of every user the caller has
+// blocked. Only the blocker sees their own list — the addressees are
+// unaware they were blocked, by design.
+//
+// @Summary      List blocked users
+// @Description  Returns the caller's block list as public profile rows. Only the blocker sees this; the blocked party never knows. Used by the mobile settings/blocked screen (WAKEUPEXPO.md §5.1).
+// @Tags         friends
+// @Produce      json
+// @Security     CookieAuth
+// @Success      200  {object} BlockListResponse  "Block list"
+// @Header       200  {string} X-Request-ID       "Echoed request id"
+// @Failure      401  {object} ErrorResponse      "Not authenticated"
+// @Failure      429  {object} ErrorResponse      "Rate limited"
+// @Failure      500  {object} ErrorResponse      "Internal error"
+// @Router       /v1/blocks [get]
+func (h *FriendHandler) ListBlocks(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	ids, err := h.friends.ListBlocked(r.Context(), uid)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	users, err := h.users.ListByIDs(r.Context(), ids)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	out := make([]UserResponse, 0, len(users))
+	for _, u := range users {
+		out = append(out, toUserResponse(u))
+	}
+	WriteJSON(w, http.StatusOK, BlockListResponse{Data: out})
+}
+
 // Unblock removes the caller's block on the target user.
 //
 // @Summary      Unblock a user
-// @Description  Removes the caller's block on the target user. The target party can't call this — only the original blocker can.
+// @Description  Removes the caller's block on the target user. The target party can't call this — only the original blocker can. Reachable via both `DELETE /v1/friends/{user_id}/block` and `DELETE /v1/blocks/{user_id}`.
 // @Tags         friends
 // @Produce      json
 // @Security     CookieAuth

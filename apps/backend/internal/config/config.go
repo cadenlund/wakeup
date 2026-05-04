@@ -58,6 +58,24 @@ type Config struct {
 	// Raw comma-joined value as it appears in env. Use CORSOriginList for the
 	// parsed slice so callers don't have to split.
 	CORSAllowedOrigins string `koanf:"cors_allowed_origins"`
+
+	// MinClientVersion is the minimum mobile-app version the server will
+	// accept. Surfaces in /v1/healthz so the client's force-upgrade gate
+	// (WAKEUPEXPO.md §4.10) can show a blocking modal when the installed
+	// version is older. Empty = no minimum (every client is OK).
+	// Use semver-style strings like "1.2.0".
+	MinClientVersion string `koanf:"min_client_version"`
+
+	// Universal-link descriptors for the §10.5 .well-known statics.
+	// IOSAppID = `<TEAMID>.<bundle id>`, e.g. "ABCD12EFGH.app.wakeup.client".
+	// AndroidPackage = the Play Store package, e.g. "app.wakeup.client".
+	// AndroidSHA256Fingerprints is a comma-joined list of SHA-256 cert
+	// fingerprints (uppercase hex with colons, as produced by
+	// `keytool -list -v`). Multiple = signing key rotation in progress.
+	// Empty values disable serving the corresponding .well-known file.
+	IOSAppID                  string `koanf:"ios_app_id"`
+	AndroidPackage            string `koanf:"android_package"`
+	AndroidSHA256Fingerprints string `koanf:"android_sha256_fingerprints"`
 }
 
 // RoomLoneKickAfterDuration parses the §10.3 lone-user kick timeout

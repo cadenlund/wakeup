@@ -40,7 +40,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	}
 
 	v := httpapi.NewValidator()
-	authHandler, err := httpapi.NewAuthHandler(h.AuthSvc, v)
+	authHandler, err := httpapi.NewAuthHandler(h.AuthSvc, h.MsgRepo, v)
 	if err != nil {
 		t.Fatalf("auth handler: %v", err)
 	}

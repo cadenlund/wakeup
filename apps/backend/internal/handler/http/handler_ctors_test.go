@@ -54,10 +54,10 @@ func newValidator() *validator.Validate {
 func TestNewAuthHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	v := newValidator()
-	if _, err := httpapi.NewAuthHandler(nil, v); err == nil {
+	if _, err := httpapi.NewAuthHandler(nil, nil, v); err == nil {
 		t.Error("nil svc: expected error")
 	}
-	if _, err := httpapi.NewAuthHandler(stubAuth, nil); err == nil {
+	if _, err := httpapi.NewAuthHandler(stubAuth, nil, nil); err == nil {
 		t.Error("nil validator: expected error")
 	}
 }
