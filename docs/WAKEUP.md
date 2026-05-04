@@ -793,8 +793,16 @@ CREATE TABLE users (
     email           citext NOT NULL UNIQUE,
     password_hash   text NOT NULL,
     avatar_url      text,
+    bio             text CHECK (char_length(bio) <= 280),                            -- nullable; soft 280-char cap to discourage essays
+    status_emoji    text CHECK (char_length(status_emoji) <= 8),                     -- nullable; one emoji + variant selector worst case
     color_scheme    text NOT NULL DEFAULT 'system' CHECK (color_scheme IN ('light','dark','system')),
     role            text NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
+    -- email_hash is a stored-generated SHA-256 of the lowercased email. Used by
+    -- POST /v1/contacts/match (§6.2) so the client can hash its address book and
+    -- ask "which of these emails belong to existing accounts" without ever
+    -- sending the raw values. Generated column means the application never has
+    -- to remember to recompute it — Postgres + pgcrypto's digest() owns it.
+    email_hash      bytea GENERATED ALWAYS AS (digest(lower(email::text), 'sha256')) STORED,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
     deleted_at      timestamptz
@@ -802,6 +810,7 @@ CREATE TABLE users (
 CREATE INDEX users_username_trgm_idx ON users USING gin (username gin_trgm_ops);
 CREATE INDEX users_display_name_trgm_idx ON users USING gin (display_name gin_trgm_ops);
 CREATE INDEX users_active_idx ON users (id) WHERE deleted_at IS NULL;
+CREATE INDEX users_email_hash_idx ON users (email_hash) WHERE deleted_at IS NULL;
 
 CREATE TRIGGER users_set_updated_at
     BEFORE UPDATE ON users
@@ -869,9 +878,25 @@ CREATE TABLE conversation_members (
     role                   text NOT NULL DEFAULT 'member' CHECK (role IN ('member','admin')),
     joined_at              timestamptz NOT NULL DEFAULT now(),
     last_read_message_id   uuid,
+    -- muted_until is the §10.2-aware push-suppression timestamp. Future value =
+    -- silence pushes for this conversation until then. NULL or past = audible.
+    -- "Mute forever" stores a far-future timestamp ('2099-01-01'); we don't add
+    -- a separate "forever" boolean. WS events still fire — this only gates the
+    -- *push notification* fanout, not in-app surfaces.
+    muted_until            timestamptz,
+    -- pinned_at is the §6 pin-to-top marker. Non-null → pin; the conversation
+    -- list orders by `pinned_at DESC NULLS LAST, last_message_at DESC`. We use
+    -- a timestamp (not a bool) so multi-pin order is deterministic — most
+    -- recently pinned floats above older pins. Per-member, not per-conversation.
+    pinned_at              timestamptz,
     PRIMARY KEY (conversation_id, user_id)
 );
 CREATE INDEX conversation_members_user_idx ON conversation_members (user_id);
+-- Partial index for the "ordered list of my conversations" query — lets the
+-- pinned-first sort use an index scan instead of a full sort.
+CREATE INDEX conversation_members_user_pinned_idx
+    ON conversation_members (user_id, pinned_at DESC)
+    WHERE pinned_at IS NOT NULL;
 
 CREATE TRIGGER conversations_set_updated_at
     BEFORE UPDATE ON conversations
@@ -934,9 +959,18 @@ ALTER TABLE message_attachments
 
 ```sql
 -- migrations/0007_presence.sql
+-- `status` is the *effective* presence — what other users see. It gets
+-- updated by the WS hub (online on connect, offline on disconnect, away
+-- after idle) AND by the user's manual override (POST /v1/presence/status).
+-- `intent` is the *sticky* override — when non-null, the WS hub leaves
+-- `status` alone and the manual value wins. Without intent, DND would clear
+-- the moment the user backgrounds the app and the WS disconnects, which
+-- defeats the point. Both columns share the same enum (minus 'offline' for
+-- intent — you can't manually mark yourself offline; that's what logout is).
 CREATE TABLE presence_states (
     user_id            uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    status             text NOT NULL DEFAULT 'offline' CHECK (status IN ('online','away','offline','sleeping')),
+    status             text NOT NULL DEFAULT 'offline' CHECK (status IN ('online','away','offline','sleeping','dnd')),
+    intent             text CHECK (intent IN ('online','away','sleeping','dnd')),
     last_active_at     timestamptz NOT NULL DEFAULT now(),
     last_heartbeat_at  timestamptz NOT NULL DEFAULT now(),
     updated_at         timestamptz NOT NULL DEFAULT now()
@@ -1067,8 +1101,8 @@ auth
 
 users
   GET    /v1/users?q=&limit=&cursor=          search by username/display_name (trigram)
-  GET    /v1/users/{id}                       UserResponse (public profile)
-  PATCH  /v1/users/me                         body: { display_name?, avatar_url?, color_scheme? }
+  GET    /v1/users/{id}                       UserResponse (public profile, includes bio + status_emoji)
+  PATCH  /v1/users/me                         body: { display_name?, avatar_url?, color_scheme?, bio?, status_emoji? }
   POST   /v1/users/me/avatar                  multipart, max 5MB, image/* only
   GET    /v1/users/me/notifications           NotificationPreferencesResponse
   PATCH  /v1/users/me/notifications           body: any subset of { direct_messages?, group_messages?, friend_requests?, calls? }
@@ -1085,7 +1119,7 @@ friends
   DELETE /v1/friends/{user_id}/block
 
 conversations
-  GET    /v1/conversations?limit=&cursor=     sorted by last_message_at DESC
+  GET    /v1/conversations?limit=&cursor=     sorted by pinned_at DESC NULLS LAST, last_message_at DESC
   POST   /v1/conversations                    body: { type, member_ids[], name? }   group cap 25
   GET    /v1/conversations/{id}
   PATCH  /v1/conversations/{id}               group only: { name?, avatar_url? }
@@ -1093,6 +1127,8 @@ conversations
   POST   /v1/conversations/{id}/members       body: { user_ids[] }   admin only
   DELETE /v1/conversations/{id}/members/{user_id}
   POST   /v1/conversations/{id}/read          body: { up_to_message_id }
+  PATCH  /v1/conversations/{id}/mute          body: { until: timestamp | null }    null = unmute; far-future = forever
+  PATCH  /v1/conversations/{id}/pin           body: { pinned: bool }                per-member; floats above unpinned in list
 
 messages
   GET    /v1/conversations/{id}/messages?limit=&cursor=&q=    reverse chrono; q = full-text
@@ -1107,7 +1143,28 @@ attachments
 
 presence
   GET    /v1/presence/friends                 bulk: status of all my friends (used on app open)
-  POST   /v1/presence/status                  body: { status: 'online'|'sleeping' }   manual override
+  POST   /v1/presence/status                  body: { status: 'online'|'away'|'sleeping'|'dnd' | null }
+                                              Sets presence_states.intent. null clears the override and lets the
+                                              WS hub take over again. 'dnd' is sticky across app backgrounding
+                                              (suppresses pushes; in-app surfaces still work). See §10.2.
+
+contacts
+  POST   /v1/contacts/match                   body: { email_hashes: [hex sha256] }  → { matched: [User] }
+                                              Email-only for v1 (no SMS). Client computes sha256(lower(trim(email)))
+                                              over its address book and sends LOWERCASE HEX hashes (64 chars each).
+                                              Backend matches against users.email_hash (bytea, raw bytes) by
+                                              hex-decoding the input batch server-side and doing binary equality
+                                              lookup against the indexed column — sketch:
+                                                  SELECT ... FROM users
+                                                  WHERE deleted_at IS NULL
+                                                    AND email_hash = ANY(
+                                                        SELECT decode(h, 'hex') FROM unnest($1::text[]) AS h
+                                                    )
+                                              Soft-deleted users are excluded. Unmatched hashes are not echoed and
+                                              not logged. Cap: ≤ 1000 hashes per request (handler returns 422 above
+                                              that — clients should chunk locally). Validate each hash matches
+                                              /^[0-9a-f]{64}$/ before decoding so a malformed input fails the whole
+                                              batch with a typed validation error rather than a Postgres decode panic.
 
 rooms (voice/video — every conversation has one persistent room: room_id == conversation_id)
   POST   /v1/conversations/{id}/room/join     body: { video?: bool=false }   → { room_id, livekit_url, livekit_token, expires_at, video }
@@ -1658,6 +1715,14 @@ type Notification struct {
 ```
 
 Fired by `MessageService.Send` when the recipient has no active WS connection. Look up active connections via Redis (Hub publishes `presence:online:<user_id>` keys with TTL on heartbeat).
+
+**Suppression rules — push fanout MUST skip a recipient if any of:**
+
+1. The recipient's `notification_preferences` for the relevant category is false (existing behavior).
+2. The recipient's `presence_states.intent === 'dnd'` (sticky Do Not Disturb — survives the WS connection going away).
+3. For per-conversation pushes (messages, member-added, room.started for that conv), the recipient's `conversation_members.muted_until > now()`.
+
+Suppression only gates the *push*. WS events still fire — in-app surfaces (unread badge, conversation list bump, room banner) work normally so the user catches up the next time they open the app. Implement this as a single `eligibleRecipients` query inside `pushnotif` rather than three separate filters; the SQL joins `users → presence_states → notification_preferences → conversation_members (LEFT, when conv-scoped)` and returns only the user-ids that pass every gate.
 
 ### 10.3 Voice & video (`internal/room`) — self-hosted LiveKit
 
