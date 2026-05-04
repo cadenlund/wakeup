@@ -140,13 +140,18 @@ func (s *Service) Heartbeat(ctx context.Context, userID uuid.UUID) error {
 	return nil
 }
 
-// SetStatus is the §7.3 manual override. Validates the status,
-// persists it, publishes presence.update on a change.
-func (s *Service) SetStatus(ctx context.Context, userID uuid.UUID, status domain.PresenceStatus) error {
-	if !status.IsValid() {
+// SetStatus is the §7.3 manual override. status is the new effective
+// status (online / away / sleeping / dnd) — also written to the
+// `intent` column so the override sticks across WS disconnect / decay.
+// Pass status == nil to *clear* the override; the row's status falls
+// back to 'online' (the next heartbeat / decay cycle re-asserts).
+//
+// Publishes presence.update on a change.
+func (s *Service) SetStatus(ctx context.Context, userID uuid.UUID, status *domain.PresenceStatus) error {
+	if status != nil && !status.IsValidIntent() {
 		return apierror.Validation([]apierror.FieldError{{
 			Field: "status", Code: "INVALID_VALUE",
-			Message: fmt.Sprintf("status %q is not one of online/away/offline/sleeping", status),
+			Message: fmt.Sprintf("status %q is not one of online/away/sleeping/dnd (offline cannot be set manually; use logout)", *status),
 		}})
 	}
 	prior, err := s.repo.Get(ctx, userID)
@@ -159,7 +164,24 @@ func (s *Service) SetStatus(ctx context.Context, userID uuid.UUID, status domain
 	default:
 		priorStatus = prior.Status
 	}
-	updated, err := s.repo.SetStatus(ctx, userID, status)
+
+	// status==nil clears the sticky intent; effective status falls back
+	// to 'online' as a sensible default — the WS hub or the decay
+	// sweeper will refine it on the next tick. Otherwise effective
+	// status == intent (manual override sticks).
+	var (
+		effective domain.PresenceStatus
+		intent    *domain.PresenceStatus
+	)
+	if status == nil {
+		effective = domain.PresenceOnline
+		intent = nil
+	} else {
+		effective = *status
+		intent = status
+	}
+
+	updated, err := s.repo.SetStatus(ctx, userID, effective, intent)
 	if err != nil {
 		return apierror.Internal("presence: set status").WithCause(err)
 	}

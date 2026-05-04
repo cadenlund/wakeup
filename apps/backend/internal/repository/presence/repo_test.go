@@ -101,7 +101,7 @@ func TestUpsertHeartbeat_PreservesManualSleeping(t *testing.T) {
 	repo := presence.New(pool)
 	uid := makeUser(ctx, t, pool)
 
-	if _, err := repo.SetStatus(ctx, uid, domain.PresenceSleeping); err != nil {
+	if _, err := repo.SetStatus(ctx, uid, domain.PresenceSleeping, nil); err != nil {
 		t.Fatalf("SetStatus sleeping: %v", err)
 	}
 	got, err := repo.UpsertHeartbeat(ctx, uid)
@@ -120,7 +120,7 @@ func TestUpsertHeartbeat_PreservesManualOffline(t *testing.T) {
 	repo := presence.New(pool)
 	uid := makeUser(ctx, t, pool)
 
-	if _, err := repo.SetStatus(ctx, uid, domain.PresenceOffline); err != nil {
+	if _, err := repo.SetStatus(ctx, uid, domain.PresenceOffline, nil); err != nil {
 		t.Fatalf("SetStatus offline: %v", err)
 	}
 	got, err := repo.UpsertHeartbeat(ctx, uid)
@@ -145,7 +145,7 @@ func TestSetStatus_RoundTrip(t *testing.T) {
 		domain.PresenceOnline, domain.PresenceAway,
 		domain.PresenceSleeping, domain.PresenceOffline,
 	} {
-		got, err := repo.SetStatus(ctx, uid, status)
+		got, err := repo.SetStatus(ctx, uid, status, nil)
 		if err != nil {
 			t.Fatalf("SetStatus %s: %v", status, err)
 		}
@@ -161,7 +161,7 @@ func TestSetStatus_RejectsInvalidStatus(t *testing.T) {
 	pool := testutil.NewTestDB(t)
 	repo := presence.New(pool)
 	uid := makeUser(ctx, t, pool)
-	_, err := repo.SetStatus(ctx, uid, domain.PresenceStatus("bogus"))
+	_, err := repo.SetStatus(ctx, uid, domain.PresenceStatus("bogus"), nil)
 	if err == nil {
 		t.Fatal("expected CHECK violation for unknown status")
 	}
@@ -181,7 +181,7 @@ func TestListByIDs_ReturnsRowsForKnownUsers(t *testing.T) {
 	if _, err := repo.UpsertHeartbeat(ctx, a); err != nil {
 		t.Fatalf("seed a: %v", err)
 	}
-	if _, err := repo.SetStatus(ctx, b, domain.PresenceSleeping); err != nil {
+	if _, err := repo.SetStatus(ctx, b, domain.PresenceSleeping, nil); err != nil {
 		t.Fatalf("seed b: %v", err)
 	}
 
@@ -259,7 +259,7 @@ func TestDecayStale_AwayToOffline(t *testing.T) {
 	repo := presence.New(pool)
 	uid := makeUser(ctx, t, pool)
 
-	if _, err := repo.SetStatus(ctx, uid, domain.PresenceAway); err != nil {
+	if _, err := repo.SetStatus(ctx, uid, domain.PresenceAway, nil); err != nil {
 		t.Fatalf("seed away: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
@@ -288,10 +288,10 @@ func TestDecayStale_LeavesManualStatusAlone(t *testing.T) {
 	sleeper := makeUser(ctx, t, pool)
 	offline := makeUser(ctx, t, pool)
 
-	if _, err := repo.SetStatus(ctx, sleeper, domain.PresenceSleeping); err != nil {
+	if _, err := repo.SetStatus(ctx, sleeper, domain.PresenceSleeping, nil); err != nil {
 		t.Fatalf("seed sleeper: %v", err)
 	}
-	if _, err := repo.SetStatus(ctx, offline, domain.PresenceOffline); err != nil {
+	if _, err := repo.SetStatus(ctx, offline, domain.PresenceOffline, nil); err != nil {
 		t.Fatalf("seed offline: %v", err)
 	}
 	if _, err := pool.Exec(ctx,

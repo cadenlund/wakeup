@@ -92,7 +92,7 @@ func TestSendMessage_NoPushForOnlineRecipient(t *testing.T) {
 	}
 	// Mark b as actively online via the presence service so the push
 	// fan-out treats them as "live WS" and skips them.
-	if err := h.PresenceSvc.SetStatus(ctx, b.ID, domain.PresenceOnline); err != nil {
+	if err := h.PresenceSvc.SetStatus(ctx, b.ID, domain.PresenceOnline.Ptr()); err != nil {
 		t.Fatalf("set b online: %v", err)
 	}
 
@@ -149,7 +149,7 @@ func TestSendFriendRequest_NoPushWhenAddresseeOnline(t *testing.T) {
 	if _, err := h.DeviceRepo.Register(ctx, b.ID, "ExponentPushToken[b]", domain.DeviceIOS); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
-	if err := h.PresenceSvc.SetStatus(ctx, b.ID, domain.PresenceOnline); err != nil {
+	if err := h.PresenceSvc.SetStatus(ctx, b.ID, domain.PresenceOnline.Ptr()); err != nil {
 		t.Fatalf("set b online: %v", err)
 	}
 

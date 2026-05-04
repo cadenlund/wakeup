@@ -177,7 +177,7 @@ func TestSetStatus_ValidatesValue(t *testing.T) {
 	ctx := context.Background()
 	st := newStack(t)
 	uid := makeUser(ctx, t, st.pool)
-	err := st.svc.SetStatus(ctx, uid, domain.PresenceStatus("bogus"))
+	err := st.svc.SetStatus(ctx, uid, domain.PresenceStatus("bogus").Ptr())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -199,12 +199,72 @@ func TestSetStatus_PublishesOnChange(t *testing.T) {
 	st.friends.byUser[uid] = []uuid.UUID{friend}
 
 	drain := subscribePresence(t, st.broker, friend)
-	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping); err != nil {
+	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping.Ptr()); err != nil {
 		t.Fatalf("SetStatus: %v", err)
 	}
 	got := drain(100 * time.Millisecond)
 	if len(got) != 1 || got[0].Status != "sleeping" {
 		t.Errorf("got %+v, want one sleeping update", got)
+	}
+}
+
+func TestSetStatus_DNDPersistsIntentAndStatus(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	if err := st.svc.SetStatus(ctx, uid, domain.PresenceDND.Ptr()); err != nil {
+		t.Fatalf("SetStatus dnd: %v", err)
+	}
+	row, err := st.repo.Get(ctx, uid)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Status != domain.PresenceDND {
+		t.Errorf("status = %q, want dnd", row.Status)
+	}
+	if row.Intent == nil || *row.Intent != domain.PresenceDND {
+		t.Errorf("intent = %v, want sticky dnd", row.Intent)
+	}
+}
+
+func TestSetStatus_NilClearsIntentAndDefaultsToOnline(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	if err := st.svc.SetStatus(ctx, uid, domain.PresenceDND.Ptr()); err != nil {
+		t.Fatalf("seed dnd: %v", err)
+	}
+	if err := st.svc.SetStatus(ctx, uid, nil); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	row, err := st.repo.Get(ctx, uid)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Intent != nil {
+		t.Errorf("intent = %v, want nil after clear", row.Intent)
+	}
+	if row.Status != domain.PresenceOnline {
+		t.Errorf("status = %q, want online (default after clear)", row.Status)
+	}
+}
+
+func TestSetStatus_RejectsOfflineIntent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+	err := st.svc.SetStatus(ctx, uid, domain.PresenceOffline.Ptr())
+	if err == nil {
+		t.Fatal("expected error — offline isn't a valid intent")
+	}
+	var ae *apierror.Error
+	if !errors.As(err, &ae) || ae.Code != apierror.CodeValidation {
+		t.Errorf("err = %v, want VALIDATION_FAILED", err)
 	}
 }
 
@@ -217,10 +277,10 @@ func TestSetStatus_DoesNotPublishOnNoOpChange(t *testing.T) {
 	st.friends.byUser[uid] = []uuid.UUID{friend}
 
 	drain := subscribePresence(t, st.broker, friend)
-	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping); err != nil {
+	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping.Ptr()); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping); err != nil {
+	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping.Ptr()); err != nil {
 		t.Fatalf("second: %v", err)
 	}
 	got := drain(100 * time.Millisecond)
@@ -241,7 +301,7 @@ func TestPublish_NonFriendDoesNotReceive(t *testing.T) {
 	st.friends.byUser[uid] = []uuid.UUID{friend}
 
 	drain := subscribePresence(t, st.broker, stranger)
-	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping); err != nil {
+	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping.Ptr()); err != nil {
 		t.Fatalf("SetStatus: %v", err)
 	}
 	got := drain(100 * time.Millisecond)
@@ -277,10 +337,10 @@ func TestListForUsers_FillsMissingAsOffline(t *testing.T) {
 	b := makeUser(ctx, t, st.pool)
 	missing := uuid.Must(uuid.NewV7())
 
-	if err := st.svc.SetStatus(ctx, a, domain.PresenceOnline); err != nil {
+	if err := st.svc.SetStatus(ctx, a, domain.PresenceOnline.Ptr()); err != nil {
 		t.Fatalf("seed a: %v", err)
 	}
-	if err := st.svc.SetStatus(ctx, b, domain.PresenceSleeping); err != nil {
+	if err := st.svc.SetStatus(ctx, b, domain.PresenceSleeping.Ptr()); err != nil {
 		t.Fatalf("seed b: %v", err)
 	}
 
@@ -317,11 +377,12 @@ func TestRun_DemotesAndPublishes(t *testing.T) {
 	st.friends.byUser[uid] = []uuid.UUID{friend}
 
 	drain := subscribePresence(t, st.broker, friend)
-	if err := st.svc.SetStatus(ctx, uid, domain.PresenceOnline); err != nil {
+	// Seed via the repo with intent=nil so the decay sweeper is allowed
+	// to demote — service.SetStatus would set intent='online' (sticky)
+	// which by design is exempt from decay.
+	if _, err := st.repo.SetStatus(ctx, uid, domain.PresenceOnline, nil); err != nil {
 		t.Fatalf("seed online: %v", err)
 	}
-	// Drain the offline→online publish.
-	_ = drain(50 * time.Millisecond)
 
 	// Wait past the 100ms onlineCutoff so the sweeper demotes.
 	time.Sleep(150 * time.Millisecond)
@@ -331,6 +392,41 @@ func TestRun_DemotesAndPublishes(t *testing.T) {
 	got := drain(100 * time.Millisecond)
 	if len(got) != 1 || got[0].Status != "away" {
 		t.Errorf("got %+v, want one away update", got)
+	}
+}
+
+// Counterpart: when intent is set, the sweeper does NOT touch the row.
+// This is what makes DND survive backgrounding without resetting.
+func TestRun_SkipsRowsWithStickyIntent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+	friend := uuid.Must(uuid.NewV7())
+	st.friends.byUser[uid] = []uuid.UUID{friend}
+
+	drain := subscribePresence(t, st.broker, friend)
+	// Service.SetStatus sets intent='online' too. Sticky.
+	if err := st.svc.SetStatus(ctx, uid, domain.PresenceOnline.Ptr()); err != nil {
+		t.Fatalf("seed online with intent: %v", err)
+	}
+	_ = drain(50 * time.Millisecond) // drain the offline→online publish
+
+	time.Sleep(150 * time.Millisecond)
+	if err := st.svc.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := drain(100 * time.Millisecond)
+	if len(got) != 0 {
+		t.Errorf("got %+v, want no demotion (intent is sticky)", got)
+	}
+	// Confirm the row still says online.
+	row, err := st.repo.Get(ctx, uid)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.Status != domain.PresenceOnline {
+		t.Errorf("status = %q, want online (sticky)", row.Status)
 	}
 }
 
@@ -394,7 +490,7 @@ func TestPublish_FriendLookupFailureIsNotFatal(t *testing.T) {
 	st := newStack(t)
 	st.friends.err = errors.New("boom")
 	uid := makeUser(ctx, t, st.pool)
-	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping); err != nil {
+	if err := st.svc.SetStatus(ctx, uid, domain.PresenceSleeping.Ptr()); err != nil {
 		t.Fatalf("SetStatus should still succeed even when fan-out fails: %v", err)
 	}
 	got, err := st.svc.Get(ctx, uid)

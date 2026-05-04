@@ -23,12 +23,16 @@ type PresenceListResponse struct {
 }
 
 // SetPresenceStatusRequest is the body of POST /v1/presence/status.
-// Schema constraints mirror the §6.1 manual-override docs: only
-// `online` and `sleeping` are user-settable. The service's broader
-// allow-list (which also covers `away` and `offline`) is for
-// programmatic transitions like the decay sweeper.
+// Manual override for sticky presence intent. Allowed values:
+//   - "online" / "away" / "sleeping" / "dnd": set as sticky intent;
+//     status survives WS disconnect, the decay sweeper, and app
+//     backgrounding until cleared.
+//   - null: clear an existing sticky intent. Effective status falls
+//     back to "online" and the WS hub / decay sweeper take back over.
+//
+// "offline" is intentionally not user-settable — that's what logout is.
 type SetPresenceStatusRequest struct {
-	Status string `json:"status" validate:"required,oneof=online sleeping" example:"sleeping"`
+	Status *string `json:"status" validate:"omitempty,oneof=online away sleeping dnd" example:"dnd"`
 }
 
 // WidgetFriendRow is one row in GET /v1/widget/friends. The endpoint
