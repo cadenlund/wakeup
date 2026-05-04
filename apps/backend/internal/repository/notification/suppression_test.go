@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/cadenlund/wakeup/apps/backend/internal/service/notification"
+	"github.com/cadenlund/wakeup/apps/backend/internal/repository/notification"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
@@ -55,10 +55,7 @@ func TestPushSuppressed_Default_NotSuppressed(t *testing.T) {
 	pool := testutil.NewTestDB(t)
 	uid := makeUser(ctx, t, pool)
 
-	s, err := notification.NewPushSuppression(pool)
-	if err != nil {
-		t.Fatalf("NewPushSuppression: %v", err)
-	}
+	s := notification.New(pool)
 	got, err := s.PushSuppressed(ctx, uid, nil)
 	if err != nil {
 		t.Fatalf("PushSuppressed: %v", err)
@@ -81,7 +78,7 @@ func TestPushSuppressed_DNDIntent_SuppressedRegardlessOfConv(t *testing.T) {
 		t.Fatalf("seed dnd: %v", err)
 	}
 
-	s, _ := notification.NewPushSuppression(pool)
+	s := notification.New(pool)
 	// nil convID — DND alone should suppress.
 	got, err := s.PushSuppressed(ctx, uid, nil)
 	if err != nil {
@@ -106,7 +103,7 @@ func TestPushSuppressed_NonDNDIntent_NotSuppressed(t *testing.T) {
 		t.Fatalf("seed sleeping: %v", err)
 	}
 
-	s, _ := notification.NewPushSuppression(pool)
+	s := notification.New(pool)
 	got, err := s.PushSuppressed(ctx, uid, nil)
 	if err != nil {
 		t.Fatalf("PushSuppressed: %v", err)
@@ -131,7 +128,7 @@ func TestPushSuppressed_ConvMutedFuture_Suppressed(t *testing.T) {
 		t.Fatalf("seed mute: %v", err)
 	}
 
-	s, _ := notification.NewPushSuppression(pool)
+	s := notification.New(pool)
 	got, err := s.PushSuppressed(ctx, a, &conv)
 	if err != nil {
 		t.Fatalf("PushSuppressed: %v", err)
@@ -156,7 +153,7 @@ func TestPushSuppressed_ConvMutedPast_NotSuppressed(t *testing.T) {
 		t.Fatalf("seed expired mute: %v", err)
 	}
 
-	s, _ := notification.NewPushSuppression(pool)
+	s := notification.New(pool)
 	got, err := s.PushSuppressed(ctx, a, &conv)
 	if err != nil {
 		t.Fatalf("PushSuppressed: %v", err)
@@ -181,7 +178,7 @@ func TestPushSuppressed_ConvMute_PerMember(t *testing.T) {
 		t.Fatalf("seed mute: %v", err)
 	}
 
-	s, _ := notification.NewPushSuppression(pool)
+	s := notification.New(pool)
 	// b's row is NOT muted → not suppressed.
 	got, err := s.PushSuppressed(ctx, b, &conv)
 	if err != nil {
@@ -207,7 +204,7 @@ func TestPushSuppressed_NonConvScope_IgnoresMute(t *testing.T) {
 		t.Fatalf("seed mute: %v", err)
 	}
 
-	s, _ := notification.NewPushSuppression(pool)
+	s := notification.New(pool)
 	// nil convID — friend-request style. Per-conv mute does not apply.
 	got, err := s.PushSuppressed(ctx, a, nil)
 	if err != nil {
