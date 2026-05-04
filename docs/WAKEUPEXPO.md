@@ -482,13 +482,14 @@ surfaces them one at a time.
 | `friend.request_received` | "{sender} sent you a friend request" | tap → `(tabs)/friends` |
 | `friend.request_accepted` | "{accepter} accepted your friend request" | tap → `conversation/<auto-DM>` |
 | `conversation.member_added` (caller is the newly added member) | "Added you to {group name}" | tap → `conversation/[id]` |
-| `room.started` (caller wasn't the initiator) | already covered by `<CallOverlay>` (§5.2). The full-screen call UI takes over; suppress the event-banner for `room.started`. |
+| `room.started` (caller wasn't the initiator) | *(suppressed — `<CallOverlay>` §5.2 handles incoming-call UI)* | *(no banner)* |
 
-**Suppression rules — do NOT surface a banner when:**
-- The user is currently on the conversation screen the message belongs to. They already see the message arrive in the thread.
+**Suppression rules — the dispatcher (`lib/ws/dispatcher.ts`) decides BEFORE calling `bannerStore.enqueue(...)` whether to enqueue. The banner component never makes filtering decisions; it just renders the head of the queue. Don't enqueue when:**
+- The user is currently on the conversation screen the message belongs to (`useFocusEffect`-tracked route compared to `event.conversation_id`). They already see the message arrive in the thread.
 - The conversation is muted (`muted_until > now()` from §4.12 below) — pushes are gated for muted conversations, banners should be too.
 - The user's presence intent is `dnd` — same gate as pushes.
-- A toast for the same event is currently visible. `friend.request_received` already toasts via §6.2's dispatcher; the banner subsumes the toast for that event so we pick one surface, not both. (Drop the toast in §6.2 for `friend.request_received` once the banner ships.)
+- The event is `room.started` — `<CallOverlay>` already takes the screen.
+- A toast for the same event would also fire. `friend.request_received` previously toasted via §6.2's dispatcher; the banner subsumes it, so dropping the toast for that event is part of the Phase 7.5 milestone (§16) — not a separate cleanup PR.
 
 **UX details:**
 - 4-second auto-dismiss; tap-to-route also dismisses.
@@ -624,8 +625,8 @@ The WebSocket connection auto-subscribes to channels for every conversation the 
 | `message.new` | `setQueryData` prepend to `['messages', convId]`; bump conversation row's `last_message_at` in `['conversations']`; if not on the conversation screen, increment unread badge |
 | `message.edited` | `setQueryData` patch in `['messages', convId]` |
 | `message.deleted` | `setQueryData` mark deleted in `['messages', convId]` |
-| `friend.request_received` | `invalidateQueries(['friends', 'requests'])`; toast "X sent you a friend request" |
-| `friend.request_accepted` | `invalidateQueries(['friends'])`; toast "X accepted your request" |
+| `friend.request_received` | `invalidateQueries(['friends', 'requests'])`; enqueue an `<EventBanner>` event (per §4.13). The earlier draft toasted here — the banner subsumes that surface so don't double-fire. |
+| `friend.request_accepted` | `invalidateQueries(['friends'])`; enqueue an `<EventBanner>` event (per §4.13). |
 | `presence.update` | `setQueryData` patch in `['presence', 'friends']` |
 | `room.started` | `invalidateQueries(['room', convId])`; if not the initiator, show in-app `RoomBanner` "X is calling…" with Accept/Decline |
 | `room.participant_joined` | `setQueryData` patch in `['room', convId]`; if local user is initiator and count == 2, transition call store from `dialing` → `active` |
@@ -1392,7 +1393,7 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
   - Commit: `feat(mobile): map ws events to react-query cache`
 - [ ] **7.4** Reconnect banner on the conversation screen. "Reconnected" toast on recovery.
   - Commit: `feat(mobile): surface ws connection state in ui`
-- [ ] **7.5** `<EventBanner>` per §4.13. Root-mounted singleton with a Zustand queue. Dispatcher enqueues `message.new` (when not on the conversation screen), `friend.request_received`, `friend.request_accepted`, `conversation.member_added` (caller is the new member). Suppress when conversation is muted, presence intent is dnd, or the user is on the conversation screen for a `message.new`. Tap routes to the relevant screen; swipe-up dismisses; 4-second auto-dismiss; light haptic on appearance. Maestro flow `event-banner.yaml`.
+- [ ] **7.5** `<EventBanner>` per §4.13. Root-mounted singleton with a Zustand queue. The DISPATCHER (`lib/ws/dispatcher.ts`) makes the enqueue/skip decision — the banner component never filters. Enqueue: `message.new` (when not on the conversation screen), `friend.request_received`, `friend.request_accepted`, `conversation.member_added` (caller is the newly added member). Skip: conversation muted, presence intent dnd, on the conversation screen for that `message.new`, or the event is `room.started`. Tap routes to the relevant screen; swipe-up dismisses; 4-second auto-dismiss; light haptic on appearance. Maestro flow `event-banner.yaml`. Same commit: drop the legacy toast on `friend.request_received` from §6.2's dispatcher table — the banner subsumes it.
   - Commit: `feat(mobile): add in-app event banner for foreground notifications`
 
 ### Phase 8 — Push notifications
