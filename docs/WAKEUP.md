@@ -1151,10 +1151,20 @@ presence
 contacts
   POST   /v1/contacts/match                   body: { email_hashes: [hex sha256] }  → { matched: [User] }
                                               Email-only for v1 (no SMS). Client computes sha256(lower(trim(email)))
-                                              over its address book and sends hex-encoded hashes. Backend looks them
-                                              up against users.email_hash and returns the public UserResponse for
-                                              every match. Deleted (soft) users are excluded. Unmatched hashes are
-                                              not echoed and not logged.
+                                              over its address book and sends LOWERCASE HEX hashes (64 chars each).
+                                              Backend matches against users.email_hash (bytea, raw bytes) by
+                                              hex-decoding the input batch server-side and doing binary equality
+                                              lookup against the indexed column — sketch:
+                                                  SELECT ... FROM users
+                                                  WHERE deleted_at IS NULL
+                                                    AND email_hash = ANY(
+                                                        SELECT decode(h, 'hex') FROM unnest($1::text[]) AS h
+                                                    )
+                                              Soft-deleted users are excluded. Unmatched hashes are not echoed and
+                                              not logged. Cap: ≤ 1000 hashes per request (handler returns 422 above
+                                              that — clients should chunk locally). Validate each hash matches
+                                              /^[0-9a-f]{64}$/ before decoding so a malformed input fails the whole
+                                              batch with a typed validation error rather than a Postgres decode panic.
 
 rooms (voice/video — every conversation has one persistent room: room_id == conversation_id)
   POST   /v1/conversations/{id}/room/join     body: { video?: bool=false }   → { room_id, livekit_url, livekit_token, expires_at, video }
