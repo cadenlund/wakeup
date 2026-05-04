@@ -416,7 +416,7 @@ The boundary is the absolute last line of defense. Specific screens may add thei
 
 #### Force-upgrade gate
 
-The backend's `/v1/healthz` returns a `min_client_version` field (added in `WAKEUP.md` — track adding this server-side as a follow-up). On every authenticated foreground:
+The backend's `/v1/healthz` returns a `min_client_version` field (shipped in PR #104). On every authenticated foreground:
 
 1. The app polls `GET /v1/healthz` (lightweight, no auth needed).
 2. If `min_client_version > Constants.expoConfig.version`, render a full-screen blocking modal: "An update is required. Please update from the App Store / Play Store." with a single deep-link button to the store listing.
@@ -535,13 +535,14 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 | `(auth)/register` | new account | `POST /v1/auth/register` | — |
 | `(auth)/forgot` | email entry | `POST /v1/auth/password-reset/request` | — |
 | `(auth)/reset` | token-confirm form (deep-linked from email) | `POST /v1/auth/password-reset/confirm` | — |
-| `(tabs)/index` (Conversations) | list of conversations, sorted by last_message_at. Pull-to-refresh wired to `useGetConversations.refetch()` | `GET /v1/conversations`, `GET /v1/conversations/{id}/members` (batched per page) | `message.new`, `conversation.member_added`, `room.started`, `presence.update` |
+| `(tabs)/index` (Conversations) | list of conversations, sorted by last_message_at, pinned-first. Pull-to-refresh wired to `useGetConversations.refetch()`. Members are inlined on each row in the `GET /v1/conversations` response — no separate members fetch. | `GET /v1/conversations` | `message.new`, `conversation.created`, `conversation.updated`, `conversation.member_added`, `conversation.member_removed`, `room.started`, `presence.update` |
 | `(tabs)/friends` | accepted friends + incoming/outgoing requests. Pull-to-refresh refetches all three queries | `GET /v1/friends`, `GET /v1/friends/requests`, `GET /v1/presence/friends` | `friend.*`, `presence.update` |
 | `(tabs)/profile` | "me" card + entry to settings | `GET /v1/auth/me` | `presence.update` (self) |
-| `search` | global search modal: friends + conversations + messages, debounced 200ms. Triggered by a header search icon on the conversations tab. | `GET /v1/search?q=…&types=friends,conversations,messages` (track adding this server-side as a follow-up; until shipped, the screen federates client-side over the existing `/v1/users?q=` and `/v1/conversations` lists) | — |
-| `conversation/[id]` | message thread + RoomBanner. Long-press a bubble opens a context menu (copy / react / report / delete-mine). | `GET /v1/conversations/{id}`, `GET /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/read` | `message.*`, `typing.*`, `room.*` |
+| `search` | global search modal: users + conversations + messages, debounced 200ms. Triggered by a header search icon on the conversations tab. | `GET /v1/search?q=…&types=users,conversations,messages` (shipped in PR #107; `types` is optional, omit for all three) | — |
+| `conversation/[id]` | message thread + RoomBanner. Long-press a bubble opens a context menu (copy / react / report / delete-mine). Read-receipt rendering reads `message.read` to mark a sent bubble as "read by N". | `GET /v1/conversations/{id}`, `GET /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/read` | `message.new`, `message.edited`, `message.deleted`, `message.read`, `typing.*`, `room.*`, `conversation.updated`, `conversation.member_added`, `conversation.member_removed` |
 | `conversation/new` | create group | `GET /v1/users?q=…`, `POST /v1/conversations` | — |
-| `settings/account` | display name, avatar, password change | `PATCH /v1/users/me`, `POST /v1/users/me/avatar` | — |
+| `conversation/[id]/info` | group info + member list + admin actions. Tap the conversation header in `conversation/[id]` to open. Group admins see Add Member + Remove Member; every member sees Leave Group. DM rendering of this screen is the peer's profile (no member list, no leave). | `GET /v1/conversations/{id}`, `POST /v1/conversations/{id}/members` (add), `DELETE /v1/conversations/{id}/members/{user_id}` (admin remove), `DELETE /v1/conversations/{id}` (caller leaves) | `conversation.updated`, `conversation.member_added`, `conversation.member_removed` |
+| `settings/account` | display name, avatar, password change, logout, delete-account entry | `PATCH /v1/users/me`, `POST /v1/users/me/avatar`, `POST /v1/auth/logout` | — |
 | `settings/privacy` | biometric toggle, lock-after picker | local AsyncStorage only | — |
 | `settings/notifications` | category toggles | `GET/PATCH /v1/users/me/notifications` | — |
 | `settings/theme` | 10-scheme + system swatch picker. Switching the scheme also switches the iOS app icon variant (see §10.5) and reloads the splash. | local AsyncStorage only | — |
@@ -587,7 +588,7 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 - `<PinToggle>` — single button in the same long-press menu / header overflow. Calls `PATCH /v1/conversations/{id}/pin` with `{ pinned: !current }`. Optimistic update on the conversation list resort.
 - `<ContactSyncEmptyState>` — the screen body for `settings/contacts`. Three states: not-yet-synced (CTA "Find friends from your contacts"), syncing (spinner + count), synced (matched-users list + invite buttons for unmatched).
 - `<AdminTabGuard>` — wraps the admin tab's `_layout` and the `admin/*` route group. Reads `useGetMe().data.role`, redirects non-admins to `(tabs)/index`, and renders nothing while `useGetMe()` is loading (avoids a tab-flicker on cold start).
-- `<ImpersonationBanner>` — global, mounted in root layout above the tab bar. Reads from a Zustand `useImpersonationStore` that's seeded from a `X-Impersonating` response header (or a cookie marker the backend sets). When active: a high-contrast warning banner across the top of every screen — "Impersonating <username> — End session" — tapping End calls `POST /v1/admin/impersonate/end` and reloads.
+- `<ImpersonationBanner>` — global, mounted in root layout above the tab bar. Reads `useGetMe().data.impersonated_by` (a `{ id, username, display_name }` object the backend returns on `GET /v1/auth/me` while an admin session has `impersonating_user_id` set per WAKEUP §8.7). When non-null: a high-contrast warning banner across the top of every screen — "Impersonating <username> — End session" — tapping End calls `POST /v1/admin/impersonate/end` and invalidates the `me` query so the banner falls away.
 
 ### 5.3 Admin tab (admin users only)
 
@@ -730,7 +731,7 @@ VoIP apps that don't integrate with the OS call UI fail App Store / Play Store r
 
 #### iOS — CallKit + PushKit
 
-1. **VoIP push token.** On first authenticated launch (after the regular Expo push token), call `RNCallKeep.setup(...)` then register a PushKit token via `react-native-voip-push-notification`. POST it to the backend at `/v1/devices/voip` (track adding this server-side as a follow-up to the existing `/v1/devices` endpoint — different token type).
+1. **VoIP push token.** On first authenticated launch (after the regular Expo push token), call `RNCallKeep.setup(...)` then register a PushKit token via `react-native-voip-push-notification`. POST it to the backend at `/v1/devices/voip` (shipped in PR #105 — different token type from the existing `/v1/devices` Expo path).
 2. **Incoming call wake.** When the backend has an incoming-call event for a fully-killed-app user, it sends a PushKit payload (silent, high-priority). The OS wakes the app long enough to call `RNCallKeep.displayIncomingCall(...)`. CallKit owns the UI from there (full-screen ring, lock-screen accept/decline).
 3. **Accept handler.** `RNCallKeep` events bridge to our app:
    - `answerCall` → join the LiveKit room.
@@ -857,7 +858,7 @@ Apple requires apps with account creation to provide an in-app account deletion 
 
 1. Big red "Delete account" button at the bottom of `settings/account`.
 2. Tap → modal: "This will permanently delete your account, all conversations you started, and all your messages. Friends will see [redacted] in past chats."
-3. Re-enter password → `DELETE /v1/users/me` (track adding this server-side as a follow-up — needs a soft-delete + tombstone implementation per the backend spec).
+3. Re-enter password → `DELETE /v1/users/me` (already implemented server-side; performs the soft-delete + tombstone defined in the backend spec).
 4. On success: clear all AsyncStorage, disconnect WS + LiveKit, navigate to `(auth)/login`.
 
 #### Universal links / deep links
@@ -869,7 +870,7 @@ Configured in `app.json` `ios.associatedDomains` and `android.intentFilters`. Th
 - `https://wakeup.app/r/<token>` → password reset (existing).
 - `https://wakeup.app/i/<inviteCode>` → friend invite landing (post-v1; reserved for later).
 
-Server-side: the backend serves `apple-app-site-association` and `assetlinks.json` at the well-known paths (track adding this server-side as a follow-up to the backend's static assets).
+Server-side: the backend serves `apple-app-site-association` and `assetlinks.json` at the well-known paths (shipped in PR #104; both endpoints return 404 when the corresponding `IOS_APP_ID` / `ANDROID_PACKAGE` env keys are unset, so dev environments don't have to opt in).
 
 #### Accessibility baseline
 
@@ -1369,6 +1370,8 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
   - Commit: `feat(mobile): add global search`
 - [ ] **5.6** Pin / mute long-press menu on conversation rows. `<PinToggle>` + `<MuteSheet>` per §5.2. Optimistic resort on pin. Maestro flow `conv-pin-mute.yaml`.
   - Commit: `feat(mobile): add pin and mute on conversations`
+- [ ] **5.7** `conversation/[id]/info.tsx` — group info / DM profile. Tappable conversation header opens it. Group admins get Add Member (`POST /v1/conversations/{id}/members`) + Remove Member (`DELETE /v1/conversations/{id}/members/{user_id}`); every member gets Leave Group (`DELETE /v1/conversations/{id}`). DM variant renders the peer's profile only (no member list, no leave). Maestro flows: `group-info.yaml`, `group-add-member.yaml`, `group-leave.yaml`.
+  - Commit: `feat(mobile): add group info screen with add member and leave`
 
 ### Phase 6 — Conversation thread
 
@@ -1457,7 +1460,7 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 - [ ] **11.1** `(tabs)/profile.tsx` with "me" card and entry to all settings sub-screens.
   - Commit: `feat(mobile): build profile tab`
-- [ ] **11.2** `settings/account.tsx` — display name, avatar (uses `expo-image-picker` + `expo-image-manipulator` to compress to ≤1024px / 85% quality before `POST /v1/users/me/avatar`), password change.
+- [ ] **11.2** `settings/account.tsx` — display name, avatar (uses `expo-image-picker` + `expo-image-manipulator` to compress to ≤1024px / 85% quality before `POST /v1/users/me/avatar`), password change, logout button calling `POST /v1/auth/logout` (clears all queries + cookie + navigates to `(auth)/login`).
   - Commit: `feat(mobile): build account settings with image compression`
 - [ ] **11.3** `settings/blocked.tsx` — list of blocked users + unblock button per row. Maestro flow `blocked-list.yaml`.
   - Commit: `feat(mobile): build blocked-users management screen`
@@ -1495,7 +1498,7 @@ The backend's `/v1/admin/*` routes are already implemented. This phase is pure U
   - Commit: `chore(mobile): add ios privacy manifest`
 - [ ] **11.5.2** App Tracking Transparency prompt on first authenticated launch per §10.5. AsyncStorage `tracking:prompted` gate. Manual test: install fresh, observe prompt before conversation list.
   - Commit: `feat(mobile): show app tracking transparency prompt`
-- [ ] **11.5.3** Universal links per §10.5. Configure `ios.associatedDomains` and `android.intentFilters`. Verify `https://wakeup.app/c/<id>` opens the right conversation. Backend serves `apple-app-site-association` and `assetlinks.json` (track adding this server-side as a follow-up if not yet shipped).
+- [ ] **11.5.3** Universal links per §10.5. Configure `ios.associatedDomains` and `android.intentFilters`. Verify `https://wakeup.app/c/<id>` opens the right conversation. Backend serves `apple-app-site-association` and `assetlinks.json` (shipped in PR #104; set `IOS_APP_ID` / `ANDROID_PACKAGE` / `ANDROID_SHA256_FINGERPRINTS` in the deploy env so the manifests aren't 404).
   - Commit: `feat(mobile): wire universal links for conversations and users`
 - [ ] **11.5.4** Accessibility baseline pass: every `<Pressable>` has `accessibilityLabel`, every screen passes `accessibilityRole`, Dynamic Type honored, reduced-motion respected. Manual audit using accessibility-inspector on iOS Simulator + TalkBack on Android Emulator. WCAG AA contrast checked per scheme.
   - Commit: `feat(mobile): accessibility baseline pass`
@@ -1591,4 +1594,4 @@ The Expo client is **done** when, and only when, all of the following are true:
 - **The privacy manifest (§10.5) re-audits on every dependency add.** Adding a new SDK without updating `PrivacyInfo.xcprivacy` will silently fail submission with a misleading error. Make this the last commit in any dependency-bump PR.
 - **Account deletion (§10.5) ships before submission.** Apps without it are rejected at review.
 - **The 11 app icon variants are real assets, not placeholders.** The operator must produce 1024×1024 PNGs per scheme (10 + default) before Phase 11.6 closes. Same for splash images.
-- **Backend follow-ups this spec assumes.** Audited 2026-05-03 against the current backend. **Already implemented** (no work needed): admin routes (`/v1/admin/*` + `RequireAdmin` middleware + `users.role` + audit log), `DELETE /v1/users/me`, `POST /v1/friends/{id}/block` + `DELETE`, all core auth/users/friends/conversations/messages/presence/room/devices/widget/WS routes. **Still need building** before the matching mobile milestone can ship: (1) `/v1/healthz` returning JSON with `min_client_version` field — trivial; (2) `POST /v1/devices/voip` for iOS PushKit tokens — medium (new column + handler); (3) `GET /v1/blocks` list endpoint — trivial; (4) `GET /v1/devices` list endpoint — trivial; (5) `GET /v1/search` unified search — medium (or punt and federate client-side over `/v1/users?q=` + `/v1/conversations`); (6) `/.well-known/apple-app-site-association` + `assetlinks.json` static — trivial; (7) `X-Unread-Total` header on `GET /v1/auth/me` — trivial; (8) WS heartbeat carrying `unread_total` — trivial. Net: 6 trivial + 2 medium endpoints, all additive, no refactor of existing code.
+- **Backend follow-ups this spec assumed (now closed).** Audited 2026-05-03 against the backend, reaudited 2026-05-04 after the cleanup PRs landed. All eight endpoints the mobile spec depended on are shipped: (1) `/v1/healthz` returning JSON with `min_client_version` (#104); (2) `POST /v1/devices/voip` for iOS PushKit (#105); (3) `GET /v1/blocks` (#104); (4) `GET /v1/devices` (#104); (5) `GET /v1/search` unified search across users / conversations / messages (#107); (6) `/.well-known/apple-app-site-association` + `assetlinks.json` (#104, gated on `IOS_APP_ID` / `ANDROID_PACKAGE` env keys); (7) `X-Unread-Total` response header on `GET /v1/auth/me` (#104); (8) WS `heartbeat` ack carrying `unread_total` (#104). The only remaining backend-side gap the mobile flow touches is the seeded admin account in test fixtures for the Maestro admin flows (§10.4) — tracked separately, not gating the v1 mobile cut.
