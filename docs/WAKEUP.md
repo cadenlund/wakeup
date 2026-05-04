@@ -141,7 +141,7 @@ wakeup/
 | Push notifications | Expo Push API (HTTP, no SDK needed) | mobile delivery |
 | Redis client | `github.com/redis/go-redis/v9` | rate limiting + pub/sub |
 | Swagger | `github.com/swaggo/swag` + `github.com/swaggo/http-swagger/v2` | annotations → OpenAPI 3 |
-| Client gen | `github.com/oapi-codegen/oapi-codegen/v2` | generates mobile client from OpenAPI |
+| Client gen | `openapi-typescript` (npm, run via `npx`) | emits TypeScript types for the Expo client from the OpenAPI spec |
 | Testing | stdlib + `github.com/testcontainers/testcontainers-go` + `github.com/peterldowns/pgtestdb` | template-DB → parallel tests |
 | Error tracking | `github.com/getsentry/sentry-go` | day-one observability |
 | Lint | `golangci-lint` (config copied from court-scraper) | — |
@@ -992,16 +992,19 @@ CREATE INDEX audit_log_actor_idx ON audit_log (actor_id);
 
 ```sql
 -- migrations/0011_idempotency_keys.sql
--- Caches the response body for write requests carrying an Idempotency-Key header.
--- See §4.9 for middleware semantics.
+-- Caches the response body + headers for write requests carrying an
+-- Idempotency-Key header. See §4.9 for middleware semantics.
+-- response_headers is jsonb of {"Header": ["v1", "v2"]} so multi-value
+-- headers (e.g. Set-Cookie) round-trip via http.Header's []string semantics.
 CREATE TABLE idempotency_keys (
-    key             text NOT NULL CHECK (char_length(key) BETWEEN 1 AND 255),        -- client-supplied UUID v7 (or any unique string of 1..255 chars)
-    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,             -- key is scoped per user
-    request_hash    bytea NOT NULL CHECK (octet_length(request_hash) = 32),           -- sha256(method + path + body); SHA-256 = 32 bytes
-    response_status int NOT NULL,
-    response_body   bytea NOT NULL,
-    created_at      timestamptz NOT NULL DEFAULT now(),
-    expires_at      timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
+    key              text NOT NULL CHECK (char_length(key) BETWEEN 1 AND 255),        -- client-supplied UUID v7 (or any unique string of 1..255 chars)
+    user_id          uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,             -- key is scoped per user
+    request_hash     bytea NOT NULL CHECK (octet_length(request_hash) = 32),           -- sha256(method + path + body); SHA-256 = 32 bytes
+    response_status  int NOT NULL,
+    response_headers jsonb,                                                             -- nullable: handler may not set custom headers
+    response_body    bytea NOT NULL,
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    expires_at       timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
     PRIMARY KEY (user_id, key)
 );
 -- Composite PK above already serves user_id-prefix lookups.
@@ -2387,9 +2390,11 @@ migrate-create name:
 gen-docs:
     cd apps/backend && swag init -g cmd/server/main.go -o ../../docs/openapi --parseDependency
 
-# Generate mobile client from OpenAPI
+# Generate mobile TypeScript types from OpenAPI. Pipes through the
+# v2→v3 converter at scripts/dev/ since openapi-typescript only reads
+# OpenAPI 3.x but swag emits Swagger 2.0.
 gen-client:
-    oapi-codegen -package wakeupapi -generate types,client docs/openapi/swagger.json > apps/mobile/lib/wakeupapi/client.go
+    npx -y openapi-typescript@latest <(python3 scripts/dev/swagger2-to-openapi3.py docs/openapi/swagger.json /dev/stdout) -o apps/mobile/lib/api/schema.ts
 
 # Verify all (used in CI and as the final acceptance gate)
 verify: lint test gen-docs
@@ -2631,7 +2636,7 @@ Install on your dev machine:
 - [ ] `golangci-lint` — `brew install golangci-lint` (or official installer)
 - [ ] `goose` — `go install github.com/pressly/goose/v3/cmd/goose@latest` (or `brew install goose`)
 - [ ] `swag` — `go install github.com/swaggo/swag/cmd/swag@latest`
-- [ ] `oapi-codegen` — `go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest`
+- [ ] Node + `npx` — `brew install node` (used by `just gen-client` to run `openapi-typescript`; no global install needed, `npx` fetches it on demand)
 - (LiveKit is part of the project's `docker-compose.yml` per §10.3 — you do NOT need to install it separately or sign up for LiveKit Cloud.)
 
 ### 14.2 GitHub repo + CodeRabbit
@@ -2934,8 +2939,8 @@ For each package: write the package, write exhaustive tests (every error path), 
   - Commit: `test(backend): raise coverage to ≥80% in <packages-touched>`
 - [ ] **13.9** Generate final OpenAPI: `just gen-docs`. Verify Swagger UI loads, every endpoint is listed, every endpoint has a description, and every documented `@Failure` is reachable from the handler.
   - Commit: `docs(backend): regenerate openapi spec`
-- [ ] **13.10** Generate mobile client stub: `just gen-client`. Commit the generated client.
-  - Commit: `feat(mobile): generate api client from openapi spec`
+- [ ] **13.10** Generate mobile TypeScript types: `just gen-client` (writes `apps/mobile/lib/api/schema.ts` via `openapi-typescript`). Commit the generated types. The data-fetching layer (TanStack Query hooks etc.) is layered on top during the Expo client phase — this milestone ships only the typed schema as the single source of truth between backend and mobile.
+  - Commit: `feat(mobile): generate api typescript types from openapi spec`
 - [ ] **13.11** Write a manual smoke-test script: register two users, become friends, create a group, send messages (one with an `Idempotency-Key`, retried, verify `Idempotent-Replay: true`), upload an attachment, verify presence updates, both users join the group's voice room (one toggles camera mid-call). Document as `docs/smoke.md`.
   - Commit: `docs(backend): add manual smoke test playbook`
 - [ ] **13.12** Final `just verify` — green. Final CodeRabbit review — clean.
@@ -2957,7 +2962,7 @@ The backend is **done** when, and only when, all of the following are true:
 8. ✅ A human can register, log in, add a friend, create a group, send a message, upload an attachment, see presence update in real time, and have two users join the same conversation's voice room (both audio and one with video toggled on) — all via Swagger UI + a LiveKit test client. No bugs, no surprises.
 9. ✅ The §12.7 WebSocket test matrix is fully green — every event has all five required subtests (fires, doesn't-fire, payload, multi-instance, idempotency) plus the connection-lifecycle subtable.
 10. ✅ The §12.8 voice/video matrix is fully green — token issuance, authorization, webhook handling, end-to-end LiveKit integration test (12.8.4), and multi-instance fan-out (12.8.5) all pass with a real LiveKit container.
-11. ✅ The mobile client stub at `apps/mobile/lib/wakeupapi/` compiles.
+11. ✅ The mobile TypeScript schema at `apps/mobile/lib/api/schema.ts` exists and matches the current OpenAPI spec (regenerate with `just gen-client`).
 
 Until all 11 are true, the backend is not done. Do not begin Phase 14 (mobile/Expo) until the operator has personally verified the Swagger smoke test and the §12.8.4 LiveKit end-to-end test and signed off. The §12.7 + §12.8 matrices are the **specific guarantee** that the realtime + voice/video backend is correct; they replace the equivalent reassurance you'd otherwise only get from a working frontend.
 
