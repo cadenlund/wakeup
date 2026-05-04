@@ -1,0 +1,9 @@
+appId: app.wakeup.client
+---
+# Stub. Filled in by milestone 3.1 (login screen). Real flow taps the email
+# + password inputs (by accessibilityLabel) and submits, asserting the tab
+# bar is visible. Until then the stub is a no-op so `bunx maestro test
+# .maestro/` exits 0 in Phase 0.
+- launchApp:
+    clearState: true
+- assertVisible: ".*"
