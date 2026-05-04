@@ -19,6 +19,7 @@ function appearanceToMode(scheme: ColorSchemeName): "light" | "dark" {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const effective = useThemeStore((s) => s.effective);
+  const mode = useThemeStore((s) => s.mode);
   const setOsMode = useThemeStore((s) => s.setOsMode);
   const hydrateFromStorage = useThemeStore((s) => s.hydrateFromStorage);
 
@@ -40,12 +41,16 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [setOsMode]);
 
-  // The data-theme attribute on this root View is what NativeWind v5
-  // matches against in the [data-theme="…"] selectors in global.css.
-  // The flex-1 + bg-bg keeps the wrapper edge-to-edge so per-scheme
-  // backgrounds reach every corner.
+  // Both attributes drive the global.css selectors:
+  //   - [data-theme="<scheme>"] picks the color personality
+  //   - [data-mode="light"|"dark"] picks the light/dark variant
+  // Combined: [data-theme="midnight"][data-mode="dark"] { … } etc.
+  // The same data-mode attribute also drives Tailwind's `dark:`
+  // variant via the `@variant dark (…)` declaration in global.css —
+  // so RNR's `dark:bg-destructive/60` etc. fires off the user's
+  // chosen scheme, not the OS Appearance signal alone.
   return (
-    <View data-theme={effective} className="flex-1 bg-bg">
+    <View data-theme={effective} data-mode={mode} className="flex-1 bg-background">
       {children}
     </View>
   );

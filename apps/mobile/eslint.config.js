@@ -48,6 +48,7 @@ module.exports = [
       "ios/**",
       "android/**",
       "expo-env.d.ts",
+      "nativewind-env.d.ts",
       "lib/api/schema.ts",
       "lib/api/hooks/**",
     ],

@@ -299,31 +299,81 @@ Single persistent connection to `${API_BASE}/v1/ws`. Lives in `lib/ws/client.ts`
 
 The dispatcher never owns business state — every server fact still lives in TanStack Query. The dispatcher just translates WS events into Query Cache mutations.
 
-### 4.5 Theming (10 sleep-cycle schemes)
+### 4.5 Theming (10 sleep-cycle schemes × light/dark)
 
 Schemes are pure-frontend — none of these names appear in the backend. The backend's `users.color_scheme` column stays as `light | dark | system` and is treated as the OS-mode hint; the actual themed scheme is stored client-side in AsyncStorage under key `theme:scheme`.
 
-Ten schemes, six light + four dark, named after stages of the day-and-sleep arc:
+**Two independent axes:** the user picks a *scheme* (the color personality of the app — sunrise vs midnight vs aurora); the OS picks the *mode* (light vs dark). Every scheme defines a full palette for both modes, so a `midnight` scheme on an iPhone in light mode is *light midnight* (cool blue-tinted whites), and a `sunrise` scheme on an iPhone in dark mode is *dark sunrise* (warm amber-tinted dark surfaces). The original spec carved schemes into "6 light + 4 dark"; the actual implementation is 10 × 2 = 20 token sets, with the user's *scheme* pick orthogonal to the *mode* the OS hands us.
 
-| Scheme | Mode | Lucide icon | Anchor palette |
-|---|---|---|---|
-| `sunrise` | light | `Sunrise` | peach `#FFD7B5` on cream `#FFF8EE`, accent `#FF8C5A` |
-| `daylight` | light | `Sun` | white `#FFFFFF` on `#FAFAFA`, accent `#1E40AF` |
-| `noon` | light | `SunDim` | bleached `#FFFCF0` on `#FFFFFF`, accent `#FBBF24` |
-| `golden` | light | `Sunset` | honey `#F4C430` on cream `#FFFBEA`, accent `#B45309` |
-| `meadow` | light | `Flower` | sage `#86EFAC` on `#F0FDF4`, accent `#15803D` |
-| `dusk` | dark | `CloudSun` | amber `#F59E0B` on slate `#1E293B`, accent `#D97706` |
-| `twilight` | dark | `MoonStar` | indigo `#818CF8` on charcoal `#0F172A`, accent `#4F46E5` |
-| `aurora` | dark | `Sparkles` | teal `#5EEAD4` on deep blue `#082F49`, accent `#22D3EE` |
-| `midnight` | dark | `Moon` | navy `#1E3A8A` on near-black `#020617`, accent `#3B82F6` |
-| `rem` | dark | `BrainCircuit` | violet `#A855F7` on plum `#1E1B4B`, accent `#EC4899` |
+Ten schemes, named after stages of the day-and-sleep arc:
 
-Plus a `system` pseudo-scheme that reads `Appearance.getColorScheme()` and picks `daylight` (light) or `midnight` (dark).
+| Scheme | Lucide icon | Color personality |
+|---|---|---|
+| `sunrise` | `Sunrise` | warm peach + salmon accent |
+| `daylight` | `Sun` | clean blue on white |
+| `noon` | `SunDim` | bleached white + butter accent |
+| `golden` | `Sunset` | honey + amber accent |
+| `meadow` | `Flower` | sage green + deep green accent |
+| `dusk` | `CloudSun` | warm slate + amber accent |
+| `twilight` | `MoonStar` | charcoal + indigo accent |
+| `aurora` | `Sparkles` | deep blue + teal accent |
+| `midnight` | `Moon` | near-black + blue accent |
+| `rem` | `BrainCircuit` (or `BrainCog`) | plum + pink accent |
 
-**Implementation** (`lib/theme/schemes.ts`):
-- One token table per scheme: `{ background, foreground, muted, border, accent, accent-foreground, destructive, ring, success }`. Tailwind v5's `@theme` block in `global.css` declares the variables; per-scheme overrides via `[data-theme="midnight"] @theme { … }` or NativeWind's equivalent.
-- The picker at `app/settings/theme.tsx` renders 11 swatches (10 + system), each a 96×96 card with the lucide icon + scheme name. Tap → `useThemeStore.setScheme(name)`.
-- Scheme persists across launches via AsyncStorage. On first launch, default = `system`.
+Plus a `system` pseudo-scheme that reads `Appearance.getColorScheme()` and picks `daylight` (light) or `midnight` (dark) as a sensible default for users who haven't explored the picker yet.
+
+**Token vocabulary (15 tokens, shadcn-aligned + the project's `success`):**
+
+```
+background, foreground
+card, card-foreground
+popover, popover-foreground
+primary, primary-foreground
+secondary, secondary-foreground
+muted, muted-foreground
+accent, accent-foreground
+destructive, destructive-foreground
+border, input, ring
+success, success-foreground
+```
+
+Why shadcn-shaped: `react-native-reusables` ships components built against this vocabulary verbatim (`<Button variant="destructive">` reads `bg-destructive text-destructive-foreground`). Renaming RNR's tokens to a smaller set would mean editing every component on every CLI re-add — drift we don't need. The full set lands at Phase 1.2 alongside the 10 schemes.
+
+**`global.css` structure (NativeWind v5 + Tailwind v4):**
+
+```css
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css";
+
+/* Wakeup's `dark:` Tailwind variant matches the [data-mode="dark"]
+ * attribute the ThemeProvider toggles on the wrapping View — NOT
+ * the OS Appearance signal, so the variant fires correctly when the
+ * user picks a dark scheme on a light-mode device and vice versa. */
+@variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
+
+/* Default `@theme` block holds the daylight-light palette so every
+ * @media-less Tailwind utility resolves cleanly on a fresh mount
+ * before the provider hydrates. */
+@layer theme {
+  @theme {
+    --color-background: ...;
+    /* … 14 more tokens … */
+  }
+}
+
+/* Per-scheme × per-mode overrides. */
+[data-theme="sunrise"][data-mode="light"] { … }
+[data-theme="sunrise"][data-mode="dark"]  { … }
+/* … 18 more blocks … */
+```
+
+**Implementation (`lib/theme/`):**
+- `schemes.ts` registers the 10 schemes with their lucide icons. The `mode: "light" | "dark"` field that classified schemes in the original spec is gone; mode is independent.
+- `store.ts` (Zustand) tracks `selected: SchemeOrSystem`, `osMode: "light" | "dark"`, `effective: Scheme`, `mode: "light" | "dark"`. `effective` resolves `system` to a default scheme; `mode` mirrors OS Appearance and can be user-overridden in a future iteration.
+- `provider.tsx` mounts a `<View data-theme={effective} data-mode={mode}>` at the root. NativeWind v5 matches the `[data-theme="…"][data-mode="…"]` selectors against this attribute pair.
+- The picker at `app/settings/theme.tsx` renders 11 swatches (10 + system), each showing both the light- and dark-mode preview side-by-side (96×48 each). Tap → `useThemeStore.setScheme(name)`.
+- Scheme persists across launches via AsyncStorage. On first launch, default = `system` (resolves to `daylight` light or `midnight` dark depending on OS mode).
 
 ### 4.6 Toast conventions
 

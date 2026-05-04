@@ -14,8 +14,13 @@ module.exports = withNativewind(config, {
   // platformColor() inside @media ios blocks for native-system color
   // tokens, so this MUST stay false.
   inlineVariables: false,
-  // We register className manually on a per-component basis via
-  // useCssElement (lib/tw/index.tsx) rather than monkey-patching every
-  // RN component. The polyfill would conflict with that pattern.
-  globalClassNamePolyfill: false,
+  // The polyfill makes `className` work on every bare RN primitive
+  // (View/Text/Pressable/etc.) without per-component useCssElement
+  // wiring. We need this on because react-native-reusables ships
+  // ~30 components built against bare `<RNText className=...>` —
+  // turning the polyfill off would mean rewriting every RNR file
+  // on every CLI re-add. lib/tw's useCssElement wrappers still work
+  // alongside the polyfill (they're just per-instance overrides),
+  // but everyday code can use bare RN components with className.
+  globalClassNamePolyfill: true,
 });

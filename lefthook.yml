@@ -34,7 +34,13 @@ pre-commit:
     mobile-lint:
       root: "apps/mobile/"
       glob: "**/*.{ts,tsx,js,jsx}"
-      run: bunx eslint --max-warnings 0 {staged_files}
+      # --no-warn-ignored: when lefthook hands us a staged file that
+      # eslint.config.js's ignores block excludes (auto-generated
+      # *-env.d.ts files, lib/api/schema.ts, etc.), eslint emits a
+      # warning "File ignored because of a matching ignore pattern"
+      # which fails --max-warnings 0. Suppressing the warning lets
+      # those files coexist with the staged-file invocation.
+      run: bunx eslint --max-warnings 0 --no-warn-ignored {staged_files}
     # Type-check runs over the whole package, not just staged files —
     # tsc can't safely isolate to one file (a change in foo.ts can
     # break bar.ts which isn't staged). Fast enough on the current

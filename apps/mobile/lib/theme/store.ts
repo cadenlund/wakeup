@@ -1,4 +1,4 @@
-// Zustand store for the active sleep-cycle scheme.
+// Zustand store for the active sleep-cycle scheme + mode.
 //
 // State machine:
 //   - `selected` is what the user picked in settings/theme.tsx (one of
@@ -7,8 +7,12 @@
 //     resolve to daylight (light) or midnight (dark) without re-reading
 //     the system every render. The provider keeps this in sync via the
 //     Appearance change listener.
-//   - `effective` is the resolved scheme used by the data-theme
-//     attribute on the root view. Derived from selected + osMode.
+//   - `effective` is the resolved scheme (`Scheme`, never `"system"`)
+//     used by the data-theme attribute on the root view. Derived from
+//     selected + osMode.
+//   - `mode` is the active light/dark mode used by the data-mode
+//     attribute. Currently mirrors osMode 1:1; a future iteration can
+//     surface a manual override (Settings → "Always dark", etc.).
 //
 // AsyncStorage I/O is best-effort — a failed read just falls back to
 // DEFAULT_SCHEME, a failed write logs and continues. The user's pick
@@ -30,6 +34,7 @@ type ThemeState = {
   selected: SchemeOrSystem;
   osMode: Mode;
   effective: Scheme;
+  mode: Mode;
   hydrated: boolean;
   setScheme: (scheme: SchemeOrSystem) => Promise<void>;
   setOsMode: (mode: Mode) => void;
@@ -56,6 +61,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
   selected: DEFAULT_SCHEME,
   osMode: "light",
   effective: resolveScheme(DEFAULT_SCHEME, "light"),
+  mode: "light",
   hydrated: false,
 
   setScheme: async (scheme) => {
@@ -76,6 +82,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
   setOsMode: (mode) => {
     set((s) => ({
       osMode: mode,
+      mode,
       effective: resolveScheme(s.selected, mode),
     }));
   },

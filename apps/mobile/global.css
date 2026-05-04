@@ -5,14 +5,26 @@
  * `className=...` prop on a useCssElement-wrapped component into a
  * style object. See lib/tw/index.tsx for the wrappers.
  *
- * The 10 sleep-cycle schemes per WAKEUPEXPO.md §4.5 are layered on
- * top of a `daylight` default. Other schemes apply via
- * `[data-theme="<name>"] { … }` selectors; lib/theme/provider toggles
- * that attribute on the root view (NativeWind v5's mechanism).
+ * Token vocabulary is the 15-token shadcn-aligned set (per WAKEUPEXPO.md
+ * §4.5) so RNR components import `bg-primary`, `text-card-foreground`,
+ * `border-border`, etc. unmodified.
+ *
+ * Each of the 10 sleep-cycle schemes defines a full palette for BOTH
+ * `data-mode="light"` and `data-mode="dark"`. The user picks a scheme;
+ * mode follows OS Appearance via the ThemeProvider. RNR's `dark:`
+ * variants are aliased to [data-mode="dark"] (see @variant below) so
+ * a user-picked dark scheme on a light-OS device still triggers the
+ * dark utility classes inside RNR's components.
  */
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css";
+
+/* Wakeup's `dark:` variant matches the [data-mode="dark"] attribute the
+ * ThemeProvider toggles on its wrapping View — NOT @media (prefers-
+ * color-scheme: dark), so the user's chosen scheme always drives the
+ * variant. */
+@variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
 
 /* Platform fonts — picked from native system fonts so the app feels
  * native by default. Per-scheme blocks below leave fonts alone. */
@@ -35,176 +47,539 @@
 }
 
 /* ──────────────────────────────────────────────────────────────────
- * Default scheme: daylight (light). Tailwind v4's `@theme` registers
- * each --color-* variable as a Tailwind color, so a className like
- * `bg-bg` resolves to `var(--color-bg)`.
- *
- * Tokens per WAKEUPEXPO.md §4.5:
- *   background / foreground / muted / border / accent /
- *   accent-foreground / destructive / ring / success
- *
- * Schemes other than daylight override these inside their
- * [data-theme] block below.
+ * Default palette: daylight in light mode. Used when the provider
+ * hasn't hydrated yet, or before a `data-theme` ancestor exists.
+ * Other scheme/mode combinations override these via the
+ * [data-theme="…"][data-mode="…"] selectors below.
  * ────────────────────────────────────────────────────────────────── */
 @layer theme {
   @theme {
-    --color-bg: #fafafa;
-    --color-fg: #0f172a;
+    --color-background: #fafafa;
+    --color-foreground: #0f172a;
+    --color-card: #ffffff;
+    --color-card-foreground: #0f172a;
+    --color-popover: #ffffff;
+    --color-popover-foreground: #0f172a;
+    --color-primary: #1e40af;
+    --color-primary-foreground: #ffffff;
+    --color-secondary: #f1f5f9;
+    --color-secondary-foreground: #0f172a;
     --color-muted: #f1f5f9;
-    --color-muted-fg: #64748b;
-    --color-border: #e2e8f0;
-    --color-accent: #1e40af;
-    --color-accent-fg: #ffffff;
+    --color-muted-foreground: #64748b;
+    --color-accent: #e0e7ff;
+    --color-accent-foreground: #1e40af;
     --color-destructive: #dc2626;
-    --color-destructive-fg: #ffffff;
+    --color-destructive-foreground: #ffffff;
+    --color-border: #e2e8f0;
+    --color-input: #e2e8f0;
     --color-ring: #1e40af;
     --color-success: #16a34a;
-    --color-success-fg: #ffffff;
+    --color-success-foreground: #ffffff;
   }
 }
 
-/* sunrise — light, peach on cream, accent salmon */
-[data-theme="sunrise"] {
-  --color-bg: #fff8ee;
-  --color-fg: #4a2511;
-  --color-muted: #ffe8d4;
-  --color-muted-fg: #8a4f2a;
-  --color-border: #f7d2b1;
-  --color-accent: #ff8c5a;
-  --color-accent-fg: #ffffff;
+/* ──────────────────────────────────────────────────────────────────
+ * sunrise — warm peach + salmon accent.
+ * Light: cream background, deep brown text, salmon accent.
+ * Dark: warm-tinted near-black, peach text, salmon accent.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="sunrise"][data-mode="light"] {
+  --color-background: #fff8ee;
+  --color-foreground: #4a2511;
+  --color-card: #ffffff;
+  --color-card-foreground: #4a2511;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #4a2511;
+  --color-primary: #ff8c5a;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #ffe8d4;
+  --color-secondary-foreground: #4a2511;
+  --color-muted: #fff0e0;
+  --color-muted-foreground: #8a4f2a;
+  --color-accent: #ffd7b5;
+  --color-accent-foreground: #4a2511;
   --color-destructive: #dc2626;
-  --color-destructive-fg: #ffffff;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #f7d2b1;
+  --color-input: #f7d2b1;
   --color-ring: #ff8c5a;
   --color-success: #16a34a;
-  --color-success-fg: #ffffff;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="sunrise"][data-mode="dark"] {
+  --color-background: #1c1009;
+  --color-foreground: #ffe8d4;
+  --color-card: #2a1810;
+  --color-card-foreground: #ffe8d4;
+  --color-popover: #2a1810;
+  --color-popover-foreground: #ffe8d4;
+  --color-primary: #ff8c5a;
+  --color-primary-foreground: #1c1009;
+  --color-secondary: #3a2418;
+  --color-secondary-foreground: #ffe8d4;
+  --color-muted: #2f1d12;
+  --color-muted-foreground: #d8b896;
+  --color-accent: #4a2a18;
+  --color-accent-foreground: #ffd7b5;
+  --color-destructive: #f87171;
+  --color-destructive-foreground: #1c1009;
+  --color-border: #3a2418;
+  --color-input: #3a2418;
+  --color-ring: #ff8c5a;
+  --color-success: #4ade80;
+  --color-success-foreground: #1c1009;
 }
 
-/* daylight is the default — see @theme block above. */
-
-/* noon — bleached light, butter accent */
-[data-theme="noon"] {
-  --color-bg: #ffffff;
-  --color-fg: #1a1a1a;
-  --color-muted: #fffcf0;
-  --color-muted-fg: #6b6b6b;
-  --color-border: #f4eedb;
-  --color-accent: #fbbf24;
-  --color-accent-fg: #1a1a1a;
+/* ──────────────────────────────────────────────────────────────────
+ * daylight — clean blue on white.
+ * Light: white-on-near-white, deep blue accent.
+ * Dark: near-black with same blue, light text.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="daylight"][data-mode="light"] {
+  --color-background: #fafafa;
+  --color-foreground: #0f172a;
+  --color-card: #ffffff;
+  --color-card-foreground: #0f172a;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0f172a;
+  --color-primary: #1e40af;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f1f5f9;
+  --color-secondary-foreground: #0f172a;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #64748b;
+  --color-accent: #dbeafe;
+  --color-accent-foreground: #1e40af;
   --color-destructive: #dc2626;
-  --color-destructive-fg: #ffffff;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e2e8f0;
+  --color-input: #e2e8f0;
+  --color-ring: #1e40af;
+  --color-success: #16a34a;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="daylight"][data-mode="dark"] {
+  --color-background: #0a0f1a;
+  --color-foreground: #f1f5f9;
+  --color-card: #111827;
+  --color-card-foreground: #f1f5f9;
+  --color-popover: #111827;
+  --color-popover-foreground: #f1f5f9;
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #0a0f1a;
+  --color-secondary: #1e293b;
+  --color-secondary-foreground: #f1f5f9;
+  --color-muted: #1e293b;
+  --color-muted-foreground: #94a3b8;
+  --color-accent: #1e3a5f;
+  --color-accent-foreground: #93c5fd;
+  --color-destructive: #f87171;
+  --color-destructive-foreground: #0a0f1a;
+  --color-border: #1e293b;
+  --color-input: #1e293b;
+  --color-ring: #3b82f6;
+  --color-success: #4ade80;
+  --color-success-foreground: #0a0f1a;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+ * noon — bleached light + butter accent.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="noon"][data-mode="light"] {
+  --color-background: #ffffff;
+  --color-foreground: #1a1a1a;
+  --color-card: #ffffff;
+  --color-card-foreground: #1a1a1a;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1a1a1a;
+  --color-primary: #fbbf24;
+  --color-primary-foreground: #1a1a1a;
+  --color-secondary: #fef3c7;
+  --color-secondary-foreground: #1a1a1a;
+  --color-muted: #fffcf0;
+  --color-muted-foreground: #6b6b6b;
+  --color-accent: #fef9c3;
+  --color-accent-foreground: #854d0e;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #f4eedb;
+  --color-input: #f4eedb;
   --color-ring: #fbbf24;
   --color-success: #16a34a;
-  --color-success-fg: #ffffff;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="noon"][data-mode="dark"] {
+  --color-background: #0f0f0a;
+  --color-foreground: #fffcf0;
+  --color-card: #1a1a14;
+  --color-card-foreground: #fffcf0;
+  --color-popover: #1a1a14;
+  --color-popover-foreground: #fffcf0;
+  --color-primary: #fbbf24;
+  --color-primary-foreground: #0f0f0a;
+  --color-secondary: #2a2618;
+  --color-secondary-foreground: #fffcf0;
+  --color-muted: #1f1d12;
+  --color-muted-foreground: #d4c89a;
+  --color-accent: #3a3018;
+  --color-accent-foreground: #fde68a;
+  --color-destructive: #f87171;
+  --color-destructive-foreground: #0f0f0a;
+  --color-border: #2a2618;
+  --color-input: #2a2618;
+  --color-ring: #fbbf24;
+  --color-success: #4ade80;
+  --color-success-foreground: #0f0f0a;
 }
 
-/* golden — honey on cream, deep amber accent */
-[data-theme="golden"] {
-  --color-bg: #fffbea;
-  --color-fg: #3b2103;
-  --color-muted: #fef3c7;
-  --color-muted-fg: #92400e;
-  --color-border: #fde68a;
-  --color-accent: #b45309;
-  --color-accent-fg: #fffbea;
+/* ──────────────────────────────────────────────────────────────────
+ * golden — honey + amber accent.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="golden"][data-mode="light"] {
+  --color-background: #fffbea;
+  --color-foreground: #3b2103;
+  --color-card: #ffffff;
+  --color-card-foreground: #3b2103;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #3b2103;
+  --color-primary: #b45309;
+  --color-primary-foreground: #fffbea;
+  --color-secondary: #fef3c7;
+  --color-secondary-foreground: #3b2103;
+  --color-muted: #fef9c3;
+  --color-muted-foreground: #92400e;
+  --color-accent: #fde68a;
+  --color-accent-foreground: #78350f;
   --color-destructive: #dc2626;
-  --color-destructive-fg: #ffffff;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #fde68a;
+  --color-input: #fde68a;
   --color-ring: #b45309;
   --color-success: #15803d;
-  --color-success-fg: #f0fdf4;
+  --color-success-foreground: #f0fdf4;
+}
+[data-theme="golden"][data-mode="dark"] {
+  --color-background: #1a0f04;
+  --color-foreground: #fef3c7;
+  --color-card: #261806;
+  --color-card-foreground: #fef3c7;
+  --color-popover: #261806;
+  --color-popover-foreground: #fef3c7;
+  --color-primary: #f4c430;
+  --color-primary-foreground: #1a0f04;
+  --color-secondary: #382208;
+  --color-secondary-foreground: #fef3c7;
+  --color-muted: #2c1c0a;
+  --color-muted-foreground: #d4a574;
+  --color-accent: #4a2c0e;
+  --color-accent-foreground: #fde68a;
+  --color-destructive: #f87171;
+  --color-destructive-foreground: #1a0f04;
+  --color-border: #382208;
+  --color-input: #382208;
+  --color-ring: #f4c430;
+  --color-success: #4ade80;
+  --color-success-foreground: #1a0f04;
 }
 
-/* meadow — sage on pale green, deep green accent */
-[data-theme="meadow"] {
-  --color-bg: #f0fdf4;
-  --color-fg: #052e16;
-  --color-muted: #dcfce7;
-  --color-muted-fg: #166534;
-  --color-border: #bbf7d0;
-  --color-accent: #15803d;
-  --color-accent-fg: #f0fdf4;
+/* ──────────────────────────────────────────────────────────────────
+ * meadow — sage + deep green accent.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="meadow"][data-mode="light"] {
+  --color-background: #f0fdf4;
+  --color-foreground: #052e16;
+  --color-card: #ffffff;
+  --color-card-foreground: #052e16;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #052e16;
+  --color-primary: #15803d;
+  --color-primary-foreground: #f0fdf4;
+  --color-secondary: #dcfce7;
+  --color-secondary-foreground: #052e16;
+  --color-muted: #ecfdf5;
+  --color-muted-foreground: #166534;
+  --color-accent: #bbf7d0;
+  --color-accent-foreground: #14532d;
   --color-destructive: #dc2626;
-  --color-destructive-fg: #ffffff;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #bbf7d0;
+  --color-input: #bbf7d0;
   --color-ring: #15803d;
   --color-success: #16a34a;
-  --color-success-fg: #ffffff;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="meadow"][data-mode="dark"] {
+  --color-background: #06190d;
+  --color-foreground: #dcfce7;
+  --color-card: #0a2614;
+  --color-card-foreground: #dcfce7;
+  --color-popover: #0a2614;
+  --color-popover-foreground: #dcfce7;
+  --color-primary: #4ade80;
+  --color-primary-foreground: #06190d;
+  --color-secondary: #14391e;
+  --color-secondary-foreground: #dcfce7;
+  --color-muted: #0e2f17;
+  --color-muted-foreground: #86efac;
+  --color-accent: #1e4a2c;
+  --color-accent-foreground: #bbf7d0;
+  --color-destructive: #f87171;
+  --color-destructive-foreground: #06190d;
+  --color-border: #14391e;
+  --color-input: #14391e;
+  --color-ring: #4ade80;
+  --color-success: #22c55e;
+  --color-success-foreground: #06190d;
 }
 
-/* dusk — amber on slate, deep amber accent (dark) */
-[data-theme="dusk"] {
-  --color-bg: #1e293b;
-  --color-fg: #f1f5f9;
-  --color-muted: #334155;
-  --color-muted-fg: #cbd5e1;
-  --color-border: #475569;
-  --color-accent: #d97706;
-  --color-accent-fg: #fffbeb;
+/* ──────────────────────────────────────────────────────────────────
+ * dusk — warm slate + amber accent.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="dusk"][data-mode="light"] {
+  --color-background: #fef3e8;
+  --color-foreground: #2a1a08;
+  --color-card: #ffffff;
+  --color-card-foreground: #2a1a08;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #2a1a08;
+  --color-primary: #d97706;
+  --color-primary-foreground: #fffbeb;
+  --color-secondary: #fed7aa;
+  --color-secondary-foreground: #2a1a08;
+  --color-muted: #fef3e8;
+  --color-muted-foreground: #78350f;
+  --color-accent: #fde68a;
+  --color-accent-foreground: #78350f;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #fed7aa;
+  --color-input: #fed7aa;
+  --color-ring: #d97706;
+  --color-success: #16a34a;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="dusk"][data-mode="dark"] {
+  --color-background: #1e293b;
+  --color-foreground: #f1f5f9;
+  --color-card: #28354a;
+  --color-card-foreground: #f1f5f9;
+  --color-popover: #28354a;
+  --color-popover-foreground: #f1f5f9;
+  --color-primary: #f59e0b;
+  --color-primary-foreground: #1e293b;
+  --color-secondary: #334155;
+  --color-secondary-foreground: #f1f5f9;
+  --color-muted: #2c3a52;
+  --color-muted-foreground: #cbd5e1;
+  --color-accent: #475569;
+  --color-accent-foreground: #fde68a;
   --color-destructive: #f87171;
-  --color-destructive-fg: #1e293b;
+  --color-destructive-foreground: #1e293b;
+  --color-border: #475569;
+  --color-input: #475569;
   --color-ring: #f59e0b;
   --color-success: #4ade80;
-  --color-success-fg: #052e16;
+  --color-success-foreground: #052e16;
 }
 
-/* twilight — indigo on charcoal (dark) */
-[data-theme="twilight"] {
-  --color-bg: #0f172a;
-  --color-fg: #e2e8f0;
-  --color-muted: #1e293b;
-  --color-muted-fg: #94a3b8;
-  --color-border: #334155;
-  --color-accent: #4f46e5;
-  --color-accent-fg: #eef2ff;
+/* ──────────────────────────────────────────────────────────────────
+ * twilight — charcoal + indigo accent.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="twilight"][data-mode="light"] {
+  --color-background: #eef2ff;
+  --color-foreground: #1e1b4b;
+  --color-card: #ffffff;
+  --color-card-foreground: #1e1b4b;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1e1b4b;
+  --color-primary: #4f46e5;
+  --color-primary-foreground: #eef2ff;
+  --color-secondary: #e0e7ff;
+  --color-secondary-foreground: #1e1b4b;
+  --color-muted: #eef2ff;
+  --color-muted-foreground: #4338ca;
+  --color-accent: #c7d2fe;
+  --color-accent-foreground: #312e81;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #c7d2fe;
+  --color-input: #c7d2fe;
+  --color-ring: #4f46e5;
+  --color-success: #16a34a;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="twilight"][data-mode="dark"] {
+  --color-background: #0f172a;
+  --color-foreground: #e2e8f0;
+  --color-card: #1a2238;
+  --color-card-foreground: #e2e8f0;
+  --color-popover: #1a2238;
+  --color-popover-foreground: #e2e8f0;
+  --color-primary: #818cf8;
+  --color-primary-foreground: #0f172a;
+  --color-secondary: #1e293b;
+  --color-secondary-foreground: #e2e8f0;
+  --color-muted: #1c2740;
+  --color-muted-foreground: #94a3b8;
+  --color-accent: #2d3a5f;
+  --color-accent-foreground: #c7d2fe;
   --color-destructive: #f87171;
-  --color-destructive-fg: #0f172a;
+  --color-destructive-foreground: #0f172a;
+  --color-border: #334155;
+  --color-input: #334155;
   --color-ring: #818cf8;
   --color-success: #4ade80;
-  --color-success-fg: #052e16;
+  --color-success-foreground: #052e16;
 }
 
-/* aurora — teal on deep blue (dark) */
-[data-theme="aurora"] {
-  --color-bg: #082f49;
-  --color-fg: #f0f9ff;
-  --color-muted: #0c4a6e;
-  --color-muted-fg: #7dd3fc;
-  --color-border: #075985;
-  --color-accent: #22d3ee;
-  --color-accent-fg: #082f49;
+/* ──────────────────────────────────────────────────────────────────
+ * aurora — deep blue + teal accent.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="aurora"][data-mode="light"] {
+  --color-background: #ecfeff;
+  --color-foreground: #082f49;
+  --color-card: #ffffff;
+  --color-card-foreground: #082f49;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #082f49;
+  --color-primary: #0891b2;
+  --color-primary-foreground: #ecfeff;
+  --color-secondary: #cffafe;
+  --color-secondary-foreground: #082f49;
+  --color-muted: #ecfeff;
+  --color-muted-foreground: #075985;
+  --color-accent: #a5f3fc;
+  --color-accent-foreground: #164e63;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #a5f3fc;
+  --color-input: #a5f3fc;
+  --color-ring: #0891b2;
+  --color-success: #16a34a;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="aurora"][data-mode="dark"] {
+  --color-background: #082f49;
+  --color-foreground: #f0f9ff;
+  --color-card: #0c4258;
+  --color-card-foreground: #f0f9ff;
+  --color-popover: #0c4258;
+  --color-popover-foreground: #f0f9ff;
+  --color-primary: #22d3ee;
+  --color-primary-foreground: #082f49;
+  --color-secondary: #0c4a6e;
+  --color-secondary-foreground: #f0f9ff;
+  --color-muted: #0a3a55;
+  --color-muted-foreground: #7dd3fc;
+  --color-accent: #075985;
+  --color-accent-foreground: #5eead4;
   --color-destructive: #f87171;
-  --color-destructive-fg: #082f49;
+  --color-destructive-foreground: #082f49;
+  --color-border: #075985;
+  --color-input: #075985;
   --color-ring: #5eead4;
   --color-success: #4ade80;
-  --color-success-fg: #082f49;
+  --color-success-foreground: #082f49;
 }
 
-/* midnight — navy on near-black, blue accent (dark) */
-[data-theme="midnight"] {
-  --color-bg: #020617;
-  --color-fg: #e2e8f0;
-  --color-muted: #0f172a;
-  --color-muted-fg: #94a3b8;
-  --color-border: #1e293b;
-  --color-accent: #3b82f6;
-  --color-accent-fg: #020617;
+/* ──────────────────────────────────────────────────────────────────
+ * midnight — near-black + blue accent.
+ * Light variant: cool blue-tinted whites with deep navy text.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="midnight"][data-mode="light"] {
+  --color-background: #eff6ff;
+  --color-foreground: #1e3a8a;
+  --color-card: #ffffff;
+  --color-card-foreground: #1e3a8a;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1e3a8a;
+  --color-primary: #1e3a8a;
+  --color-primary-foreground: #eff6ff;
+  --color-secondary: #dbeafe;
+  --color-secondary-foreground: #1e3a8a;
+  --color-muted: #eff6ff;
+  --color-muted-foreground: #1e40af;
+  --color-accent: #bfdbfe;
+  --color-accent-foreground: #1e3a8a;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #bfdbfe;
+  --color-input: #bfdbfe;
+  --color-ring: #1e3a8a;
+  --color-success: #16a34a;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="midnight"][data-mode="dark"] {
+  --color-background: #020617;
+  --color-foreground: #e2e8f0;
+  --color-card: #0a1023;
+  --color-card-foreground: #e2e8f0;
+  --color-popover: #0a1023;
+  --color-popover-foreground: #e2e8f0;
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #020617;
+  --color-secondary: #0f172a;
+  --color-secondary-foreground: #e2e8f0;
+  --color-muted: #0c1428;
+  --color-muted-foreground: #94a3b8;
+  --color-accent: #1e293b;
+  --color-accent-foreground: #93c5fd;
   --color-destructive: #f87171;
-  --color-destructive-fg: #020617;
+  --color-destructive-foreground: #020617;
+  --color-border: #1e293b;
+  --color-input: #1e293b;
   --color-ring: #60a5fa;
   --color-success: #4ade80;
-  --color-success-fg: #020617;
+  --color-success-foreground: #020617;
 }
 
-/* rem — violet on plum, pink accent (dark) */
-[data-theme="rem"] {
-  --color-bg: #1e1b4b;
-  --color-fg: #ede9fe;
-  --color-muted: #312e81;
-  --color-muted-fg: #c4b5fd;
-  --color-border: #4c1d95;
-  --color-accent: #ec4899;
-  --color-accent-fg: #1e1b4b;
+/* ──────────────────────────────────────────────────────────────────
+ * rem — plum + pink accent.
+ * Light variant: lavender-tinted whites with violet text.
+ * ────────────────────────────────────────────────────────────────── */
+[data-theme="rem"][data-mode="light"] {
+  --color-background: #faf5ff;
+  --color-foreground: #1e1b4b;
+  --color-card: #ffffff;
+  --color-card-foreground: #1e1b4b;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1e1b4b;
+  --color-primary: #a855f7;
+  --color-primary-foreground: #faf5ff;
+  --color-secondary: #f3e8ff;
+  --color-secondary-foreground: #1e1b4b;
+  --color-muted: #faf5ff;
+  --color-muted-foreground: #7e22ce;
+  --color-accent: #fbcfe8;
+  --color-accent-foreground: #831843;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e9d5ff;
+  --color-input: #e9d5ff;
+  --color-ring: #ec4899;
+  --color-success: #16a34a;
+  --color-success-foreground: #ffffff;
+}
+[data-theme="rem"][data-mode="dark"] {
+  --color-background: #1e1b4b;
+  --color-foreground: #ede9fe;
+  --color-card: #2a2566;
+  --color-card-foreground: #ede9fe;
+  --color-popover: #2a2566;
+  --color-popover-foreground: #ede9fe;
+  --color-primary: #a855f7;
+  --color-primary-foreground: #1e1b4b;
+  --color-secondary: #312e81;
+  --color-secondary-foreground: #ede9fe;
+  --color-muted: #25225a;
+  --color-muted-foreground: #c4b5fd;
+  --color-accent: #4c1d95;
+  --color-accent-foreground: #fbcfe8;
   --color-destructive: #f87171;
-  --color-destructive-fg: #1e1b4b;
-  --color-ring: #a855f7;
+  --color-destructive-foreground: #1e1b4b;
+  --color-border: #4c1d95;
+  --color-input: #4c1d95;
+  --color-ring: #ec4899;
   --color-success: #4ade80;
-  --color-success-fg: #1e1b4b;
+  --color-success-foreground: #1e1b4b;
 }
