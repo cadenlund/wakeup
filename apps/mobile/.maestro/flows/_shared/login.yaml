@@ -1,0 +1,15 @@
+# Stub. Filled in by milestone 3.1 (login screen). Real flow taps the
+# email + password inputs (by accessibilityLabel) and submits, asserting
+# the tab bar is visible.
+#
+# This is a sub-flow under flows/_shared/, so per WAKEUPEXPO.md §12.8 it
+# must NOT call `clearState`: parent screen-level flows are responsible
+# for that at their top before runFlow'ing this one.
+#
+# `appId` is intentionally omitted until milestone 0.6 sets the real
+# bundleIdentifier in app.json. The stub asserts trivially so
+# `bunx maestro test .maestro/` exits 0 in Phase 0 before any screen
+# milestone has shipped.
+appId: TBD-set-in-milestone-0.6
+---
+- assertTrue: true

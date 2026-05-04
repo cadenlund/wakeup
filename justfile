@@ -99,6 +99,28 @@ gen-client: gen-docs
 verify: lint test gen-docs-check
     @echo "All checks passed."
 
+# Mobile dev server, tunnel mode. The QR code that prints is the
+# canonical artifact for the per-screen review gate (WAKEUPEXPO §12.5):
+# scan it with Expo Go on the operator's phone before any
+# screen-bearing milestone is checked off. Tunnel routes through
+# ngrok-style relay so the phone reaches Metro from any network
+# (cell data, separate Wi-Fi, etc.), not just LAN.
+mobile-tunnel:
+    cd apps/mobile && bunx expo start --tunnel
+
+# Mobile dev server, LAN-only. Faster start than --tunnel; requires
+# the phone and laptop to be on the same network. Use when tunnel
+# is being slow or unavailable.
+mobile-dev:
+    cd apps/mobile && bunx expo start
+
+# Type-check + lint the mobile package. Wired into CI per
+# milestone 0.8. Test step lands in Phase 2 once the API client is
+# in place — until then there's nothing of substance to test.
+mobile-verify:
+    cd apps/mobile && bunx tsc --noEmit
+    cd apps/mobile && bunx eslint . --max-warnings 0
+
 # Reset local DB. Postgres data is bind-mounted to ./.docker-data/postgres
 # (not a Docker-managed volume), so `docker-compose down -v` alone leaves
 # the data directory intact and goose reports "no migrations to run" on
