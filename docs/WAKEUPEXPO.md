@@ -461,6 +461,51 @@ Do NOT haptic on every server-state change (presence updates, typing indicators,
 
 iOS-only by default; on Android the `expo-haptics` calls are no-ops on devices without a haptic engine, which is fine.
 
+### 4.13 In-app event banner
+
+Discord / Slack / iMessage all surface a small slide-down banner at
+the top of the screen when a notable event lands while the app is
+foregrounded but the user isn't on the relevant screen. Wakeup
+mirrors that pattern. The backend doesn't need any new work — every
+event below is already published on the WS protocol (`WAKEUP.md` §7.2);
+the banner just consumes those events client-side.
+
+**Component: `<EventBanner>`** — mounted at the root layout above
+everything except the call overlay. Single instance; queues events and
+surfaces them one at a time.
+
+**Events the banner shows:**
+
+| WS event | Banner copy | CTA / route |
+|---|---|---|
+| `message.new` (from a conv ≠ current route) | "{sender display_name}: {body[0..80]}" | tap → `conversation/[id]` |
+| `friend.request_received` | "{sender} sent you a friend request" | tap → `(tabs)/friends` |
+| `friend.request_accepted` | "{accepter} accepted your friend request" | tap → `conversation/<auto-DM>` |
+| `conversation.member_added` (caller is the newly added member) | "Added you to {group name}" | tap → `conversation/[id]` |
+| `room.started` (caller wasn't the initiator) | *(suppressed — `<CallOverlay>` §5.2 handles incoming-call UI)* | *(no banner)* |
+
+**Suppression rules — the dispatcher (`lib/ws/dispatcher.ts`) decides BEFORE calling `bannerStore.enqueue(...)` whether to enqueue. The banner component never makes filtering decisions; it just renders the head of the queue. Don't enqueue when:**
+- The user is currently on the conversation screen the message belongs to (`useFocusEffect`-tracked route compared to `event.conversation_id`). They already see the message arrive in the thread.
+- The conversation is muted (`muted_until > now()` from §4.12 below) — pushes are gated for muted conversations, banners should be too.
+- The user's presence intent is `dnd` — same gate as pushes.
+- The event is `room.started` — `<CallOverlay>` already takes the screen.
+- A toast for the same event would also fire. `friend.request_received` previously toasted via §6.2's dispatcher; the banner subsumes it, so dropping the toast for that event is part of the Phase 7.5 milestone (§16) — not a separate cleanup PR.
+
+**UX details:**
+- 4-second auto-dismiss; tap-to-route also dismisses.
+- Swipe-up to dismiss before the timer elapses.
+- One at a time. If three events arrive in quick succession, queue them and slide each in after the previous dismisses (200ms gap).
+- `haptics.tap()` (light) on appearance per §4.11.
+- Theme-aware via NativeWind tokens so colors track the active sleep-cycle scheme.
+
+**Implementation skeleton (`lib/banner/`):**
+- `lib/banner/store.ts` — Zustand queue: `enqueue(event)`, `dismissCurrent()`, derived selector for `currentEvent`.
+- `lib/banner/EventBanner.tsx` — root-mounted, reads `currentEvent`, animates with `react-native-reanimated`.
+- `lib/ws/dispatcher.ts` calls `bannerStore.enqueue(...)` for each banner-eligible event AFTER running the existing `setQueryData` / `invalidateQueries` action. Banner is a non-replacing side-effect on top of the cache update.
+
+**No backend work required.** Schema, fanout, and WS dispatch already
+exist for every event in the table above. The banner is pure mobile.
+
 ### 4.12 Presence override + per-conversation prefs
 
 Three small client patterns sit on top of the backend's mute / pin / DND additions in `WAKEUP.md` §6.2 and §10.2.
@@ -514,6 +559,7 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 
 ### 5.2 Component inventory (custom, beyond RNR)
 
+- `<EventBanner>` — root-mounted, single instance, queues banner-eligible WS events and slides each one down from the top per §4.13. Suppressed on the conversation screen for that conversation, on muted conversations, and for users in DND.
 - `<RoomBanner conversationId>` — top of conversation screen. Reads `useGetRoomState(id)`. Three render states: hidden, "Join call (N in room)", "X is calling…" (Accept / Decline buttons).
 - `<CallOverlay>` — global, mounted in root layout. Renders nothing when call store is `idle`. Two modes: full-screen (when current route ≠ a call-bearing conversation) → minimised PiP. The store decides which mode based on `useFocusEffect` from Expo Router.
 - `<ParticipantTile userId roomId>` — voice mode = avatar + speaking pulse animated via Reanimated. Video mode = `<VideoTrack>` from LiveKit. Both styles in one card with consistent shadow/border.
@@ -579,8 +625,8 @@ The WebSocket connection auto-subscribes to channels for every conversation the 
 | `message.new` | `setQueryData` prepend to `['messages', convId]`; bump conversation row's `last_message_at` in `['conversations']`; if not on the conversation screen, increment unread badge |
 | `message.edited` | `setQueryData` patch in `['messages', convId]` |
 | `message.deleted` | `setQueryData` mark deleted in `['messages', convId]` |
-| `friend.request_received` | `invalidateQueries(['friends', 'requests'])`; toast "X sent you a friend request" |
-| `friend.request_accepted` | `invalidateQueries(['friends'])`; toast "X accepted your request" |
+| `friend.request_received` | `invalidateQueries(['friends', 'requests'])`; enqueue an `<EventBanner>` event (per §4.13). The earlier draft toasted here — the banner subsumes that surface so don't double-fire. |
+| `friend.request_accepted` | `invalidateQueries(['friends'])`; enqueue an `<EventBanner>` event (per §4.13). |
 | `presence.update` | `setQueryData` patch in `['presence', 'friends']` |
 | `room.started` | `invalidateQueries(['room', convId])`; if not the initiator, show in-app `RoomBanner` "X is calling…" with Accept/Decline |
 | `room.participant_joined` | `setQueryData` patch in `['room', convId]`; if local user is initiator and count == 2, transition call store from `dialing` → `active` |
@@ -614,7 +660,7 @@ Backend categories (from `WAKEUP.md` §11.5): `direct_messages`, `group_messages
 
 ### 7.3 Notification handlers
 
-- **Foreground** (`Notifications.setNotificationHandler`): suppress system banner — the in-app surfaces (RoomBanner / unread dot / friend request list) already show it. Exception: incoming call → still play the sound but no banner.
+- **Foreground** (`Notifications.setNotificationHandler`): suppress system banner — the in-app surfaces (`<EventBanner>` per §4.13, RoomBanner, unread dot, friend request list) already show it. Exception: incoming call → still play the sound but no banner.
 - **Background tap** (`Notifications.addNotificationResponseReceivedListener`): route based on `notification.data.type`:
   - `message` → `conversation/[id]`
   - `friend_request` → `(tabs)/friends`
@@ -1347,6 +1393,8 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
   - Commit: `feat(mobile): map ws events to react-query cache`
 - [ ] **7.4** Reconnect banner on the conversation screen. "Reconnected" toast on recovery.
   - Commit: `feat(mobile): surface ws connection state in ui`
+- [ ] **7.5** `<EventBanner>` per §4.13. Root-mounted singleton with a Zustand queue. The DISPATCHER (`lib/ws/dispatcher.ts`) makes the enqueue/skip decision — the banner component never filters. Enqueue: `message.new` (when not on the conversation screen), `friend.request_received`, `friend.request_accepted`, `conversation.member_added` (caller is the newly added member). Skip: conversation muted, presence intent dnd, on the conversation screen for that `message.new`, or the event is `room.started`. Tap routes to the relevant screen; swipe-up dismisses; 4-second auto-dismiss; light haptic on appearance. Maestro flow `event-banner.yaml`. Same commit: drop the legacy toast on `friend.request_received` from §6.2's dispatcher table — the banner subsumes it.
+  - Commit: `feat(mobile): add in-app event banner for foreground notifications`
 
 ### Phase 8 — Push notifications
 

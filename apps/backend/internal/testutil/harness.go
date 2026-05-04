@@ -47,6 +47,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	presrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/presence"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	voiprepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/voiptoken"
 	adminsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
@@ -212,7 +213,8 @@ func New(t *testing.T) *Harness {
 	// FriendLister via a lazy adapter so we can build it before friendSvc;
 	// friendSvc gets presence + notifications post-build.
 	pusher := &FakePusher{}
-	deviceSvc, err := devicesvc.New(devicesvc.Config{Devices: devices})
+	voipTokens := voiprepo.New(pool)
+	deviceSvc, err := devicesvc.New(devicesvc.Config{Devices: devices, VoIP: voipTokens})
 	if err != nil {
 		t.Fatalf("Harness: build device service: %v", err)
 	}

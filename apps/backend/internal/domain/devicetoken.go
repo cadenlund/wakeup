@@ -35,3 +35,15 @@ type DeviceToken struct {
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 }
+
+// VoIPToken mirrors a row in voip_tokens (migration 0009). iOS-only:
+// PushKit tokens wake the app from a fully-killed state and are
+// delivered via Apple's PushKit transport (separate from APNS / Expo).
+// The mobile spec requires this for the §8.6 CallKit incoming-call ring.
+type VoIPToken struct {
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	VoIPToken  string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+}

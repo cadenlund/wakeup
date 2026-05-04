@@ -1181,6 +1181,11 @@ webhooks (no auth — verified by LiveKit signature)
 device tokens (push)
   GET    /v1/devices                          list the caller's registered tokens (mobile settings/devices)
   POST   /v1/devices                          body: { expo_token, platform }
+  POST   /v1/devices/voip                     body: { voip_token }                  iOS PushKit token (mobile §8.6)
+                                              Idempotent on (user_id, voip_token). PushKit wakes a
+                                              fully-killed app for incoming calls — required for the
+                                              App Store CallKit integration. iOS-only; Android uses
+                                              high-priority FCM via the regular /v1/devices path.
   DELETE /v1/devices/{id}
 
 widget (lightweight, polled every ~15min by mobile)
