@@ -81,3 +81,17 @@ SELECT message_id, user_id, read_at
 FROM message_reads
 WHERE message_id = $1
 ORDER BY read_at DESC, user_id;
+
+-- name: SearchInUserConversations :many
+-- Cross-conversation full-text search restricted to conversations the
+-- user is a member of. Powers GET /v1/search (mobile §5.1 global
+-- search). Soft-deleted messages excluded; results ordered by recency
+-- with a hard limit so the handler can render fast.
+SELECT m.id, m.conversation_id, m.sender_id, m.body, m.reply_to_message_id,
+       m.created_at, m.edited_at, m.deleted_at
+FROM messages m
+JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = $1
+WHERE m.deleted_at IS NULL
+  AND m.body_tsv @@ plainto_tsquery('english', $2::text)
+ORDER BY m.created_at DESC, m.id DESC
+LIMIT $3;

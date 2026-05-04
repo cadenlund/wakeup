@@ -10,7 +10,11 @@ pre-commit:
       run: cd apps/backend && golangci-lint run ./...
     test:
       glob: "*.go"
-      run: cd apps/backend && go test -race -count=1 ./...
+      # -short skips a couple of integration tests (notably the
+      # LiveKit e2e one) that hit public STUN servers and flake under
+      # the hook's heavy parallel load. CI runs without -short so
+      # full coverage still happens before merge.
+      run: cd apps/backend && go test -race -count=1 -short ./...
 
 commit-msg:
   commands:

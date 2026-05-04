@@ -1148,6 +1148,19 @@ presence
                                               WS hub take over again. 'dnd' is sticky across app backgrounding
                                               (suppresses pushes; in-app surfaces still work). See §10.2.
 
+search
+  GET    /v1/search?q=&types=                 unified search across users, conversations, and messages
+                                              (mobile §5.1 global search modal). Each section capped at
+                                              10 results — drill-downs use the per-section endpoints
+                                              (/v1/users?q=, /v1/conversations, /v1/conversations/{id}/messages).
+                                              q must be at least 2 chars; types is a comma-joined subset
+                                              of { users, conversations, messages } — empty = all sections.
+                                              Messages are restricted to conversations the caller is a
+                                              member of (no enumeration leak); group conversations match
+                                              by name substring; users match the existing trigram search.
+                                              Returns { users?, conversations?, messages? } with omitted
+                                              keys for sections the caller didn't request.
+
 contacts
   POST   /v1/contacts/match                   body: { email_hashes: [hex sha256] }  → { matched: [User] }
                                               Email-only for v1 (no SMS). Client computes sha256(lower(trim(email)))

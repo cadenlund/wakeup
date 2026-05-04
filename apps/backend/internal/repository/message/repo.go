@@ -103,6 +103,16 @@ FROM message_reads
 WHERE message_id = $1
 ORDER BY read_at DESC, user_id`
 
+const searchInUserConversationsSQL = `-- name: SearchInUserConversations :many
+SELECT m.id, m.conversation_id, m.sender_id, m.body, m.reply_to_message_id,
+       m.created_at, m.edited_at, m.deleted_at
+FROM messages m
+JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = $1
+WHERE m.deleted_at IS NULL
+  AND m.body_tsv @@ plainto_tsquery('english', $2::text)
+ORDER BY m.created_at DESC, m.id DESC
+LIMIT $3`
+
 // CreateParams is the input to Create.
 type CreateParams struct {
 	ID               uuid.UUID
@@ -293,6 +303,33 @@ func (q *Queries) ListReadsForMessage(ctx context.Context, messageID uuid.UUID) 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("message: list reads rows: %w", err)
+	}
+	return out, nil
+}
+
+// SearchInUserConversations runs a cross-conversation full-text search
+// restricted to conversations userID is a member of. limit caps the
+// result set so the unified search handler renders fast (recommended
+// 10-25 per request). Soft-deleted messages excluded.
+func (q *Queries) SearchInUserConversations(ctx context.Context, userID uuid.UUID, query string, limit int) ([]domain.Message, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := q.db.Query(ctx, searchInUserConversationsSQL, userID, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("message: search in user convs: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Message
+	for rows.Next() {
+		m, scanErr := scanMessage(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("message: search scan: %w", scanErr)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("message: search rows: %w", err)
 	}
 	return out, nil
 }
