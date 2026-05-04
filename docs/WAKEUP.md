@@ -1211,7 +1211,9 @@ system
   GET    /v1/readyz                           checks db + redis
   GET    /v1/openapi.json                     spec
   GET    /.well-known/apple-app-site-association   iOS Universal Links manifest (no auth, no v1 prefix)
+                                              404 when IOS_APP_ID is empty/unset.
   GET    /.well-known/assetlinks.json              Android App Links manifest (no auth, no v1 prefix)
+                                              404 when ANDROID_PACKAGE or ANDROID_SHA256_FINGERPRINTS is empty/unset.
   GET    /v1/docs                             Swagger UI
 ```
 
@@ -1428,7 +1430,9 @@ return ListMessagesResponse{Data: toMessageResponses(data), NextCursor: next, Ha
 | `room.participant_left` | `{ conversation_id, user_id }` |
 | `room.video_changed` | `{ conversation_id, user_id, video }` — relayed from LiveKit track-published/unpublished |
 | `room.ended` | `{ conversation_id }` — fired when last participant leaves and room empties |
-| `heartbeat` (ack) | `{ unread_total: int64 }` | server reply to a client `heartbeat` — carries the user's current unread message total so mobile can keep the app icon badge accurate without an extra REST call (WAKEUPEXPO.md §7.5) |
+| `heartbeat` (ack) | `{ unread_total: int64 }` |
+
+**Note:** `heartbeat` (ack) is the server's reply to a client `heartbeat` event — it carries the user's current unread message total (`unread_total`) so mobile can keep the app icon badge accurate without an extra REST call (WAKEUPEXPO.md §7.5).
 
 ### 7.3 Client → server events
 
