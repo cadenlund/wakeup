@@ -1,0 +1,36 @@
+/* Tailwind v4 entry. The three imports replace v3's `@tailwind base/utilities`
+ * directives — v4 is CSS-first so layer ordering is explicit.
+ *
+ * NativeWind v5 reads this file at Metro build time and rewrites every
+ * `className=...` prop on a useCssElement-wrapped component into a
+ * style object. See lib/tw/index.tsx for the wrappers.
+ *
+ * Per-scheme @theme blocks (10 sleep-cycle schemes per WAKEUPEXPO.md
+ * §4.5) land in the next commit (Phase 1.2). For now this file ships
+ * the base palette + platform font tokens so a smoke test can render
+ * a styled View through the wrapper.
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css";
+
+/* Platform-specific font families — picked from native system fonts so
+ * the app feels native by default. Swatched per-scheme below in §1.2
+ * gets layered on top of these. */
+@media android {
+  :root {
+    --font-mono: monospace;
+    --font-rounded: normal;
+    --font-serif: serif;
+    --font-sans: normal;
+  }
+}
+
+@media ios {
+  :root {
+    --font-mono: ui-monospace;
+    --font-serif: ui-serif;
+    --font-sans: system-ui;
+    --font-rounded: ui-rounded;
+  }
+}

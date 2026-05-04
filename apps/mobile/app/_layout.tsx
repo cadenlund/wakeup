@@ -6,6 +6,13 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import "react-native-reanimated";
 
+// Tailwind v4 entry. Importing global.css at the root layout module
+// ensures NativeWind v5's Metro transform sees the file before any
+// component tries to render with className. Per the
+// `expo:expo-tailwind-setup` skill — must be imported once, anywhere
+// in the dependency graph that the bundler picks up first.
+import "../global.css";
+
 import { useColorScheme } from "@/components/useColorScheme";
 
 export {
