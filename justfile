@@ -77,7 +77,11 @@ gen-docs-check: gen-docs
 # converter handles the v2→v3 subset we actually use: parameter
 # type → schema.type, formData → multipart requestBody,
 # definitions → components.schemas.
-gen-client:
+#
+# Depends on `gen-docs` so we never feed a stale swagger.json into the
+# converter. CLI is pinned (vs `@latest`) so output is reproducible
+# across machines and CI; bump it deliberately. (CodeRabbit on PR #97.)
+gen-client: gen-docs
     #!/usr/bin/env bash
     set -euo pipefail
     # mktemp + trap so concurrent invocations don't collide on a fixed
@@ -89,7 +93,7 @@ gen-client:
     tmp=$(mktemp -t wakeup-openapi3.XXXXXX.json)
     trap 'rm -f "$tmp"' EXIT
     python3 scripts/dev/swagger2-to-openapi3.py docs/openapi/swagger.json "$tmp"
-    npx -y openapi-typescript@latest "$tmp" -o apps/mobile/lib/api/schema.ts
+    npx -y openapi-typescript@7.4.4 "$tmp" -o apps/mobile/lib/api/schema.ts
 
 # Verify all (used in CI and as the final acceptance gate)
 verify: lint test gen-docs-check

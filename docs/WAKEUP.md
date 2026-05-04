@@ -993,7 +993,7 @@ CREATE INDEX audit_log_actor_idx ON audit_log (actor_id);
 ```sql
 -- migrations/0011_idempotency_keys.sql
 -- Caches the response body + headers for write requests carrying an
--- Idempotency-Key header. See §4.9 for middleware semantics.
+-- Idempotency-Key header. See §4.8 for middleware semantics.
 -- response_headers is jsonb of {"Header": ["v1", "v2"]} so multi-value
 -- headers (e.g. Set-Cookie) round-trip via http.Header's []string semantics.
 CREATE TABLE idempotency_keys (
