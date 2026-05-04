@@ -11,6 +11,11 @@ on:
       - "apps/mobile/**"
       - ".github/workflows/mobile.yml"
 
+# Least-privilege default. Steps that need write scopes opt in
+# explicitly via job-level overrides.
+permissions:
+  contents: read
+
 # Cancel previous runs of this workflow when a new commit lands on the
 # same branch — keeps the queue short on rebased PRs.
 concurrency:
@@ -20,6 +25,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/mobile
