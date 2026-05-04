@@ -1027,10 +1027,12 @@ Every entry below is a YAML file under `.maestro/flows/` (or one level deeper fo
 
 | File | Asserts |
 |---|---|
+| `onboarding.yaml` | first-launch carousel — advance through three screens; third screen requests Notifications permission; AsyncStorage `onboarding:complete=true` afterward. |
 | `auth-login.yaml` | login form submits → tab bar visible. |
 | `auth-register.yaml` | register form submits → tab bar visible. |
 | `auth-forgot-password.yaml` | enter email → "Check your email" copy visible. |
 | `auth-reset-password.yaml` | deep-link from URL with token + form submits → login screen visible. |
+| `auth-redirect.yaml` | unauthenticated cold start → redirected to `(auth)/login` (covers the `useGetMe` 401 → root redirect path). |
 | `conversations-empty.yaml` | fresh user → "No conversations yet" copy visible. |
 | `conversations-list.yaml` | seed two conversations → both rows render in `last_message_at` order. |
 | `conv-pin-mute.yaml` | long-press a row → pin toggles (row floats to top); mute opens sheet → 1hr selection updates row badge. |
@@ -1051,14 +1053,19 @@ Every entry below is a YAML file under `.maestro/flows/` (or one level deeper fo
 | `notifications-toggle.yaml` | settings/notifications → toggle "Friend requests" off → assertVisible the disabled state, refetch confirms persisted. |
 | `devices-list.yaml` | settings/devices → seeded token row visible → tap Revoke → row disappears. |
 | `theme-picker.yaml` | settings/theme → tap a non-default scheme swatch → root view re-paints (assertion: scheme name persists in AsyncStorage on relaunch). |
+| `privacy-toggle.yaml` | settings/privacy → biometric lock toggle on → lock-after picker reachable → AsyncStorage flag persisted. |
 | `account-edit.yaml` | settings/account → change display name → save → `(tabs)/profile` shows new name. |
-| `account-delete.yaml` | settings/account → Delete → confirm → re-enter password → `(auth)/login` visible. |
+| `delete-account.yaml` | settings/delete-account → confirm → re-enter password → `(auth)/login` visible (Apple-mandated path). |
 | `account-logout.yaml` | settings/account → Logout → `(auth)/login` visible + cookie cleared (re-launching does not auto-auth). |
 | `profile-edit.yaml` | settings/profile-edit → bio + status emoji → save → profile renders both. |
+| `contacts-sync.yaml` | settings/contacts → grant `expo-contacts` permission → entries hashed locally → matched users render → unmatched rows show "Send invite". |
+| `about-debug.yaml` | settings/about → 7-tap version → debug panel reveals (Sentry crash, network state, last WS event). |
+| `user-profile-view.yaml` | tap a friend → `user/[id]` renders display name, bio, status emoji, presence dot, friend / message / block actions. |
 | `search.yaml` | type "wak" in search modal → users / conversations / messages results all render. |
 | `event-banner.yaml` | seeded WS message arrives while not on conversation screen → banner appears → tap → routes to thread. |
 | `force-upgrade.yaml` | mock `/v1/healthz` → set `min_client_version` ahead of `expoConfig.version` → blocking modal appears + cannot dismiss. |
 | `network-banner.yaml` | toggle airplane mode (Maestro `setAirplaneMode`) → `<NetworkBanner>` appears within 1s. |
+| `admin-tab-visibility.yaml` | admin user logs in → 4th tab visible; non-admin logs in → 4th tab hidden (covers both `<AdminTabGuard>` paths). |
 | `admin-list.yaml` | seeded admin → admin tab → user list visible. |
 | `admin-user-detail.yaml` | tap a user row → role/lock fields visible + impersonate button enabled. |
 | `admin-impersonate-start-end.yaml` | start impersonation → `<ImpersonationBanner>` visible (driven by `impersonated_by` on `GET /v1/auth/me`) → End → banner gone. |

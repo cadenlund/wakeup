@@ -4,7 +4,7 @@ End-to-end flows for the Wakeup mobile app. Authoritative spec lives in [WAKEUPE
 
 ## Layout
 
-```
+```text
 .maestro/
 ├── flows/
 │   ├── _shared/                  # reusable sub-flows (login, register, seeders)
