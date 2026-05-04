@@ -96,9 +96,15 @@ func (s *Service) RegisterVoIP(ctx context.Context, userID uuid.UUID, voipToken 
 // Empty slice when none. Used alongside the existing /v1/devices list
 // for the mobile settings/devices screen and (future) by the call
 // fanout to enumerate VoIP recipients.
+//
+// Returns apierror.NotFound when VoIP storage isn't configured (s.voip
+// is nil) — same posture as RegisterVoIP / DeleteVoIP, so a misconfigured
+// deployment surfaces a typed error instead of silently looking like
+// "no devices yet" (CodeRabbit on PR #105 — the prior nil/nil return
+// drifted from the sibling methods).
 func (s *Service) ListVoIPForUser(ctx context.Context, userID uuid.UUID) ([]domain.VoIPToken, error) {
 	if s.voip == nil {
-		return nil, nil
+		return nil, apierror.NotFound("voip token storage")
 	}
 	tokens, err := s.voip.ListByUser(ctx, userID)
 	if err != nil {

@@ -108,4 +108,11 @@ func TestListByUser_NewestFirst(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2", len(got))
 	}
+	// tok-2 was registered second, so it must come first under
+	// `ORDER BY created_at DESC, id DESC`. Without this assertion a
+	// broken sort would silently pass the count-only check.
+	if got[0].VoIPToken != "tok-2" || got[1].VoIPToken != "tok-1" {
+		t.Errorf("order = [%s, %s], want [tok-2, tok-1]",
+			got[0].VoIPToken, got[1].VoIPToken)
+	}
 }
