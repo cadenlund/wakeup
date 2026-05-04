@@ -541,6 +541,7 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 | `search` | global search modal: users + conversations + messages, debounced 200ms. Triggered by a header search icon on the conversations tab. | `GET /v1/search?q=…&types=users,conversations,messages` (shipped in PR #107; `types` is optional, omit for all three) | — |
 | `conversation/[id]` | message thread + RoomBanner. Long-press a bubble opens a context menu (copy / react / report / delete-mine). Read-receipt rendering reads `message.read` to mark a sent bubble as "read by N". | `GET /v1/conversations/{id}`, `GET /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/read` | `message.new`, `message.edited`, `message.deleted`, `message.read`, `typing.*`, `room.*`, `conversation.updated`, `conversation.member_added`, `conversation.member_removed` |
 | `conversation/new` | create group | `GET /v1/users?q=…`, `POST /v1/conversations` | — |
+| `conversation/[id]/info` | group info + member list + admin actions. Tap the conversation header in `conversation/[id]` to open. Group admins see Add Member + Remove Member; every member sees Leave Group. DM rendering of this screen is the peer's profile (no member list, no leave). | `GET /v1/conversations/{id}`, `POST /v1/conversations/{id}/members` (add), `DELETE /v1/conversations/{id}/members/{user_id}` (admin remove), `DELETE /v1/conversations/{id}` (caller leaves) | `conversation.updated`, `conversation.member_added`, `conversation.member_removed` |
 | `settings/account` | display name, avatar, password change, logout, delete-account entry | `PATCH /v1/users/me`, `POST /v1/users/me/avatar`, `POST /v1/auth/logout` | — |
 | `settings/privacy` | biometric toggle, lock-after picker | local AsyncStorage only | — |
 | `settings/notifications` | category toggles | `GET/PATCH /v1/users/me/notifications` | — |
@@ -1369,6 +1370,8 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
   - Commit: `feat(mobile): add global search`
 - [ ] **5.6** Pin / mute long-press menu on conversation rows. `<PinToggle>` + `<MuteSheet>` per §5.2. Optimistic resort on pin. Maestro flow `conv-pin-mute.yaml`.
   - Commit: `feat(mobile): add pin and mute on conversations`
+- [ ] **5.7** `conversation/[id]/info.tsx` — group info / DM profile. Tappable conversation header opens it. Group admins get Add Member (`POST /v1/conversations/{id}/members`) + Remove Member (`DELETE /v1/conversations/{id}/members/{user_id}`); every member gets Leave Group (`DELETE /v1/conversations/{id}`). DM variant renders the peer's profile only (no member list, no leave). Maestro flows: `group-info.yaml`, `group-add-member.yaml`, `group-leave.yaml`.
+  - Commit: `feat(mobile): add group info screen with add member and leave`
 
 ### Phase 6 — Conversation thread
 
