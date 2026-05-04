@@ -99,9 +99,14 @@ gen-client: gen-docs
 verify: lint test gen-docs-check
     @echo "All checks passed."
 
-# Reset local DB
+# Reset local DB. Postgres data is bind-mounted to ./.docker-data/postgres
+# (not a Docker-managed volume), so `docker-compose down -v` alone leaves
+# the data directory intact and goose reports "no migrations to run" on
+# next up. The rm -rf wipes the bind mount; the trailing `|| true`
+# tolerates the dir not existing on a fresh checkout.
 db-reset:
     docker-compose down -v
+    rm -rf ./.docker-data/postgres || true
     docker-compose up -d postgres
     sleep 2
     just migrate-up

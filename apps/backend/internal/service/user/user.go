@@ -65,11 +65,17 @@ func New(cfg Config) (*Service, error) {
 
 // UpdateProfileParams is the input to UpdateProfile. Each pointer field
 // uses nil-means-unchanged semantics (matches the repo's COALESCE pattern).
+//
+// Bio + StatusEmoji: pass *"" to clear the field, *"value" to set, nil to
+// leave alone. The handler's validator caps lengths (≤280 / ≤8) before
+// reaching here; the DB's CHECK constraint is the final wall.
 type UpdateProfileParams struct {
 	UserID      uuid.UUID
 	DisplayName *string
 	AvatarURL   *string
 	ColorScheme *string
+	Bio         *string
+	StatusEmoji *string
 }
 
 // ListByIDs fetches every user whose ID appears in ids. Soft-deleted
@@ -151,6 +157,8 @@ func (s *Service) UpdateProfile(ctx context.Context, p UpdateProfileParams) (dom
 		DisplayName: p.DisplayName,
 		AvatarURL:   p.AvatarURL,
 		ColorScheme: p.ColorScheme,
+		Bio:         p.Bio,
+		StatusEmoji: p.StatusEmoji,
 	})
 	if err != nil {
 		if errors.Is(err, repo.ErrNotFound) {

@@ -1,13 +1,18 @@
 -- queries.sql for the users table. Constants in repo.go MUST mirror these
 -- SQL bodies verbatim (§4.3 discipline).
+--
+-- Column order on every SELECT/RETURNING: id, username, display_name, email,
+-- password_hash, avatar_url, bio, status_emoji, color_scheme, role,
+-- created_at, updated_at, deleted_at. scanUser in repo.go assumes this
+-- exact order — keep them in lock-step.
 
 -- name: Create :one
 INSERT INTO users (id, username, display_name, email, password_hash)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at;
+RETURNING id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at;
 
 -- name: GetByID :one
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1 AND deleted_at IS NULL;
 
@@ -15,17 +20,17 @@ WHERE id = $1 AND deleted_at IS NULL;
 -- §4.6 soft-delete: this lookup is what message-history rendering uses to
 -- still attribute messages to a soft-deleted author. Handlers / DTOs are
 -- responsible for collapsing the user to "Deleted User".
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1;
 
 -- name: GetByUsername :one
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE username = $1 AND deleted_at IS NULL;
 
 -- name: GetByEmail :one
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE email = $1 AND deleted_at IS NULL;
 
@@ -34,12 +39,19 @@ WHERE email = $1 AND deleted_at IS NULL;
 -- Pass NULL for fields that should stay unchanged. avatar_url accepts both
 -- NULL (don't change) and '' (clear) — the service maps those to two
 -- different parameter shapes if it ever needs to clear the avatar.
+--
+-- bio + status_emoji: empty string is a valid stored value (treated as
+-- "no bio displayed" by the UI), and NULL is "don't change." If a client
+-- ever needs to actively clear an existing bio, send "" — same semantics
+-- as setting it to a blank value.
 UPDATE users
 SET display_name = COALESCE($2, display_name),
     avatar_url   = COALESCE($3, avatar_url),
-    color_scheme = COALESCE($4, color_scheme)
+    color_scheme = COALESCE($4, color_scheme),
+    bio          = COALESCE($5, bio),
+    status_emoji = COALESCE($6, status_emoji)
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at;
+RETURNING id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at;
 
 -- name: UpdatePassword :exec
 UPDATE users SET password_hash = $2 WHERE id = $1 AND deleted_at IS NULL;
@@ -60,7 +72,7 @@ UPDATE users SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL;
 -- %, and _ with their backslash-escaped forms so user input like "100%"
 -- stays a literal "100%" instead of becoming a wildcard. The ESCAPE '\'
 -- clause makes that explicit (PG's default depends on version).
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE deleted_at IS NULL
   AND (
@@ -73,6 +85,6 @@ ORDER BY created_at DESC, id DESC
 LIMIT $4;
 
 -- name: ListByIDs :many
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE id = ANY($1::uuid[]);

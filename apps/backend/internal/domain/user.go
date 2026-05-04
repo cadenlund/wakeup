@@ -21,8 +21,10 @@ type User struct {
 	Email        string
 	PasswordHash string // never marshaled to JSON — handler DTOs strip it (§4.10)
 	AvatarURL    *string
-	ColorScheme  string // "light" | "dark" | "system"
-	Role         string // "user" | "admin"
+	Bio          *string // ≤ 280 chars; nil = no bio set
+	StatusEmoji  *string // ≤ 8 chars (one emoji + variant selector); nil = none
+	ColorScheme  string  // "light" | "dark" | "system"
+	Role         string  // "user" | "admin"
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time // soft delete; see §4.6 soft-delete rules

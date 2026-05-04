@@ -22,8 +22,17 @@ CREATE TABLE users (
     email           citext NOT NULL UNIQUE,
     password_hash   text NOT NULL,
     avatar_url      text,
+    bio             text CHECK (char_length(bio) <= 280),
+    status_emoji    text CHECK (char_length(status_emoji) <= 8),
     color_scheme    text NOT NULL DEFAULT 'system' CHECK (color_scheme IN ('light','dark','system')),
     role            text NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
+    -- Stored-generated SHA-256 of the lowercased email. Used by
+    -- POST /v1/contacts/match (WAKEUP.md §6.2): the client hashes its
+    -- address book and asks "which of these belong to existing accounts"
+    -- without ever sending raw addresses. Generated column means the
+    -- application never has to remember to recompute it on email change.
+    -- pgcrypto's digest() is enabled at the top of this file.
+    email_hash      bytea GENERATED ALWAYS AS (digest(lower(email::text), 'sha256')) STORED,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
     deleted_at      timestamptz
@@ -31,6 +40,7 @@ CREATE TABLE users (
 CREATE INDEX users_username_trgm_idx ON users USING gin (username gin_trgm_ops);
 CREATE INDEX users_display_name_trgm_idx ON users USING gin (display_name gin_trgm_ops);
 CREATE INDEX users_active_idx ON users (id) WHERE deleted_at IS NULL;
+CREATE INDEX users_email_hash_idx ON users (email_hash) WHERE deleted_at IS NULL;
 
 CREATE TRIGGER users_set_updated_at
     BEFORE UPDATE ON users
@@ -38,6 +48,7 @@ CREATE TRIGGER users_set_updated_at
 
 -- +goose Down
 DROP TRIGGER IF EXISTS users_set_updated_at ON users;
+DROP INDEX IF EXISTS users_email_hash_idx;
 DROP INDEX IF EXISTS users_active_idx;
 DROP INDEX IF EXISTS users_display_name_trgm_idx;
 DROP INDEX IF EXISTS users_username_trgm_idx;

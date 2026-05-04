@@ -13,10 +13,16 @@ type UserListResponse struct {
 
 // UpdateMeRequest is the body for PATCH /v1/users/me. All fields optional;
 // nil-means-unchanged matches the service's COALESCE pattern.
+//
+// Bio + StatusEmoji: send `""` (empty string) to clear; the service treats
+// "" the same as "no bio set" — UI hides empty values rather than rendering
+// them. Send the field as null in JSON (or omit it) to leave unchanged.
 type UpdateMeRequest struct {
 	DisplayName *string `json:"display_name,omitempty" validate:"omitempty,min=1,max=64"             example:"Caden Lund"`
 	AvatarURL   *string `json:"avatar_url,omitempty"   validate:"omitempty,url,max=2048"             example:"https://wakeup.app/avatars/caden.png"`
 	ColorScheme *string `json:"color_scheme,omitempty" validate:"omitempty,oneof=light dark system"  example:"dark"`
+	Bio         *string `json:"bio,omitempty"          validate:"omitempty,max=280"                  example:"Building things at night."`
+	StatusEmoji *string `json:"status_emoji,omitempty" validate:"omitempty,max=8"                    example:"🛌"`
 }
 
 // AvatarUploadResponse is returned by POST /v1/users/me/avatar after a
@@ -50,12 +56,13 @@ func toUserResponse(u domain.User) UserResponse {
 	if u.DeletedAt != nil {
 		return UserResponse{
 			ID: u.ID, Username: "deleted-user", DisplayName: "Deleted User",
-			AvatarURL: nil, CreatedAt: u.CreatedAt,
+			AvatarURL: nil, Bio: nil, StatusEmoji: nil, CreatedAt: u.CreatedAt,
 		}
 	}
 	return UserResponse{
 		ID: u.ID, Username: u.Username, DisplayName: u.DisplayName,
-		AvatarURL: u.AvatarURL, CreatedAt: u.CreatedAt,
+		AvatarURL: u.AvatarURL, Bio: u.Bio, StatusEmoji: u.StatusEmoji,
+		CreatedAt: u.CreatedAt,
 	}
 }
 

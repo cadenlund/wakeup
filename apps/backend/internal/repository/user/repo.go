@@ -39,25 +39,25 @@ func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }
 const createSQL = `-- name: Create :one
 INSERT INTO users (id, username, display_name, email, password_hash)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at`
+RETURNING id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at`
 
 const getByIDSQL = `-- name: GetByID :one
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1 AND deleted_at IS NULL`
 
 const getByIDIncludingDeletedSQL = `-- name: GetByIDIncludingDeleted :one
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1`
 
 const getByUsernameSQL = `-- name: GetByUsername :one
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE username = $1 AND deleted_at IS NULL`
 
 const getByEmailSQL = `-- name: GetByEmail :one
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE email = $1 AND deleted_at IS NULL`
 
@@ -65,9 +65,11 @@ const updateSQL = `-- name: Update :one
 UPDATE users
 SET display_name = COALESCE($2, display_name),
     avatar_url   = COALESCE($3, avatar_url),
-    color_scheme = COALESCE($4, color_scheme)
+    color_scheme = COALESCE($4, color_scheme),
+    bio          = COALESCE($5, bio),
+    status_emoji = COALESCE($6, status_emoji)
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at`
+RETURNING id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at`
 
 const updatePasswordSQL = `-- name: UpdatePassword :exec
 UPDATE users SET password_hash = $2 WHERE id = $1 AND deleted_at IS NULL`
@@ -79,7 +81,7 @@ const softDeleteSQL = `-- name: SoftDelete :exec
 UPDATE users SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`
 
 const listByPrefixSQL = `-- name: ListByPrefix :many
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE deleted_at IS NULL
   AND (
@@ -125,7 +127,7 @@ func needsLikeEscape(s string) bool {
 }
 
 const listByIDsSQL = `-- name: ListByIDs :many
-SELECT id, username, display_name, email, password_hash, avatar_url, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE id = ANY($1::uuid[])`
 
@@ -140,6 +142,8 @@ func scanUser(row pgx.Row) (domain.User, error) {
 		&u.Email,
 		&u.PasswordHash,
 		&u.AvatarURL,
+		&u.Bio,
+		&u.StatusEmoji,
 		&u.ColorScheme,
 		&u.Role,
 		&u.CreatedAt,
@@ -218,7 +222,9 @@ func (q *Queries) GetByEmail(ctx context.Context, email string) (domain.User, er
 // should stay unchanged (COALESCE pattern). ErrNotFound when the row is
 // missing or soft-deleted.
 func (q *Queries) Update(ctx context.Context, p UpdateParams) (domain.User, error) {
-	u, err := scanUser(q.db.QueryRow(ctx, updateSQL, p.ID, p.DisplayName, p.AvatarURL, p.ColorScheme))
+	u, err := scanUser(q.db.QueryRow(ctx, updateSQL,
+		p.ID, p.DisplayName, p.AvatarURL, p.ColorScheme, p.Bio, p.StatusEmoji,
+	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}

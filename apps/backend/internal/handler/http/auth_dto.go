@@ -18,6 +18,8 @@ type UserResponse struct {
 	Username    string    `json:"username"     example:"caden"`
 	DisplayName string    `json:"display_name" example:"Caden Lund"`
 	AvatarURL   *string   `json:"avatar_url"   example:"https://wakeup.app/avatars/caden.png"`
+	Bio         *string   `json:"bio"          example:"Building things at night."`
+	StatusEmoji *string   `json:"status_emoji" example:"🛌"`
 	CreatedAt   time.Time `json:"created_at"   example:"2026-05-02T09:31:21.810Z"`
 }
 
@@ -32,6 +34,8 @@ type MeResponse struct {
 	DisplayName    string            `json:"display_name"    example:"Caden Lund"`
 	Email          string            `json:"email"           example:"caden@example.com"`
 	AvatarURL      *string           `json:"avatar_url"      example:"https://wakeup.app/avatars/caden.png"`
+	Bio            *string           `json:"bio"             example:"Building things at night."`
+	StatusEmoji    *string           `json:"status_emoji"    example:"🛌"`
 	ColorScheme    string            `json:"color_scheme"    example:"system"`
 	Role           string            `json:"role"            example:"user"`
 	CreatedAt      time.Time         `json:"created_at"      example:"2026-05-02T09:31:21.810Z"`
@@ -58,8 +62,10 @@ type ImpersonatorInfo struct {
 func toMeResponse(u domain.User, impersonator *domain.User) MeResponse {
 	resp := MeResponse{
 		ID: u.ID, Username: u.Username, DisplayName: u.DisplayName,
-		Email: u.Email, AvatarURL: u.AvatarURL, ColorScheme: u.ColorScheme,
-		Role: u.Role, CreatedAt: u.CreatedAt,
+		Email: u.Email, AvatarURL: u.AvatarURL,
+		Bio: u.Bio, StatusEmoji: u.StatusEmoji,
+		ColorScheme: u.ColorScheme,
+		Role:        u.Role, CreatedAt: u.CreatedAt,
 	}
 	if impersonator != nil && impersonator.ID != u.ID {
 		resp.ImpersonatedBy = &ImpersonatorInfo{
