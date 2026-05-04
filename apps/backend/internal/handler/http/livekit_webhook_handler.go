@@ -275,6 +275,19 @@ func (h *LiveKitWebhookHandler) handleParticipantJoined(
 		// Duplicate event under at-least-once delivery.
 		return nil
 	}
+	// If this join brings the room to ≥2 participants, the previously-
+	// scheduled lone-user kick (if any) is no longer applicable. Cancel
+	// is idempotent so the no-pending-kick case is free.
+	if err := h.rooms.CancelLoneKick(ctx, convID); err != nil {
+		// Soft-fail: a sweep that fires anyway would call
+		// RemoveParticipant on an already-multiparty room, which the
+		// new joiner would experience as an unexpected disconnect.
+		// Log loudly so operators see this if it ever happens.
+		h.logger.Warn("livekit webhook: cancel lone kick",
+			slog.String("conv_id", convID.String()),
+			slog.String("error", err.Error()),
+		)
+	}
 	h.publish(ctx, convID, wsproto.EventRoomParticipantJoined, wsproto.RoomParticipantJoinedPayload{
 		ConversationID: convID,
 		UserID:         userID,
@@ -318,10 +331,45 @@ func (h *LiveKitWebhookHandler) handleParticipantLeft(
 		ConversationID: convID,
 		UserID:         userID,
 	})
-	if size == 0 {
+	switch size {
+	case 0:
+		// Room emptied entirely — broadcast room.ended and clear any
+		// lone-kick state (defensive: shouldn't be set when count was
+		// previously 1 because the survivor's leave gets here too).
+		if err := h.rooms.CancelLoneKick(ctx, convID); err != nil {
+			h.logger.Warn("livekit webhook: cancel lone kick on empty room",
+				slog.String("conv_id", convID.String()),
+				slog.String("error", err.Error()),
+			)
+		}
 		h.publish(ctx, convID, wsproto.EventRoomEnded, wsproto.RoomEndedPayload{
 			ConversationID: convID,
 		})
+	case 1:
+		// One survivor — schedule the §10.3 lone-user kick. Find them
+		// via SMEMBERS so the kick targets the right identity even if
+		// LiveKit's webhook ordering is weird (e.g., a second left
+		// fires while we're still processing the first).
+		survivors, err := h.rooms.ListParticipants(ctx, convID)
+		if err != nil {
+			h.logger.Warn("livekit webhook: list survivors for lone kick",
+				slog.String("conv_id", convID.String()),
+				slog.String("error", err.Error()),
+			)
+			return nil
+		}
+		if len(survivors) != 1 {
+			// Race: the count changed between SCARD and SMEMBERS. The
+			// next webhook will reconcile.
+			return nil
+		}
+		if err := h.rooms.ScheduleLoneKick(ctx, convID, survivors[0]); err != nil {
+			h.logger.Warn("livekit webhook: schedule lone kick",
+				slog.String("conv_id", convID.String()),
+				slog.String("survivor_id", survivors[0].String()),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 	return nil
 }

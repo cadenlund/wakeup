@@ -40,6 +40,17 @@ const TokenTTL = 10 * time.Minute
 // after 24h to avoid stuck state if a webhook is dropped.
 const participantSetTTL = 24 * time.Hour
 
+// DefaultLoneKickAfter is the §10.3 Discord-style "alone too long"
+// timeout. Mirrors Discord's behaviour. Tunable via Config.LoneKickAfter
+// (env var ROOM_LONE_KICK_AFTER); set to 0 to disable.
+const DefaultLoneKickAfter = 5 * time.Minute
+
+// loneKickQueueKey is the global Redis ZSET tracking due kicks.
+// Score = unix timestamp the kick is due to fire; member = conv_id.
+// One pending kick per conversation at a time (only one participant
+// can ever be "the lone user" simultaneously).
+const loneKickQueueKey = "room:lone_kicks_due"
+
 // ConvRoomID returns the LiveKit room name for a conversation per
 // §10.3 (room_id == conversation_id, prefixed for clarity).
 func ConvRoomID(convID uuid.UUID) string { return "conv:" + convID.String() }
@@ -57,14 +68,16 @@ type UserGetter interface {
 
 // Service is the room service.
 type Service struct {
-	convs      *convsvc.Service
-	users      UserGetter
-	apiKey     string
-	apiSecret  string
-	livekitURL string
-	redis      redis.Cmdable
-	logger     *slog.Logger
-	now        func() time.Time
+	convs         *convsvc.Service
+	users         UserGetter
+	apiKey        string
+	apiSecret     string
+	livekitURL    string
+	redis         redis.Cmdable
+	logger        *slog.Logger
+	now           func() time.Time
+	livekitAdmin  LiveKitAdmin
+	loneKickAfter time.Duration
 }
 
 // Config builds the service.
@@ -79,6 +92,16 @@ type Config struct {
 	// Now lets tests inject a fake clock for the §12.8.1 token TTL
 	// assertion. Defaults to time.Now.
 	Now func() time.Time
+	// LiveKitAdmin is the §10.3 admin RPC seam used by the lone-kick
+	// sweeper to call RemoveParticipant. Optional: when nil, kick
+	// scheduling still records entries but ExecuteLoneKick is a no-op
+	// — the scheduling/cancel paths stay testable without a real
+	// LiveKit binding.
+	LiveKitAdmin LiveKitAdmin
+	// LoneKickAfter is the §10.3 timeout. Defaults to DefaultLoneKickAfter
+	// when zero. A negative value disables the feature (sweeper still
+	// runs but never schedules a kick).
+	LoneKickAfter time.Duration
 }
 
 // New constructs the service.
@@ -109,11 +132,17 @@ func New(cfg Config) (*Service, error) {
 	if now == nil {
 		now = time.Now
 	}
+	loneKickAfter := cfg.LoneKickAfter
+	if loneKickAfter == 0 {
+		loneKickAfter = DefaultLoneKickAfter
+	}
 	return &Service{
 		convs: cfg.Convs, users: cfg.Users,
 		apiKey: cfg.APIKey, apiSecret: cfg.APISecret,
 		livekitURL: cfg.LiveKitURL, redis: cfg.Redis,
 		logger: logger, now: now,
+		livekitAdmin:  cfg.LiveKitAdmin,
+		loneKickAfter: loneKickAfter,
 	}, nil
 }
 
@@ -282,6 +311,32 @@ func (s *Service) GetParticipants(ctx context.Context, userID, convID uuid.UUID)
 	return out, nil
 }
 
+// ListParticipants is the webhook-side helper that returns the raw
+// participant set for convID. No membership check — the LiveKit
+// webhook is signature-verified upstream, and the webhook needs to
+// read the survivor list during participant_left to schedule the
+// §10.3 lone-user kick. User-facing reads still go through
+// GetParticipants (membership-gated).
+func (s *Service) ListParticipants(ctx context.Context, convID uuid.UUID) ([]uuid.UUID, error) {
+	raw, err := s.redis.SMembers(ctx, participantsKey(convID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("room: SMEMBERS participants: %w", err)
+	}
+	out := make([]uuid.UUID, 0, len(raw))
+	for _, r := range raw {
+		uid, err := uuid.Parse(r)
+		if err != nil {
+			s.logger.Warn("room: skipping malformed participant id in list",
+				slog.String("conv_id", convID.String()),
+				slog.String("raw", r),
+			)
+			continue
+		}
+		out = append(out, uid)
+	}
+	return out, nil
+}
+
 // AddParticipant is the webhook-side helper — called by the §10.4
 // LiveKit webhook handler on `participant_joined`. SADD's the user
 // to the participant set, stamps the joined-at timestamp (only on
@@ -363,4 +418,141 @@ func (s *Service) SetParticipantVideo(ctx context.Context, convID, userID uuid.U
 		return fmt.Errorf("room: SET video: %w", err)
 	}
 	return nil
+}
+
+// loneUserKey returns the Redis key holding the user_id pending a
+// lone-kick on convID. One per conversation since only one participant
+// can ever be alone in a room at a time.
+func loneUserKey(convID uuid.UUID) string {
+	return fmt.Sprintf("room:%s:lone_user", convID)
+}
+
+// LoneKickAfter returns the configured timeout. Zero means
+// scheduling is a no-op — the feature is disabled.
+func (s *Service) LoneKickAfter() time.Duration { return s.loneKickAfter }
+
+// ScheduleLoneKick records a pending kick on convID for userID. The
+// deadline is now+LoneKickAfter; the §4.12 sweeper will fire
+// RemoveParticipant when the deadline passes (unless CancelLoneKick
+// fires first because someone else joined).
+//
+// Idempotent — calling twice with the same conv refreshes the
+// deadline and overwrites the user_id (the latter matters if a
+// transient state had a different participant momentarily). Returns
+// nil without touching Redis when LoneKickAfter is non-positive (the
+// feature is disabled).
+func (s *Service) ScheduleLoneKick(ctx context.Context, convID, userID uuid.UUID) error {
+	if s.loneKickAfter <= 0 {
+		return nil
+	}
+	fireAt := s.now().Add(s.loneKickAfter).Unix()
+	pipe := s.redis.TxPipeline()
+	pipe.ZAdd(ctx, loneKickQueueKey, redis.Z{Score: float64(fireAt), Member: convID.String()})
+	// The user-id key carries 2× the kick TTL so it definitely outlives
+	// the ZSET entry — otherwise the sweeper could find an entry with
+	// no associated user and have to skip it.
+	pipe.Set(ctx, loneUserKey(convID), userID.String(), 2*s.loneKickAfter)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("room: schedule lone kick: %w", err)
+	}
+	return nil
+}
+
+// CancelLoneKick removes any pending kick for convID. Idempotent —
+// calling for a conv with no pending kick is a no-op.
+func (s *Service) CancelLoneKick(ctx context.Context, convID uuid.UUID) error {
+	pipe := s.redis.TxPipeline()
+	pipe.ZRem(ctx, loneKickQueueKey, convID.String())
+	pipe.Del(ctx, loneUserKey(convID))
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("room: cancel lone kick: %w", err)
+	}
+	return nil
+}
+
+// LoneKick is one due-and-extracted pending kick.
+type LoneKick struct {
+	ConversationID uuid.UUID
+	UserID         uuid.UUID
+}
+
+// PopDueLoneKicks atomically removes every kick whose deadline has
+// passed and returns the (conv, user) pairs the caller should fire.
+// The "atomic" property matters when multiple replicas run the
+// sweeper — only one replica wins the ZREM for a given conv, so
+// RemoveParticipant fires exactly once per kick.
+//
+// Implementation: ZRANGEBYSCORE pulls members ≤ now; ZREM removes
+// them in the same pipeline; then GET → DEL each user key.
+func (s *Service) PopDueLoneKicks(ctx context.Context) ([]LoneKick, error) {
+	cutoff := s.now().Unix()
+	candidates, err := s.redis.ZRangeByScore(ctx, loneKickQueueKey, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: fmt.Sprintf("%d", cutoff),
+	}).Result()
+	if err != nil {
+		return nil, fmt.Errorf("room: ZRANGEBYSCORE lone_kicks_due: %w", err)
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	out := make([]LoneKick, 0, len(candidates))
+	for _, raw := range candidates {
+		convID, err := uuid.Parse(raw)
+		if err != nil {
+			s.logger.Warn("room: skipping malformed lone-kick conv id",
+				slog.String("raw", raw))
+			// Still ZREM it so it doesn't keep piling up.
+			_ = s.redis.ZRem(ctx, loneKickQueueKey, raw).Err()
+			continue
+		}
+		// Atomically claim: ZREM returns 1 iff this replica won the
+		// race. Skip if another sweeper already grabbed it.
+		removed, err := s.redis.ZRem(ctx, loneKickQueueKey, raw).Result()
+		if err != nil {
+			s.logger.Warn("room: ZREM lone_kicks_due",
+				slog.String("conv_id", convID.String()),
+				slog.String("error", err.Error()))
+			continue
+		}
+		if removed == 0 {
+			continue
+		}
+		userRaw, err := s.redis.Get(ctx, loneUserKey(convID)).Result()
+		if err != nil {
+			s.logger.Warn("room: GET lone_user",
+				slog.String("conv_id", convID.String()),
+				slog.String("error", err.Error()))
+			continue
+		}
+		userID, err := uuid.Parse(userRaw)
+		if err != nil {
+			s.logger.Warn("room: malformed lone_user value",
+				slog.String("conv_id", convID.String()),
+				slog.String("raw", userRaw))
+			_ = s.redis.Del(ctx, loneUserKey(convID)).Err()
+			continue
+		}
+		// Clean up the companion user key now that we own the kick.
+		_ = s.redis.Del(ctx, loneUserKey(convID)).Err()
+		out = append(out, LoneKick{ConversationID: convID, UserID: userID})
+	}
+	return out, nil
+}
+
+// ExecuteLoneKick fires the actual LiveKit RemoveParticipant RPC for
+// one due kick. Errors are returned (the sweeper logs them); a kick
+// that fails leaves no Redis state behind because PopDueLoneKicks
+// already removed the entry — a missed kick is tolerable since the
+// next §10.3 webhook (e.g. participant_left when the user gives up
+// on their own) will tidy up state. Returns nil when no admin client
+// is wired, so unit tests on PopDueLoneKicks don't need a fake.
+func (s *Service) ExecuteLoneKick(ctx context.Context, k LoneKick) error {
+	if s.livekitAdmin == nil {
+		return nil
+	}
+	return s.livekitAdmin.RemoveParticipant(ctx,
+		ConvRoomID(k.ConversationID),
+		ParticipantIdentity(k.UserID),
+	)
 }

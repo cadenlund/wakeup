@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/knadh/koanf/parsers/dotenv"
 	"github.com/knadh/koanf/providers/confmap"
@@ -42,6 +43,12 @@ type Config struct {
 	LiveKitURL       string `koanf:"livekit_url"`
 	LiveKitAPIKey    string `koanf:"livekit_api_key"`
 	LiveKitAPISecret string `koanf:"livekit_api_secret"`
+	// RoomLoneKickAfter is the §10.3 Discord-style timeout: when a
+	// participant is alone in a room for this long, the lone-kick
+	// sweeper drops them. Stored as a Go duration string ("5m",
+	// "30s") so koanf's plain string unmarshal works; main.go calls
+	// RoomLoneKickAfterDuration to parse. Empty / "0" disables.
+	RoomLoneKickAfter string `koanf:"room_lone_kick_after"`
 
 	ExpoAccessToken string `koanf:"expo_access_token"`
 
@@ -51,6 +58,24 @@ type Config struct {
 	// Raw comma-joined value as it appears in env. Use CORSOriginList for the
 	// parsed slice so callers don't have to split.
 	CORSAllowedOrigins string `koanf:"cors_allowed_origins"`
+}
+
+// RoomLoneKickAfterDuration parses the §10.3 lone-user kick timeout
+// from its string env form. Returns 0 + nil when the value is empty
+// (the room service then falls through to its DefaultLoneKickAfter);
+// returns 0 + an error when the value can't be parsed so a fat-finger
+// in the .env file fails at boot rather than silently disabling the
+// feature. Use Go's standard duration syntax: "5m", "30s", "1h".
+func (c *Config) RoomLoneKickAfterDuration() (time.Duration, error) {
+	raw := strings.TrimSpace(c.RoomLoneKickAfter)
+	if raw == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("config: ROOM_LONE_KICK_AFTER %q: %w", raw, err)
+	}
+	return d, nil
 }
 
 // CORSOriginList splits the comma-joined CORSAllowedOrigins env value into a
