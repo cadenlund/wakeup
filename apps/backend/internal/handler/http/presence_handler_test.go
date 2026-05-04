@@ -59,15 +59,44 @@ func TestSetPresenceStatus_AcceptsOnline(t *testing.T) {
 	}
 }
 
-// The §6.1 manual override allowlist excludes `away` and `offline`
-// (those are server-managed). The DTO validator rejects them.
-func TestSetPresenceStatus_RejectsAway(t *testing.T) {
+// `away` and `dnd` are user-settable as sticky intents per the new
+// presence design. They round-trip through the same handler.
+func TestSetPresenceStatus_AcceptsAway(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
 	c, _ := h.AuthClient(t)
 	resp := post(t, c, h.Server.URL+"/v1/presence/status", map[string]any{"status": "away"})
 	t.Cleanup(func() { _ = resp.Body.Close() })
-	assertCode(t, resp, http.StatusUnprocessableEntity, apierror.CodeValidation)
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+}
+
+func TestSetPresenceStatus_AcceptsDND(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, _ := h.AuthClient(t)
+	resp := post(t, c, h.Server.URL+"/v1/presence/status", map[string]any{"status": "dnd"})
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+}
+
+// Sending `null` (or omitting the field) clears any existing sticky
+// intent — the next heartbeat / decay cycle takes back over.
+func TestSetPresenceStatus_AcceptsNullToClear(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, _ := h.AuthClient(t)
+	resp := post(t, c, h.Server.URL+"/v1/presence/status", map[string]any{"status": nil})
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
 }
 
 func TestSetPresenceStatus_RejectsOffline(t *testing.T) {
@@ -128,7 +157,7 @@ func TestGetPresenceFriends_WithFriendsAndStatuses(t *testing.T) {
 	// Bob has no presence row yet; should render as offline.
 
 	// Make ourselves sleeping and assert the friend list reflects it.
-	if err := h.PresenceSvc.SetStatus(context.Background(), bob.ID, domain.PresenceSleeping); err != nil {
+	if err := h.PresenceSvc.SetStatus(context.Background(), bob.ID, domain.PresenceSleeping.Ptr()); err != nil {
 		t.Fatalf("SetStatus: %v", err)
 	}
 

@@ -85,7 +85,7 @@ func (h *PresenceHandler) ListFriendsPresence(w http.ResponseWriter, r *http.Req
 // SetStatus is the manual override (§7.3 presence.set's REST sibling).
 //
 // @Summary      Set my presence status
-// @Description  Manual override for the user's status. Only `online` and `sleeping` are user-settable — the decay sweeper handles `away` / `offline` automatically (§9.2). On a real change, the server publishes `presence.update` to every accepted friend (§7.2).
+// @Description  Manual sticky-intent override. Allowed values: `online`, `away`, `sleeping`, `dnd`, or `null` to clear. `offline` is reserved for logout. Sticky values survive WS disconnect / decay so DND doesn't reset on app background. On a real change, the server publishes `presence.update` to every accepted friend (§7.2).
 // @Tags         presence
 // @Accept       json
 // @Produce      json
@@ -111,7 +111,12 @@ func (h *PresenceHandler) SetStatus(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, e)
 		return
 	}
-	if err := h.presence.SetStatus(r.Context(), uid, domain.PresenceStatus(req.Status)); err != nil {
+	var status *domain.PresenceStatus
+	if req.Status != nil {
+		s := domain.PresenceStatus(*req.Status)
+		status = &s
+	}
+	if err := h.presence.SetStatus(r.Context(), uid, status); err != nil {
 		WriteError(w, r, err)
 		return
 	}

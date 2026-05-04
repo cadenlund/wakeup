@@ -39,7 +39,7 @@ func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }
 // SQL constants mirror queries.sql 1:1 (§4.3 discipline).
 
 const getSQL = `-- name: Get :one
-SELECT user_id, status, last_active_at, last_heartbeat_at, updated_at
+SELECT user_id, status, intent, last_active_at, last_heartbeat_at, updated_at
 FROM presence_states
 WHERE user_id = $1`
 
@@ -50,21 +50,23 @@ ON CONFLICT (user_id) DO UPDATE SET
     last_active_at    = now(),
     last_heartbeat_at = now(),
     status = CASE
+        WHEN presence_states.intent IS NOT NULL THEN presence_states.status
         WHEN presence_states.status = 'away' THEN 'online'
         ELSE presence_states.status
     END
-RETURNING user_id, status, last_active_at, last_heartbeat_at, updated_at`
+RETURNING user_id, status, intent, last_active_at, last_heartbeat_at, updated_at`
 
 const setStatusSQL = `-- name: SetStatus :one
-INSERT INTO presence_states (user_id, status, last_active_at)
-VALUES ($1, $2, now())
+INSERT INTO presence_states (user_id, status, intent, last_active_at)
+VALUES ($1, $2, $3, now())
 ON CONFLICT (user_id) DO UPDATE SET
     status         = EXCLUDED.status,
+    intent         = EXCLUDED.intent,
     last_active_at = now()
-RETURNING user_id, status, last_active_at, last_heartbeat_at, updated_at`
+RETURNING user_id, status, intent, last_active_at, last_heartbeat_at, updated_at`
 
 const listByIDsSQL = `-- name: ListByIDs :many
-SELECT user_id, status, last_active_at, last_heartbeat_at, updated_at
+SELECT user_id, status, intent, last_active_at, last_heartbeat_at, updated_at
 FROM presence_states
 WHERE user_id = ANY($1::uuid[])`
 
@@ -76,15 +78,16 @@ WITH demoted AS (
         WHEN status = 'away'   AND last_active_at < now() - $2::interval THEN 'offline'
         ELSE status
     END
-    WHERE (status = 'online' AND last_active_at < now() - $1::interval)
-       OR (status = 'away'   AND last_active_at < now() - $2::interval)
-    RETURNING user_id, status, last_active_at, last_heartbeat_at, updated_at
+    WHERE intent IS NULL
+      AND ((status = 'online' AND last_active_at < now() - $1::interval)
+        OR (status = 'away'   AND last_active_at < now() - $2::interval))
+    RETURNING user_id, status, intent, last_active_at, last_heartbeat_at, updated_at
 )
 SELECT * FROM demoted`
 
 func scanPresence(row pgx.Row) (domain.PresenceState, error) {
 	var p domain.PresenceState
-	err := row.Scan(&p.UserID, &p.Status, &p.LastActiveAt, &p.LastHeartbeatAt, &p.UpdatedAt)
+	err := row.Scan(&p.UserID, &p.Status, &p.Intent, &p.LastActiveAt, &p.LastHeartbeatAt, &p.UpdatedAt)
 	return p, err
 }
 
@@ -113,9 +116,13 @@ func (q *Queries) UpsertHeartbeat(ctx context.Context, userID uuid.UUID) (domain
 	return p, nil
 }
 
-// SetStatus is the manual override. Returns the resulting row.
-func (q *Queries) SetStatus(ctx context.Context, userID uuid.UUID, status domain.PresenceStatus) (domain.PresenceState, error) {
-	p, err := scanPresence(q.db.QueryRow(ctx, setStatusSQL, userID, status))
+// SetStatus is the manual override. status is the new effective status
+// (what other users see); intent is the sticky-override marker. Pass a
+// non-nil intent equal to status to make the override sticky (DND,
+// sleeping, away). Pass nil intent to clear an existing override —
+// the next heartbeat / decay cycle takes back over.
+func (q *Queries) SetStatus(ctx context.Context, userID uuid.UUID, status domain.PresenceStatus, intent *domain.PresenceStatus) (domain.PresenceState, error) {
+	p, err := scanPresence(q.db.QueryRow(ctx, setStatusSQL, userID, status, intent))
 	if err != nil {
 		return domain.PresenceState{}, fmt.Errorf("presence: set status: %w", err)
 	}

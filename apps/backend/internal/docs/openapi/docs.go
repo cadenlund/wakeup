@@ -3240,7 +3240,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Manual override for the user's status. Only ` + "`" + `online` + "`" + ` and ` + "`" + `sleeping` + "`" + ` are user-settable — the decay sweeper handles ` + "`" + `away` + "`" + ` / ` + "`" + `offline` + "`" + ` automatically (§9.2). On a real change, the server publishes ` + "`" + `presence.update` + "`" + ` to every accepted friend (§7.2).",
+                "description": "Manual sticky-intent override. Allowed values: ` + "`" + `online` + "`" + `, ` + "`" + `away` + "`" + `, ` + "`" + `sleeping` + "`" + `, ` + "`" + `dnd` + "`" + `, or ` + "`" + `null` + "`" + ` to clear. ` + "`" + `offline` + "`" + ` is reserved for logout. Sticky values survive WS disconnect / decay so DND doesn't reset on app background. On a real change, the server publishes ` + "`" + `presence.update` + "`" + ` to every accepted friend (§7.2).",
                 "consumes": [
                     "application/json"
                 ],
@@ -4866,17 +4866,16 @@ const docTemplate = `{
         },
         "internal_handler_http.SetPresenceStatusRequest": {
             "type": "object",
-            "required": [
-                "status"
-            ],
             "properties": {
                 "status": {
                     "type": "string",
                     "enum": [
                         "online",
-                        "sleeping"
+                        "away",
+                        "sleeping",
+                        "dnd"
                     ],
-                    "example": "sleeping"
+                    "example": "dnd"
                 }
             }
         },
