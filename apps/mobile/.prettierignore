@@ -1,0 +1,11 @@
+node_modules
+.expo
+dist
+web-build
+ios
+android
+bun.lock
+package-lock.json
+lib/api/schema.ts
+lib/api/hooks
+.maestro/screenshots
