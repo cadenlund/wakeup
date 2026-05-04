@@ -535,13 +535,13 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 | `(auth)/register` | new account | `POST /v1/auth/register` | — |
 | `(auth)/forgot` | email entry | `POST /v1/auth/password-reset/request` | — |
 | `(auth)/reset` | token-confirm form (deep-linked from email) | `POST /v1/auth/password-reset/confirm` | — |
-| `(tabs)/index` (Conversations) | list of conversations, sorted by last_message_at. Pull-to-refresh wired to `useGetConversations.refetch()` | `GET /v1/conversations`, `GET /v1/conversations/{id}/members` (batched per page) | `message.new`, `conversation.member_added`, `room.started`, `presence.update` |
+| `(tabs)/index` (Conversations) | list of conversations, sorted by last_message_at, pinned-first. Pull-to-refresh wired to `useGetConversations.refetch()`. Members are inlined on each row in the `GET /v1/conversations` response — no separate members fetch. | `GET /v1/conversations` | `message.new`, `conversation.created`, `conversation.updated`, `conversation.member_added`, `conversation.member_removed`, `room.started`, `presence.update` |
 | `(tabs)/friends` | accepted friends + incoming/outgoing requests. Pull-to-refresh refetches all three queries | `GET /v1/friends`, `GET /v1/friends/requests`, `GET /v1/presence/friends` | `friend.*`, `presence.update` |
 | `(tabs)/profile` | "me" card + entry to settings | `GET /v1/auth/me` | `presence.update` (self) |
 | `search` | global search modal: users + conversations + messages, debounced 200ms. Triggered by a header search icon on the conversations tab. | `GET /v1/search?q=…&types=users,conversations,messages` (shipped in PR #107; `types` is optional, omit for all three) | — |
-| `conversation/[id]` | message thread + RoomBanner. Long-press a bubble opens a context menu (copy / react / report / delete-mine). | `GET /v1/conversations/{id}`, `GET /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/read` | `message.*`, `typing.*`, `room.*` |
+| `conversation/[id]` | message thread + RoomBanner. Long-press a bubble opens a context menu (copy / react / report / delete-mine). Read-receipt rendering reads `message.read` to mark a sent bubble as "read by N". | `GET /v1/conversations/{id}`, `GET /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/read` | `message.new`, `message.edited`, `message.deleted`, `message.read`, `typing.*`, `room.*`, `conversation.updated`, `conversation.member_added`, `conversation.member_removed` |
 | `conversation/new` | create group | `GET /v1/users?q=…`, `POST /v1/conversations` | — |
-| `settings/account` | display name, avatar, password change | `PATCH /v1/users/me`, `POST /v1/users/me/avatar` | — |
+| `settings/account` | display name, avatar, password change, logout, delete-account entry | `PATCH /v1/users/me`, `POST /v1/users/me/avatar`, `POST /v1/auth/logout` | — |
 | `settings/privacy` | biometric toggle, lock-after picker | local AsyncStorage only | — |
 | `settings/notifications` | category toggles | `GET/PATCH /v1/users/me/notifications` | — |
 | `settings/theme` | 10-scheme + system swatch picker. Switching the scheme also switches the iOS app icon variant (see §10.5) and reloads the splash. | local AsyncStorage only | — |
@@ -587,7 +587,7 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 - `<PinToggle>` — single button in the same long-press menu / header overflow. Calls `PATCH /v1/conversations/{id}/pin` with `{ pinned: !current }`. Optimistic update on the conversation list resort.
 - `<ContactSyncEmptyState>` — the screen body for `settings/contacts`. Three states: not-yet-synced (CTA "Find friends from your contacts"), syncing (spinner + count), synced (matched-users list + invite buttons for unmatched).
 - `<AdminTabGuard>` — wraps the admin tab's `_layout` and the `admin/*` route group. Reads `useGetMe().data.role`, redirects non-admins to `(tabs)/index`, and renders nothing while `useGetMe()` is loading (avoids a tab-flicker on cold start).
-- `<ImpersonationBanner>` — global, mounted in root layout above the tab bar. Reads from a Zustand `useImpersonationStore` that's seeded from a `X-Impersonating` response header (or a cookie marker the backend sets). When active: a high-contrast warning banner across the top of every screen — "Impersonating <username> — End session" — tapping End calls `POST /v1/admin/impersonate/end` and reloads.
+- `<ImpersonationBanner>` — global, mounted in root layout above the tab bar. Reads `useGetMe().data.impersonated_by` (a `{ id, username, display_name }` object the backend returns on `GET /v1/auth/me` while an admin session has `impersonating_user_id` set per WAKEUP §8.7). When non-null: a high-contrast warning banner across the top of every screen — "Impersonating <username> — End session" — tapping End calls `POST /v1/admin/impersonate/end` and invalidates the `me` query so the banner falls away.
 
 ### 5.3 Admin tab (admin users only)
 
@@ -1457,7 +1457,7 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 - [ ] **11.1** `(tabs)/profile.tsx` with "me" card and entry to all settings sub-screens.
   - Commit: `feat(mobile): build profile tab`
-- [ ] **11.2** `settings/account.tsx` — display name, avatar (uses `expo-image-picker` + `expo-image-manipulator` to compress to ≤1024px / 85% quality before `POST /v1/users/me/avatar`), password change.
+- [ ] **11.2** `settings/account.tsx` — display name, avatar (uses `expo-image-picker` + `expo-image-manipulator` to compress to ≤1024px / 85% quality before `POST /v1/users/me/avatar`), password change, logout button calling `POST /v1/auth/logout` (clears all queries + cookie + navigates to `(auth)/login`).
   - Commit: `feat(mobile): build account settings with image compression`
 - [ ] **11.3** `settings/blocked.tsx` — list of blocked users + unblock button per row. Maestro flow `blocked-list.yaml`.
   - Commit: `feat(mobile): build blocked-users management screen`
