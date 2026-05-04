@@ -53,6 +53,7 @@ import (
 	adminsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
+	contactssvc "github.com/cadenlund/wakeup/apps/backend/internal/service/contacts"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	devicesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/device"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
@@ -333,6 +334,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("admin handler: %w", err)
 	}
+	contactsSvc, err := contactssvc.New(contactssvc.Config{Users: users})
+	if err != nil {
+		return fmt.Errorf("contacts service: %w", err)
+	}
+	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, authSvc, v)
+	if err != nil {
+		return fmt.Errorf("contacts handler: %w", err)
+	}
 	livekitWebhookHandler, err := httpapi.NewLiveKitWebhookHandler(
 		roomSvc, broker,
 		lkauth.NewSimpleKeyProvider(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret),
@@ -396,6 +405,7 @@ func run() error {
 		RoomHandler:           roomHandler,
 		DeviceHandler:         deviceHandler,
 		AdminHandler:          adminHandler,
+		ContactsHandler:       contactsHandler,
 		LiveKitWebhookHandler: livekitWebhookHandler,
 		WSHandler:             wsHandler,
 	}

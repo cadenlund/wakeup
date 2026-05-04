@@ -73,6 +73,7 @@ type routerDeps struct {
 	RoomHandler           *httpapi.RoomHandler
 	DeviceHandler         *httpapi.DeviceHandler
 	AdminHandler          *httpapi.AdminHandler
+	ContactsHandler       *httpapi.ContactsHandler
 	LiveKitWebhookHandler *httpapi.LiveKitWebhookHandler
 	WSHandler             *wshandler.Handler
 
@@ -121,7 +122,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
 		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil || d.RoomSvc == nil || d.DeviceSvc == nil || d.AdminSvc == nil || d.IdempotencyRepo == nil ||
-		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.DeviceHandler == nil || d.AdminHandler == nil || d.LiveKitWebhookHandler == nil || d.WSHandler == nil {
+		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.DeviceHandler == nil || d.AdminHandler == nil || d.ContactsHandler == nil || d.LiveKitWebhookHandler == nil || d.WSHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
 
@@ -243,6 +244,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Post("/v1/conversations/{id}/room/leave", d.RoomHandler.Leave)
 				r.Post("/v1/devices", d.DeviceHandler.Register)
 				r.Delete("/v1/devices/{id}", d.DeviceHandler.Delete)
+				r.Post("/v1/contacts/match", d.ContactsHandler.Match)
 
 				// §12.5 admin write endpoints. RequireAdmin sits inside
 				// the writes-tier rate-limit group so admins still pay

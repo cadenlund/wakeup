@@ -88,3 +88,16 @@ LIMIT $4;
 SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
 FROM users
 WHERE id = ANY($1::uuid[]);
+
+-- name: MatchByEmailHashes :many
+-- POST /v1/contacts/match. Caller passes a slice of LOWERCASE HEX
+-- SHA-256 strings (validated /^[0-9a-f]{64}$/ at the handler so a
+-- malformed entry never reaches `decode`). Server unnests + decodes
+-- to bytes, then does indexed binary equality against the stored
+-- email_hash bytea generated column. Soft-deleted users excluded.
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+FROM users
+WHERE deleted_at IS NULL
+  AND email_hash = ANY(
+      SELECT decode(h, 'hex') FROM unnest($1::text[]) AS h
+  );
