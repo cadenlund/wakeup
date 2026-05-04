@@ -14,8 +14,13 @@ module.exports = withNativewind(config, {
   // platformColor() inside @media ios blocks for native-system color
   // tokens, so this MUST stay false.
   inlineVariables: false,
-  // We register className manually on a per-component basis via
-  // useCssElement (lib/tw/index.tsx) rather than monkey-patching every
-  // RN component. The polyfill would conflict with that pattern.
-  globalClassNamePolyfill: false,
+  // Polyfill ON so every react-native primitive (View, Text, Pressable,
+  // ...) accepts a className prop directly. Required for the
+  // react-native-reusables foundation (§3.1) — RNR components ship
+  // importing primitives from react-native and applying className on
+  // them. The lib/tw/ wrappers stay around for the cases where the
+  // wrapper adds value (TouchableHighlight underlayColor extraction,
+  // AnimatedScrollView dual-class handling) but are no longer
+  // load-bearing for className resolution.
+  globalClassNamePolyfill: true,
 });

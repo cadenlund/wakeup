@@ -1,13 +1,14 @@
 // CSS-aware wrappers around the React Native primitives.
 //
-// react-native-css's `useCssElement` is the bridge that lets a `className`
-// prop become a real RN style object. Without these wrappers, calling
-// `<View className="flex-1 bg-bg" />` would do nothing — the className
-// would just sit on the view as an unused prop.
-//
-// Imports throughout the app come from `@/lib/tw` instead of `react-native`
-// so the className path is the only path. Bare `react-native` imports are
-// banned by the §0 spec rule (CodeRabbit enforces).
+// As of the RNR foundation (§3.1), the global classname polyfill is on
+// in metro.config.js, so a bare `<View className="..." />` already
+// resolves correctly. These wrappers stay for two reasons:
+//   1. TouchableHighlight needs `underlayColor` extracted from a
+//      flattened style object — not something the polyfill handles.
+//   2. AnimatedScrollView accepts both `contentClassName` and
+//      `contentContainerClassName`, mapped to `contentContainerStyle`.
+// New code can import primitives directly from `react-native`; reach
+// for these wrappers only when the special-case behaviour matters.
 import { Link as RouterLink } from "expo-router";
 import * as React from "react";
 import {
