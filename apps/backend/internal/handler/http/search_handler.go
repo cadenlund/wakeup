@@ -38,13 +38,25 @@ func (h *SearchHandler) Mount(r chi.Router) {
 	r.Get("/v1/search", h.Search)
 }
 
-// SearchResponse is the wire shape for GET /v1/search. Sections the
-// caller didn't opt into via `types` come back as nil (omitted from
-// JSON via omitempty).
+// SearchResponse is the wire shape for GET /v1/search.
+//
+// We use POINTER slices so the JSON encoder can distinguish three
+// states cleanly:
+//
+//   - field omitted: the caller didn't request that section via
+//     `types`. Pointer is nil → omitempty drops the key.
+//   - empty array `[]`: the caller requested the section but got
+//     zero matches. Pointer is non-nil but the slice is empty.
+//   - populated array: hits.
+//
+// Plain `[]Type` with omitempty would conflate the first two states —
+// an empty array would be indistinguishable from "not requested," and
+// the mobile UI couldn't tell whether to render "no matches" vs hide
+// the section entirely (CodeRabbit on PR #107).
 type SearchResponse struct {
-	Users         []UserResponse          `json:"users,omitempty"`
-	Conversations []SearchConversationRow `json:"conversations,omitempty"`
-	Messages      []SearchMessageRow      `json:"messages,omitempty"`
+	Users         *[]UserResponse          `json:"users,omitempty"`
+	Conversations *[]SearchConversationRow `json:"conversations,omitempty"`
+	Messages      *[]SearchMessageRow      `json:"messages,omitempty"`
 }
 
 // SearchConversationRow is the slim conversation shape for unified
@@ -108,15 +120,22 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Compute the EFFECTIVE requested set so the response can carry an
+	// empty array for "requested but no hits." When the caller passes
+	// no types param, the service treats it as "all sections" — mirror
+	// that here so we don't drop empty arrays for unspecified types.
+	requested := requestedTypes(types)
+
 	out := SearchResponse{}
-	if res.Users != nil {
-		out.Users = make([]UserResponse, 0, len(res.Users))
+	if requested[searchsvc.TypeUsers] {
+		users := make([]UserResponse, 0, len(res.Users))
 		for _, u := range res.Users {
-			out.Users = append(out.Users, toUserResponse(u))
+			users = append(users, toUserResponse(u))
 		}
+		out.Users = &users
 	}
-	if res.Conversations != nil {
-		out.Conversations = make([]SearchConversationRow, 0, len(res.Conversations))
+	if requested[searchsvc.TypeConversations] {
+		convs := make([]SearchConversationRow, 0, len(res.Conversations))
 		for _, c := range res.Conversations {
 			row := SearchConversationRow{
 				ID:            c.ID.String(),
@@ -129,13 +148,14 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 			if c.AvatarURL != nil {
 				row.AvatarURL = *c.AvatarURL
 			}
-			out.Conversations = append(out.Conversations, row)
+			convs = append(convs, row)
 		}
+		out.Conversations = &convs
 	}
-	if res.Messages != nil {
-		out.Messages = make([]SearchMessageRow, 0, len(res.Messages))
+	if requested[searchsvc.TypeMessages] {
+		msgs := make([]SearchMessageRow, 0, len(res.Messages))
 		for _, m := range res.Messages {
-			out.Messages = append(out.Messages, SearchMessageRow{
+			msgs = append(msgs, SearchMessageRow{
 				ID:             m.ID.String(),
 				ConversationID: m.ConversationID.String(),
 				SenderID:       m.SenderID.String(),
@@ -143,6 +163,24 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 				CreatedAt:      m.CreatedAt.Format("2006-01-02T15:04:05.000Z"),
 			})
 		}
+		out.Messages = &msgs
 	}
 	WriteJSON(w, http.StatusOK, out)
+}
+
+// requestedTypes turns the parsed types slice into a set. nil/empty
+// input means "all sections" — same convention as searchsvc.Search.
+func requestedTypes(types []searchsvc.Type) map[searchsvc.Type]bool {
+	if len(types) == 0 {
+		return map[searchsvc.Type]bool{
+			searchsvc.TypeUsers:         true,
+			searchsvc.TypeConversations: true,
+			searchsvc.TypeMessages:      true,
+		}
+	}
+	m := make(map[searchsvc.Type]bool, len(types))
+	for _, t := range types {
+		m[t] = true
+	}
+	return m
 }

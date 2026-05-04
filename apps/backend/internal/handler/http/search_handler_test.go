@@ -41,12 +41,12 @@ func TestSearch_FindsUserByDisplayName(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
 	c, _ := h.AuthClient(t)
-	_, peer := h.AuthClient(t)
+	// Use a fixed, distinctive display name so the query exercises
+	// display-name matching specifically (not username) — fails if
+	// the trigram `OR` clause ever drops display_name.
+	_, peer := h.AuthClient(t, testutil.WithDisplayName("ZephyrTarget"))
 
-	// Use the first 3 chars of the peer's username as the query — that
-	// matches the trigram-prefix search the user repo runs.
-	q := peer.Username[:3]
-	resp, err := c.Get(h.Server.URL + "/v1/search?q=" + q + "&types=users")
+	resp, err := c.Get(h.Server.URL + "/v1/search?q=zephyr&types=users")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestSearch_FindsUserByDisplayName(t *testing.T) {
 	got := mustDecode(t, resp.Body)
 	users, _ := got["users"].([]any)
 	if len(users) == 0 {
-		t.Errorf("expected at least one user match for q=%q", q)
+		t.Errorf("expected display-name match for ZephyrTarget; peer.DisplayName=%q", peer.DisplayName)
 	}
 }
 
