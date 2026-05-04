@@ -12,14 +12,21 @@ import (
 // `members` is the full participant list with embedded public profiles
 // — frontend renders avatars + names from this without follow-up calls.
 type ConversationResponse struct {
-	ID            uuid.UUID               `json:"id"              example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
-	Type          string                  `json:"type"            example:"group"`
-	Name          *string                 `json:"name"            example:"Wakeup Crew"`
-	AvatarURL     *string                 `json:"avatar_url"      example:"https://wakeup.app/avatars/group.png"`
-	CreatedAt     time.Time               `json:"created_at"      example:"2026-05-02T09:31:21.810Z"`
-	UpdatedAt     time.Time               `json:"updated_at"      example:"2026-05-02T09:35:11.221Z"`
-	LastMessageAt time.Time               `json:"last_message_at" example:"2026-05-02T10:42:55.412Z"`
-	Members       []ConversationMemberRow `json:"members"`
+	ID            uuid.UUID `json:"id"              example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
+	Type          string    `json:"type"            example:"group"`
+	Name          *string   `json:"name"            example:"Wakeup Crew"`
+	AvatarURL     *string   `json:"avatar_url"      example:"https://wakeup.app/avatars/group.png"`
+	CreatedAt     time.Time `json:"created_at"      example:"2026-05-02T09:31:21.810Z"`
+	UpdatedAt     time.Time `json:"updated_at"      example:"2026-05-02T09:35:11.221Z"`
+	LastMessageAt time.Time `json:"last_message_at" example:"2026-05-02T10:42:55.412Z"`
+	// MutedUntil + PinnedAt are the CALLER's membership state, not
+	// shared. Other members may have different mute / pin values for
+	// the same conversation. Surfaced here so the list and detail
+	// responses give the client everything it needs to render mute
+	// icons and sort pinned-first without follow-up calls.
+	MutedUntil *time.Time              `json:"muted_until"     example:"2026-05-02T18:00:00Z"`
+	PinnedAt   *time.Time              `json:"pinned_at"       example:"2026-05-02T09:31:21.810Z"`
+	Members    []ConversationMemberRow `json:"members"`
 }
 
 // ConversationMemberRow is one member of a ConversationResponse.
@@ -72,6 +79,48 @@ type MarkReadRequest struct {
 	UpToMessageID uuid.UUID `json:"up_to_message_id" validate:"required" example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
 }
 
+// SetMuteRequest is the body for PATCH /v1/conversations/{id}/mute.
+// `until = null` unmutes; a future timestamp suppresses pushes until
+// then. "Forever" is just a far-future stamp like 2099-01-01.
+type SetMuteRequest struct {
+	Until *time.Time `json:"until" example:"2026-05-02T18:00:00Z"`
+}
+
+// SetPinRequest is the body for PATCH /v1/conversations/{id}/pin.
+// Server stamps `pinned_at = now()` when true, NULL when false.
+//
+// `Pinned` is a pointer so we can distinguish an omitted field from an
+// explicit `false`. validator/v10's `required` on a non-pointer bool
+// rejects `false`, which would mean callers couldn't unpin.
+type SetPinRequest struct {
+	Pinned *bool `json:"pinned" validate:"required" example:"true"`
+}
+
+// ConversationMemberResponse is the wire shape returned by
+// PATCH /v1/conversations/{id}/{mute,pin}. Includes everything the
+// client needs to update its local cached row.
+type ConversationMemberResponse struct {
+	ConversationID    uuid.UUID  `json:"conversation_id"   example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
+	UserID            uuid.UUID  `json:"user_id"           example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
+	Role              string     `json:"role"              example:"member"`
+	JoinedAt          time.Time  `json:"joined_at"         example:"2026-05-02T09:31:21.810Z"`
+	LastReadMessageID *uuid.UUID `json:"last_read_message_id" example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
+	MutedUntil        *time.Time `json:"muted_until"       example:"2026-05-02T18:00:00Z"`
+	PinnedAt          *time.Time `json:"pinned_at"         example:"2026-05-02T09:31:21.810Z"`
+}
+
+func toConversationMemberResponse(m domain.ConversationMember) ConversationMemberResponse {
+	return ConversationMemberResponse{
+		ConversationID:    m.ConversationID,
+		UserID:            m.UserID,
+		Role:              string(m.Role),
+		JoinedAt:          m.JoinedAt,
+		LastReadMessageID: m.LastReadMessageID,
+		MutedUntil:        m.MutedUntil,
+		PinnedAt:          m.PinnedAt,
+	}
+}
+
 // toConversationMemberRow renders a single conversation_members row
 // with the embedded counterparty profile.
 func toConversationMemberRow(m domain.ConversationMember, u domain.User) ConversationMemberRow {
@@ -85,8 +134,14 @@ func toConversationMemberRow(m domain.ConversationMember, u domain.User) Convers
 // toConversationResponse renders a single conversation with members,
 // pulling the embedded user records from a pre-loaded `usersByID` map
 // (built by the handler so we do one batch SELECT per request).
-func toConversationResponse(c domain.Conversation, members []domain.ConversationMember, usersByID map[uuid.UUID]domain.User) ConversationResponse {
+//
+// callerID identifies which member row carries the per-caller mute and
+// pin state — those fields are surfaced at the top level so the
+// client can render a mute icon / sort pinned-first without scanning
+// the embedded members slice.
+func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members []domain.ConversationMember, usersByID map[uuid.UUID]domain.User) ConversationResponse {
 	rows := make([]ConversationMemberRow, 0, len(members))
+	var mutedUntil, pinnedAt *time.Time
 	for _, m := range members {
 		u, ok := usersByID[m.UserID]
 		if !ok {
@@ -95,6 +150,10 @@ func toConversationResponse(c domain.Conversation, members []domain.Conversation
 			u = domain.User{ID: m.UserID}
 		}
 		rows = append(rows, toConversationMemberRow(m, u))
+		if m.UserID == callerID {
+			mutedUntil = m.MutedUntil
+			pinnedAt = m.PinnedAt
+		}
 	}
 	return ConversationResponse{
 		ID:            c.ID,
@@ -104,6 +163,8 @@ func toConversationResponse(c domain.Conversation, members []domain.Conversation
 		CreatedAt:     c.CreatedAt,
 		UpdatedAt:     c.UpdatedAt,
 		LastMessageAt: c.LastMessageAt,
+		MutedUntil:    mutedUntil,
+		PinnedAt:      pinnedAt,
 		Members:       rows,
 	}
 }

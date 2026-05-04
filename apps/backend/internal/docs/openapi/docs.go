@@ -1810,6 +1810,196 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/conversations/{id}/mute": {
+            "patch": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Per-member toggle. Body: ` + "`" + `{ \"until\": ISO8601 timestamp | null }` + "`" + `. ` + "`" + `null` + "`" + ` unmutes; a future timestamp suppresses pushes until then; \"forever\" is just a far-future stamp like ` + "`" + `2099-01-01T00:00:00Z` + "`" + `. WS events still fire — only the push-fanout is gated. Non-members get 404.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Mute / unmute a conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Mute deadline",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.SetMuteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated member row",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ConversationMemberResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON / id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversations/{id}/pin": {
+            "patch": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Per-member toggle. Body: ` + "`" + `{ \"pinned\": bool }` + "`" + `. The server stamps ` + "`" + `pinned_at = now()` + "`" + ` when true, NULL when false. Pinning is a UI-ordering hint; the conversation list response includes ` + "`" + `pinned_at` + "`" + ` so clients can sort pinned-first. Non-members get 404.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "conversations"
+                ],
+                "summary": "Pin / unpin a conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c\"",
+                        "description": "Conversation id (UUID v7)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Pin toggle",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.SetPinRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated member row",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ConversationMemberResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON / id",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Conversation not found or caller not a member",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/conversations/{id}/read": {
             "post": {
                 "security": [
@@ -4179,6 +4369,39 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.ConversationMemberResponse": {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "joined_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
+                },
+                "last_read_message_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "muted_until": {
+                    "type": "string",
+                    "example": "2026-05-02T18:00:00Z"
+                },
+                "pinned_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
+                },
+                "role": {
+                    "type": "string",
+                    "example": "member"
+                },
+                "user_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
         "internal_handler_http.ConversationMemberRow": {
             "type": "object",
             "properties": {
@@ -4220,9 +4443,18 @@ const docTemplate = `{
                         "$ref": "#/definitions/internal_handler_http.ConversationMemberRow"
                     }
                 },
+                "muted_until": {
+                    "description": "MutedUntil + PinnedAt are the CALLER's membership state, not\nshared. Other members may have different mute / pin values for\nthe same conversation. Surfaced here so the list and detail\nresponses give the client everything it needs to render mute\nicons and sort pinned-first without follow-up calls.",
+                    "type": "string",
+                    "example": "2026-05-02T18:00:00Z"
+                },
                 "name": {
                     "type": "string",
                     "example": "Wakeup Crew"
+                },
+                "pinned_at": {
+                    "type": "string",
+                    "example": "2026-05-02T09:31:21.810Z"
                 },
                 "type": {
                     "type": "string",
@@ -4861,6 +5093,27 @@ const docTemplate = `{
                 "reply_to_message_id": {
                     "type": "string",
                     "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
+        "internal_handler_http.SetMuteRequest": {
+            "type": "object",
+            "properties": {
+                "until": {
+                    "type": "string",
+                    "example": "2026-05-02T18:00:00Z"
+                }
+            }
+        },
+        "internal_handler_http.SetPinRequest": {
+            "type": "object",
+            "required": [
+                "pinned"
+            ],
+            "properties": {
+                "pinned": {
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },

@@ -57,6 +57,14 @@ type ConversationMember struct {
 	Role              MemberRole
 	JoinedAt          time.Time
 	LastReadMessageID *uuid.UUID
+	// MutedUntil is the per-member mute deadline. Non-nil + future =
+	// push notifications suppressed for this conversation. WS events
+	// still fire — only the push fanout gates on this.
+	MutedUntil *time.Time
+	// PinnedAt marks the conversation as pinned to the top of the
+	// user's list. Non-nil = pinned; ordering among pinned is
+	// pinned_at DESC (most recently pinned floats highest).
+	PinnedAt *time.Time
 }
 
 // IsAdmin reports whether the member has admin privileges in the

@@ -61,6 +61,8 @@ func (h *ConversationHandler) Mount(r chi.Router) {
 		r.Post("/{id}/members", h.AddMembers)
 		r.Delete("/{id}/members/{user_id}", h.RemoveMember)
 		r.Post("/{id}/read", h.MarkRead)
+		r.Patch("/{id}/mute", h.SetMute)
+		r.Patch("/{id}/pin", h.SetPin)
 	})
 }
 
@@ -154,7 +156,7 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	rendered, err := h.renderOne(r.Context(), res.Conversation, res.Members)
+	rendered, err := h.renderOne(r.Context(), uid, res.Conversation, res.Members)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -195,7 +197,7 @@ func (h *ConversationHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	rendered, err := h.renderOne(r.Context(), res.Conversation, res.Members)
+	rendered, err := h.renderOne(r.Context(), uid, res.Conversation, res.Members)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -253,7 +255,7 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	rendered, err := h.renderOne(r.Context(), conv, res.Members)
+	rendered, err := h.renderOne(r.Context(), uid, conv, res.Members)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -293,6 +295,95 @@ func (h *ConversationHandler) Leave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteNoContent(w)
+}
+
+// SetMute toggles per-member push suppression for a conversation.
+//
+// @Summary      Mute / unmute a conversation
+// @Description  Per-member toggle. Body: `{ "until": ISO8601 timestamp | null }`. `null` unmutes; a future timestamp suppresses pushes until then; "forever" is just a far-future stamp like `2099-01-01T00:00:00Z`. WS events still fire — only the push-fanout is gated. Non-members get 404.
+// @Tags         conversations
+// @Accept       json
+// @Produce      json
+// @Security     CookieAuth
+// @Param        id       path     string                  true  "Conversation id (UUID v7)"  example("0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c")
+// @Param        request  body     SetMuteRequest          true  "Mute deadline"
+// @Success      200      {object} ConversationMemberResponse "Updated member row"
+// @Header       200      {string} X-Request-ID            "Echoed request id"
+// @Failure      400      {object} ErrorResponse           "Malformed JSON / id"
+// @Failure      401      {object} ErrorResponse           "Not authenticated"
+// @Failure      404      {object} ErrorResponse           "Conversation not found or caller not a member"
+// @Failure      413      {object} ErrorResponse           "Request body too large"
+// @Failure      422      {object} ErrorResponse           "Validation failed"
+// @Failure      429      {object} ErrorResponse           "Rate limited"
+// @Failure      500      {object} ErrorResponse           "Internal error"
+// @Router       /v1/conversations/{id}/mute [patch]
+func (h *ConversationHandler) SetMute(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, r, apierror.BadRequest("id must be a valid UUID"))
+		return
+	}
+	var req SetMuteRequest
+	if e := DecodeJSON(r, h.v, &req); e != nil {
+		WriteError(w, r, e)
+		return
+	}
+	updated, err := h.convs.SetMute(r.Context(), uid, id, req.Until)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, toConversationMemberResponse(updated))
+}
+
+// SetPin toggles whether the conversation is pinned to the top of the
+// caller's list.
+//
+// @Summary      Pin / unpin a conversation
+// @Description  Per-member toggle. Body: `{ "pinned": bool }`. The server stamps `pinned_at = now()` when true, NULL when false. Pinning is a UI-ordering hint; the conversation list response includes `pinned_at` so clients can sort pinned-first. Non-members get 404.
+// @Tags         conversations
+// @Accept       json
+// @Produce      json
+// @Security     CookieAuth
+// @Param        id       path     string                     true  "Conversation id (UUID v7)"  example("0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c")
+// @Param        request  body     SetPinRequest              true  "Pin toggle"
+// @Success      200      {object} ConversationMemberResponse "Updated member row"
+// @Header       200      {string} X-Request-ID               "Echoed request id"
+// @Failure      400      {object} ErrorResponse              "Malformed JSON / id"
+// @Failure      401      {object} ErrorResponse              "Not authenticated"
+// @Failure      404      {object} ErrorResponse              "Conversation not found or caller not a member"
+// @Failure      413      {object} ErrorResponse              "Request body too large"
+// @Failure      422      {object} ErrorResponse              "Validation failed"
+// @Failure      429      {object} ErrorResponse              "Rate limited"
+// @Failure      500      {object} ErrorResponse              "Internal error"
+// @Router       /v1/conversations/{id}/pin [patch]
+func (h *ConversationHandler) SetPin(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, r, apierror.BadRequest("id must be a valid UUID"))
+		return
+	}
+	var req SetPinRequest
+	if e := DecodeJSON(r, h.v, &req); e != nil {
+		WriteError(w, r, e)
+		return
+	}
+	updated, err := h.convs.SetPin(r.Context(), uid, id, *req.Pinned)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, toConversationMemberResponse(updated))
 }
 
 // AddMembers adds users to a group. Admin-only.
@@ -435,12 +526,14 @@ func (h *ConversationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 // --- rendering helpers --------------------------------------------------
 
 // renderOne enriches a single conversation with its member-user join.
-func (h *ConversationHandler) renderOne(ctx context.Context, conv domain.Conversation, members []domain.ConversationMember) (ConversationResponse, error) {
+// callerID is needed so the response can surface the caller's mute /
+// pin state at the top level.
+func (h *ConversationHandler) renderOne(ctx context.Context, callerID uuid.UUID, conv domain.Conversation, members []domain.ConversationMember) (ConversationResponse, error) {
 	usersByID, err := h.loadUsersForMembers(ctx, members)
 	if err != nil {
 		return ConversationResponse{}, err
 	}
-	return toConversationResponse(conv, members, usersByID), nil
+	return toConversationResponse(conv, callerID, members, usersByID), nil
 }
 
 // renderConversationList batch-loads members + their user records for
@@ -450,7 +543,7 @@ func (h *ConversationHandler) renderOne(ctx context.Context, conv domain.Convers
 // Caller is responsible for ensuring the actor is a member of every
 // conversation in `convs` — `Service.List` enforces that already, so
 // this path skips the per-row membership check.
-func (h *ConversationHandler) renderConversationList(ctx context.Context, _ uuid.UUID, convs []domain.Conversation) ([]ConversationResponse, error) {
+func (h *ConversationHandler) renderConversationList(ctx context.Context, callerID uuid.UUID, convs []domain.Conversation) ([]ConversationResponse, error) {
 	if len(convs) == 0 {
 		return []ConversationResponse{}, nil
 	}
@@ -485,7 +578,7 @@ func (h *ConversationHandler) renderConversationList(ctx context.Context, _ uuid
 
 	out := make([]ConversationResponse, 0, len(convs))
 	for _, c := range convs {
-		out = append(out, toConversationResponse(c, membersByConv[c.ID], usersByID))
+		out = append(out, toConversationResponse(c, callerID, membersByConv[c.ID], usersByID))
 	}
 	return out, nil
 }
