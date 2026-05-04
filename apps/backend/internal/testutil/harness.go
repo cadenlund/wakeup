@@ -49,6 +49,7 @@ import (
 	adminsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/admin"
 	attsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/attachment"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
+	contactssvc "github.com/cadenlund/wakeup/apps/backend/internal/service/contacts"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	devicesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/device"
 	friendsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
@@ -310,6 +311,14 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build admin handler: %v", err)
 	}
+	contactsSvc, err := contactssvc.New(contactssvc.Config{Users: users})
+	if err != nil {
+		t.Fatalf("Harness: build contacts service: %v", err)
+	}
+	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, authSvc, v)
+	if err != nil {
+		t.Fatalf("Harness: build contacts handler: %v", err)
+	}
 
 	// §8 WebSocket: build hub + bridge + upgrade handler so harness
 	// users can dial /v1/ws like any other route. The bridge owns one
@@ -345,6 +354,7 @@ func New(t *testing.T) *Harness {
 	presenceHandler.Mount(router)
 	roomHandler.Mount(router)
 	deviceHandler.Mount(router)
+	contactsHandler.Mount(router)
 	// Admin routes are gated by RequireAdmin so non-admin sessions hit
 	// 403 just like in production. Mount the handler under a sub-router
 	// that wraps every /v1/admin/* path.
