@@ -612,6 +612,98 @@ func TestLeave_NonMemberReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestSetMute_RoundTripPerMember(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+
+	until := time.Now().Add(15 * time.Minute)
+	got, err := st.svc.SetMute(ctx, a.ID, created.Conversation.ID, &until)
+	if err != nil {
+		t.Fatalf("SetMute: %v", err)
+	}
+	if got.MutedUntil == nil || !got.MutedUntil.Equal(until.Truncate(time.Microsecond)) {
+		t.Errorf("MutedUntil = %v, want %v", got.MutedUntil, until)
+	}
+
+	// Other party's row is NOT muted — per-member.
+	other, err := st.convs.GetMember(ctx, created.Conversation.ID, b.ID)
+	if err != nil {
+		t.Fatalf("GetMember(b): %v", err)
+	}
+	if other.MutedUntil != nil {
+		t.Errorf("b.MutedUntil = %v, want nil — mute is per-member", other.MutedUntil)
+	}
+
+	// Unmute by passing nil.
+	got2, err := st.svc.SetMute(ctx, a.ID, created.Conversation.ID, nil)
+	if err != nil {
+		t.Fatalf("Unmute: %v", err)
+	}
+	if got2.MutedUntil != nil {
+		t.Errorf("MutedUntil after unmute = %v, want nil", got2.MutedUntil)
+	}
+}
+
+func TestSetMute_NonMemberReturnsNotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	stranger := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	until := time.Now().Add(time.Hour)
+	_, err := st.svc.SetMute(ctx, stranger.ID, created.Conversation.ID, &until)
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND", asAPIError(t, err).Code)
+	}
+}
+
+func TestSetPin_RoundTripPerMember(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+
+	now := time.Now()
+	got, err := st.svc.SetPin(ctx, a.ID, created.Conversation.ID, &now)
+	if err != nil {
+		t.Fatalf("SetPin: %v", err)
+	}
+	if got.PinnedAt == nil {
+		t.Errorf("PinnedAt = nil, want non-nil after pin")
+	}
+	// Per-member: b's row stays unpinned.
+	other, err := st.convs.GetMember(ctx, created.Conversation.ID, b.ID)
+	if err != nil {
+		t.Fatalf("GetMember(b): %v", err)
+	}
+	if other.PinnedAt != nil {
+		t.Errorf("b.PinnedAt = %v, want nil — pin is per-member", other.PinnedAt)
+	}
+
+	// Unpin.
+	got2, err := st.svc.SetPin(ctx, a.ID, created.Conversation.ID, nil)
+	if err != nil {
+		t.Fatalf("Unpin: %v", err)
+	}
+	if got2.PinnedAt != nil {
+		t.Errorf("PinnedAt after unpin = %v, want nil", got2.PinnedAt)
+	}
+}
+
 func TestRemoveMember_AdminCanKick(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

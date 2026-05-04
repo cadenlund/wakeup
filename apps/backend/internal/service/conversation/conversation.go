@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -394,6 +395,49 @@ func (s *Service) Update(ctx context.Context, p UpdateParams) (domain.Conversati
 	})
 	if err != nil {
 		return domain.Conversation{}, apierror.Internal("update conversation").WithCause(err)
+	}
+	return updated, nil
+}
+
+// SetMute toggles the per-member push-suppression deadline for a
+// conversation. mutedUntil = nil unmutes; a future timestamp suppresses
+// pushes until then; a far-future stamp ('2099-01-01') is the canonical
+// "forever" value (handler builds it from the bool the client sends).
+//
+// Membership-gated: non-members get NotFound to avoid enumeration.
+func (s *Service) SetMute(ctx context.Context, actor, convID uuid.UUID, mutedUntil *time.Time) (domain.ConversationMember, error) {
+	if _, err := s.convs.GetMember(ctx, convID, actor); err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return domain.ConversationMember{}, apierror.NotFound("conversation")
+		}
+		return domain.ConversationMember{}, apierror.Internal("get member").WithCause(err)
+	}
+	updated, err := s.convs.SetMute(ctx, convID, actor, mutedUntil)
+	if err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return domain.ConversationMember{}, apierror.NotFound("conversation")
+		}
+		return domain.ConversationMember{}, apierror.Internal("set mute").WithCause(err)
+	}
+	return updated, nil
+}
+
+// SetPin toggles the per-member pin marker. pinnedAt = nil unpins; a
+// non-nil timestamp (typically now()) pins. The handler converts the
+// client's `{ pinned: bool }` body into the right pinnedAt value.
+func (s *Service) SetPin(ctx context.Context, actor, convID uuid.UUID, pinnedAt *time.Time) (domain.ConversationMember, error) {
+	if _, err := s.convs.GetMember(ctx, convID, actor); err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return domain.ConversationMember{}, apierror.NotFound("conversation")
+		}
+		return domain.ConversationMember{}, apierror.Internal("get member").WithCause(err)
+	}
+	updated, err := s.convs.SetPin(ctx, convID, actor, pinnedAt)
+	if err != nil {
+		if errors.Is(err, convrepo.ErrNotFound) {
+			return domain.ConversationMember{}, apierror.NotFound("conversation")
+		}
+		return domain.ConversationMember{}, apierror.Internal("set pin").WithCause(err)
 	}
 	return updated, nil
 }

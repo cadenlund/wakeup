@@ -99,7 +99,7 @@ LIMIT 1`
 const addMemberSQL = `-- name: AddMember :one
 INSERT INTO conversation_members (conversation_id, user_id, role)
 VALUES ($1, $2, $3)
-RETURNING conversation_id, user_id, role, joined_at, last_read_message_id`
+RETURNING conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at`
 
 const lockConversationForMemberWriteSQL = `-- name: LockConversationForMemberWrite :one
 SELECT id FROM conversations WHERE id = $1 FOR UPDATE`
@@ -109,18 +109,18 @@ DELETE FROM conversation_members
 WHERE conversation_id = $1 AND user_id = $2`
 
 const getMemberSQL = `-- name: GetMember :one
-SELECT conversation_id, user_id, role, joined_at, last_read_message_id
+SELECT conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at
 FROM conversation_members
 WHERE conversation_id = $1 AND user_id = $2`
 
 const listMembersSQL = `-- name: ListMembers :many
-SELECT conversation_id, user_id, role, joined_at, last_read_message_id
+SELECT conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at
 FROM conversation_members
 WHERE conversation_id = $1
 ORDER BY joined_at ASC, user_id ASC`
 
 const listMembersForConversationsSQL = `-- name: ListMembersForConversations :many
-SELECT conversation_id, user_id, role, joined_at, last_read_message_id
+SELECT conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at
 FROM conversation_members
 WHERE conversation_id = ANY($1::uuid[])
 ORDER BY conversation_id, joined_at ASC, user_id ASC`
@@ -132,6 +132,18 @@ const updateLastReadMessageSQL = `-- name: UpdateLastReadMessage :exec
 UPDATE conversation_members
 SET last_read_message_id = $3
 WHERE conversation_id = $1 AND user_id = $2`
+
+const setMuteSQL = `-- name: SetMute :one
+UPDATE conversation_members
+SET muted_until = $3
+WHERE conversation_id = $1 AND user_id = $2
+RETURNING conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at`
+
+const setPinSQL = `-- name: SetPin :one
+UPDATE conversation_members
+SET pinned_at = $3
+WHERE conversation_id = $1 AND user_id = $2
+RETURNING conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at`
 
 // CreateParams is the input to CreateConversation. Direct conversations
 // pass nil Name + AvatarURL; groups pass at least Name. The repo
@@ -159,6 +171,7 @@ func scanMember(row pgx.Row) (domain.ConversationMember, error) {
 	var m domain.ConversationMember
 	err := row.Scan(
 		&m.ConversationID, &m.UserID, &m.Role, &m.JoinedAt, &m.LastReadMessageID,
+		&m.MutedUntil, &m.PinnedAt,
 	)
 	return m, err
 }
@@ -446,4 +459,34 @@ func (q *Queries) UpdateLastReadMessage(ctx context.Context, conversationID, use
 		return fmt.Errorf("conversation: update last read: %w", err)
 	}
 	return nil
+}
+
+// SetMute writes (or clears) the mute deadline for a single member.
+// Pass mutedUntil = nil to unmute, or a future timestamp (forever =
+// far-future like '2099-01-01') to suppress pushes for that long.
+// Returns the resulting member row. ErrNotFound when the (conv, user)
+// pair has no membership row.
+func (q *Queries) SetMute(ctx context.Context, conversationID, userID uuid.UUID, mutedUntil *time.Time) (domain.ConversationMember, error) {
+	m, err := scanMember(q.db.QueryRow(ctx, setMuteSQL, conversationID, userID, mutedUntil))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ConversationMember{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.ConversationMember{}, fmt.Errorf("conversation: set mute: %w", err)
+	}
+	return m, nil
+}
+
+// SetPin writes (or clears) the pin marker for a single member. Pass
+// pinnedAt = nil to unpin or now() to pin. Returns the resulting member
+// row. ErrNotFound when the (conv, user) pair has no membership row.
+func (q *Queries) SetPin(ctx context.Context, conversationID, userID uuid.UUID, pinnedAt *time.Time) (domain.ConversationMember, error) {
+	m, err := scanMember(q.db.QueryRow(ctx, setPinSQL, conversationID, userID, pinnedAt))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ConversationMember{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.ConversationMember{}, fmt.Errorf("conversation: set pin: %w", err)
+	}
+	return m, nil
 }

@@ -69,7 +69,7 @@ LIMIT 1;
 -- name: AddMember :one
 INSERT INTO conversation_members (conversation_id, user_id, role)
 VALUES ($1, $2, $3)
-RETURNING conversation_id, user_id, role, joined_at, last_read_message_id;
+RETURNING conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at;
 
 -- name: LockConversationForMemberWrite :one
 -- Step 1 of the cap-enforcing add: row-lock the conversation so
@@ -83,12 +83,12 @@ DELETE FROM conversation_members
 WHERE conversation_id = $1 AND user_id = $2;
 
 -- name: GetMember :one
-SELECT conversation_id, user_id, role, joined_at, last_read_message_id
+SELECT conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at
 FROM conversation_members
 WHERE conversation_id = $1 AND user_id = $2;
 
 -- name: ListMembers :many
-SELECT conversation_id, user_id, role, joined_at, last_read_message_id
+SELECT conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at
 FROM conversation_members
 WHERE conversation_id = $1
 ORDER BY joined_at ASC, user_id ASC;
@@ -97,7 +97,7 @@ ORDER BY joined_at ASC, user_id ASC;
 -- Batched ListMembers across N conversations. Used by handlers
 -- rendering a paginated conversation list so we make ONE
 -- conversation_members query per page instead of N.
-SELECT conversation_id, user_id, role, joined_at, last_read_message_id
+SELECT conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at
 FROM conversation_members
 WHERE conversation_id = ANY($1::uuid[])
 ORDER BY conversation_id, joined_at ASC, user_id ASC;
@@ -109,3 +109,22 @@ SELECT count(*) FROM conversation_members WHERE conversation_id = $1;
 UPDATE conversation_members
 SET last_read_message_id = $3
 WHERE conversation_id = $1 AND user_id = $2;
+
+-- name: SetMute :one
+-- Per-member mute toggle. Pass $3 = NULL to unmute, or a future
+-- timestamp to suppress pushes for this conversation until then.
+-- "Forever" stores '2099-01-01' (or any far-future value) — the
+-- push fanout filter compares against now() so the test is uniform.
+UPDATE conversation_members
+SET muted_until = $3
+WHERE conversation_id = $1 AND user_id = $2
+RETURNING conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at;
+
+-- name: SetPin :one
+-- Per-member pin toggle. Pass $3 = NULL to unpin, or a timestamp
+-- (typically now()) to pin. Service layer enforces the "now()"
+-- choice — clients send a boolean, the service converts.
+UPDATE conversation_members
+SET pinned_at = $3
+WHERE conversation_id = $1 AND user_id = $2
+RETURNING conversation_id, user_id, role, joined_at, last_read_message_id, muted_until, pinned_at;
