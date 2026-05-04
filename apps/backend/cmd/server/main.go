@@ -45,6 +45,7 @@ import (
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	idemrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/idempotency"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
+	notifrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notification"
 	notifprefrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/notificationpref"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/passwordreset"
 	presrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/presence"
@@ -187,8 +188,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("notificationpref service: %w", err)
 	}
+	pushSuppression := notifrepo.New(pool)
 	notificationSvc, err := notifsvc.New(notifsvc.Config{
 		Prefs: notifPrefSvc, Devices: devicesRepo, Pusher: pusher,
+		Suppression: pushSuppression,
 	})
 	if err != nil {
 		return fmt.Errorf("notification service: %w", err)

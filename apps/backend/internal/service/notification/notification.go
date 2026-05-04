@@ -40,11 +40,33 @@ type DeviceTokenLister interface {
 	ListByUser(ctx context.Context, userID uuid.UUID) ([]domain.DeviceToken, error)
 }
 
+// SuppressionChecker gates push delivery on the §10.2 sticky DND intent
+// and the per-conversation mute_until column. A non-nil convID is the
+// signal "this push is conversation-scoped" — for those, both DND and
+// per-member mute apply. For non-conversation-scoped pushes (friend
+// requests), pass nil convID; only DND applies.
+//
+// The package ships nopSuppression for tests / call sites that don't
+// want gating; production wires the adapter over presence_states +
+// conversation_members.
+type SuppressionChecker interface {
+	PushSuppressed(ctx context.Context, userID uuid.UUID, convID *uuid.UUID) (bool, error)
+}
+
+// nopSuppression always returns false. Default when Config.Suppression
+// is nil — keeps tests that don't care about suppression simple.
+type nopSuppression struct{}
+
+func (nopSuppression) PushSuppressed(context.Context, uuid.UUID, *uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 // Service fans an offline-push request out to Expo.
 type Service struct {
-	prefs   PrefChecker
-	devices DeviceTokenLister
-	pusher  pushnotif.Pusher
+	prefs       PrefChecker
+	devices     DeviceTokenLister
+	pusher      pushnotif.Pusher
+	suppression SuppressionChecker
 }
 
 // Config builds the service.
@@ -52,6 +74,11 @@ type Config struct {
 	Prefs   PrefChecker
 	Devices DeviceTokenLister
 	Pusher  pushnotif.Pusher
+	// Suppression is optional. Nil = nopSuppression (always deliver).
+	// Production wires an adapter that reads presence_states +
+	// conversation_members; tests typically pass nil and exercise the
+	// suppression layer in its own unit tests.
+	Suppression SuppressionChecker
 }
 
 // New constructs the service. Returns an error if any dependency is missing.
@@ -65,19 +92,36 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Pusher == nil {
 		return nil, errors.New("notification: Config.Pusher is required")
 	}
-	return &Service{prefs: cfg.Prefs, devices: cfg.Devices, pusher: cfg.Pusher}, nil
+	suppression := cfg.Suppression
+	if suppression == nil {
+		suppression = nopSuppression{}
+	}
+	return &Service{
+		prefs: cfg.Prefs, devices: cfg.Devices, pusher: cfg.Pusher,
+		suppression: suppression,
+	}, nil
 }
 
-// SendOfflinePush gates by the user's per-category preference, then fans
-// out the payload to every Expo token they've registered. A user with no
-// devices (or with the category toggled off) is a silent no-op — that's
-// the expected steady-state for a brand-new user with no mobile install.
+// SendOfflinePush gates push delivery and fans out to Expo. Three gates
+// in order, each a silent no-op when it trips:
+//  1. The recipient's per-category preference (§11.5).
+//  2. Sticky DND intent on presence_states (§10.2). DND survives WS
+//     disconnect; pushes are suppressed but in-app surfaces still fire.
+//  3. Per-conversation mute_until > now() — only when convID != nil.
+//     Friend-request pushes pass nil convID and skip this gate.
 //
-// Errors are logged at warn-level and returned so call sites can decide
-// whether to surface them; per §11 this is a best-effort side-channel,
-// so trigger sites should not block their main flow on a push failure.
-func (s *Service) SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category Category, payload pushnotif.Notification) error {
+// Errors from gate 2/3 are returned to the caller; per §11 trigger
+// sites treat push as best-effort and shouldn't block their main flow
+// on a push failure.
+func (s *Service) SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category Category, payload pushnotif.Notification, convID *uuid.UUID) error {
 	if !s.prefs.ShouldNotify(ctx, recipientID, category) {
+		return nil
+	}
+	suppressed, err := s.suppression.PushSuppressed(ctx, recipientID, convID)
+	if err != nil {
+		return fmt.Errorf("notification: suppression check: %w", err)
+	}
+	if suppressed {
 		return nil
 	}
 	tokens, err := s.devices.ListByUser(ctx, recipientID)
