@@ -141,7 +141,7 @@ wakeup/
 | Push notifications | Expo Push API (HTTP, no SDK needed) | mobile delivery |
 | Redis client | `github.com/redis/go-redis/v9` | rate limiting + pub/sub |
 | Swagger | `github.com/swaggo/swag` + `github.com/swaggo/http-swagger/v2` | annotations → OpenAPI 3 |
-| Client gen | `github.com/oapi-codegen/oapi-codegen/v2` | generates mobile client from OpenAPI |
+| Client gen | `openapi-typescript` (npm, run via `npx`) | emits TypeScript types for the Expo client from the OpenAPI spec |
 | Testing | stdlib + `github.com/testcontainers/testcontainers-go` + `github.com/peterldowns/pgtestdb` | template-DB → parallel tests |
 | Error tracking | `github.com/getsentry/sentry-go` | day-one observability |
 | Lint | `golangci-lint` (config copied from court-scraper) | — |
@@ -692,9 +692,9 @@ func (q *Queries) Create(ctx context.Context, p CreateParams) (domain.User, erro
 
 `domain/` may import only stdlib + `github.com/google/uuid`. It must not import `repository/`, `service/`, `handler/`, or any other internal package — it's the leaf shared by the rest.
 
-### 4.12 Background job runner (one pattern, three jobs)
+### 4.12 Background job runner (one pattern, four jobs)
 
-Three goroutines run continuously inside the server: presence sweeper (30s), idempotency-key sweeper (1h), expired-session sweeper (1h). All three use the same runner pattern so lifecycle is uniform.
+Four goroutines run continuously inside the server: presence sweeper (30s), idempotency-key sweeper (1h), expired-session sweeper (1h), and lone-user kick sweeper (30s). All use the same runner pattern so lifecycle is uniform.
 
 ```go
 // internal/job/runner.go
@@ -737,7 +737,7 @@ func (s *Sweeper) Interval() time.Duration          { return 30 * time.Second }
 func (s *Sweeper) Run(ctx context.Context) error    { return s.svc.SweepStale(ctx) }
 ```
 
-(Same shape for `internal/service/idempotency/sweeper.go` returning 1h interval, and `internal/service/auth/session_sweeper.go` returning 1h interval.)
+(Same shape for `internal/service/idempotency/sweeper.go` returning 1h interval, `internal/service/auth/session_sweeper.go` returning 1h interval, and `internal/service/room/lone_kick_sweeper.go` returning 30s interval — the lone-kick sweeper polls the §10.3 `room:lone_kicks_due` ZSET for entries past their deadline and fires `LiveKit RemoveParticipant` for each.)
 
 **Wired in `cmd/server/main.go`:**
 
@@ -746,6 +746,7 @@ runner := job.New(logger)
 runner.Register(&presence.Sweeper{Svc: presenceSvc})
 runner.Register(&idempotency.Sweeper{Svc: idempSvc})
 runner.Register(&auth.SessionSweeper{Svc: authSvc})
+runner.Register(&room.LoneKickSweeper{Svc: roomSvc})
 runner.Start(ctx)
 defer runner.Stop()  // blocks during graceful shutdown
 ```
@@ -991,16 +992,19 @@ CREATE INDEX audit_log_actor_idx ON audit_log (actor_id);
 
 ```sql
 -- migrations/0011_idempotency_keys.sql
--- Caches the response body for write requests carrying an Idempotency-Key header.
--- See §4.9 for middleware semantics.
+-- Caches the response body + headers for write requests carrying an
+-- Idempotency-Key header. See §4.8 for middleware semantics.
+-- response_headers is jsonb of {"Header": ["v1", "v2"]} so multi-value
+-- headers (e.g. Set-Cookie) round-trip via http.Header's []string semantics.
 CREATE TABLE idempotency_keys (
-    key             text NOT NULL CHECK (char_length(key) BETWEEN 1 AND 255),        -- client-supplied UUID v7 (or any unique string of 1..255 chars)
-    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,             -- key is scoped per user
-    request_hash    bytea NOT NULL CHECK (octet_length(request_hash) = 32),           -- sha256(method + path + body); SHA-256 = 32 bytes
-    response_status int NOT NULL,
-    response_body   bytea NOT NULL,
-    created_at      timestamptz NOT NULL DEFAULT now(),
-    expires_at      timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
+    key              text NOT NULL CHECK (char_length(key) BETWEEN 1 AND 255),        -- client-supplied UUID v7 (or any unique string of 1..255 chars)
+    user_id          uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,             -- key is scoped per user
+    request_hash     bytea NOT NULL CHECK (octet_length(request_hash) = 32),           -- sha256(method + path + body); SHA-256 = 32 bytes
+    response_status  int NOT NULL,
+    response_headers jsonb,                                                             -- nullable: handler may not set custom headers
+    response_body    bytea NOT NULL,
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    expires_at       timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
     PRIMARY KEY (user_id, key)
 );
 -- Composite PK above already serves user_id-prefix lookups.
@@ -1660,8 +1664,9 @@ Fired by `MessageService.Send` when the recipient has no active WS connection. L
 **Model: every conversation has a persistent voice/video room. `room_id == conversation_id`.** No separate room entity. The room exists conceptually as long as the conversation exists; physically it spins up in LiveKit on first join and tears down when empty.
 
 - **Default audio-only on join.** The client publishes microphone, does NOT publish camera. Any participant can enable their camera mid-call by publishing the camera track — no server round-trip needed; LiveKit handles the renegotiation.
-- **"Calling" UX = first person joins** → other conversation members get a `room.started` WebSocket event (also pushed via Expo if offline). Treat as the "incoming call" notification.
+- **"Calling" UX = first person joins** → other conversation members get a `room.started` WebSocket event (also pushed via Expo if offline) — Discord-style "X is calling…" prompt for online members, system push for offline. The push is gated by the recipient's `notification_preferences.calls` toggle (§11). The push fan-out happens regardless of whether anyone else has joined yet — that's the "ringing" semantic.
 - **"In a call" indicator** = anyone listed in the current participants set is visible to other conversation members.
+- **Lone-user auto-kick** — a participant left alone in the room (count drops to 1) gets server-side kicked after `ROOM_LONE_KICK_AFTER` (default 5 minutes, env-tunable). Mirrors Discord's "you've been alone too long" disconnect. Mechanism: on the `participant_left` webhook, if the surviving participant count is exactly 1, the room service ZADDs an entry to a Redis sorted set `room:lone_kicks_due` keyed on `<conversation_id>` with score `now + ROOM_LONE_KICK_AFTER`; on the next `participant_joined` that brings the count back to ≥2, the entry is ZREM'd. A background sweeper job (§4.12) ticks every 30s, pulls due entries via ZRANGEBYSCORE, and calls LiveKit's `RemoveParticipant` admin RPC to drop the lone user. The user re-experiences this as a normal `room_finished` (room empties → §10.3 broadcasts `room.ended`).
 - **No "end call" concept** for the room itself. Individual users leave; when last user leaves, the room is empty. LiveKit emits `room_finished`; we broadcast `room.ended`.
 
 **Backend responsibilities:**
@@ -1683,9 +1688,12 @@ Fired by `MessageService.Send` when the recipient has no active WS connection. L
    - `room:<conv_id>:participants` SET of `user_id`
    - `room:<conv_id>:started_at` ISO timestamp (set on first join)
    - `room:<conv_id>:participant:<user_id>:video` `"true" | "false"`
-   - All keys have a 24-hour TTL as a safety net for stuck state.
+   - `room:lone_kicks_due` global ZSET — score = unix kick deadline, member = `<conv_id>` (one pending kick per conversation)
+   - `room:<conv_id>:lone_user` ISO-string `user_id` of the participant the kick will fire on
+   - All per-conv keys have a 24-hour TTL as a safety net for stuck state.
 5. **Broadcast `room.*` events** (§7.2) to conversation members via the existing pubsub broker.
-6. **Trigger push notifications** on `room.started` for every conversation member who is offline AND has the relevant notification preference enabled (`calls` category).
+6. **Trigger push notifications** on `room.started` for every conversation member who is offline AND has the relevant notification preference enabled (`calls` category). The "ringing" notification fires on the first `participant_joined` even if no one else has joined yet — Discord-style — so call recipients get the alert without waiting for a second participant.
+7. **Schedule lone-user kicks** on `participant_left` when the surviving count is exactly 1; cancel on `participant_joined` when count returns to ≥2. The sweeper job in §4.12 fires due kicks via the LiveKit `RoomServiceClient.RemoveParticipant` admin RPC.
 
 **Webhook endpoint signature verification — example:**
 
@@ -2154,6 +2162,9 @@ Use the `Receiver` from `LiveKitTestEnv` to **synthesize valid webhook signature
 | `room_started_triggers_push` | Conversation members who are offline AND have `notification_preferences.calls = true` get an Expo Push (verify via FakePusher in harness) |
 | `participant_joined` | Redis SET adds user_id; WS `room.participant_joined` broadcasts to other participants |
 | `participant_left` | Redis SET removes user_id; WS broadcasts; if SET becomes empty, `room.ended` fires |
+| `participant_left_count_one_schedules_kick` | After `participant_left` brings the surviving count to exactly 1, `room:lone_kicks_due` ZSET has an entry for the conversation with score ≈ now+`ROOM_LONE_KICK_AFTER`, and `room:<conv_id>:lone_user` holds the surviving user_id |
+| `participant_joined_count_two_cancels_kick` | After `participant_joined` brings the count from 1 to 2, both `room:lone_kicks_due` and `room:<conv_id>:lone_user` are cleared |
+| `lone_kick_sweeper_fires_removeparticipant` | Drive the sweeper directly with a stub LiveKitAdmin; an entry whose deadline has passed triggers exactly one `RemoveParticipant(room, identity)` call with the right shape |
 | `track_published_camera` | WS `room.video_changed` broadcasts with `video=true`; non-camera tracks (microphone, screen) don't trigger this event |
 | `track_unpublished_camera` | WS `room.video_changed` broadcasts with `video=false` |
 | `unknown_room` | Webhook for a room ID that doesn't match any conversation → 200, no-op (don't leak existence) |
@@ -2379,9 +2390,11 @@ migrate-create name:
 gen-docs:
     cd apps/backend && swag init -g cmd/server/main.go -o ../../docs/openapi --parseDependency
 
-# Generate mobile client from OpenAPI
+# Generate mobile TypeScript types from OpenAPI. Pipes through the
+# v2→v3 converter at scripts/dev/ since openapi-typescript only reads
+# OpenAPI 3.x but swag emits Swagger 2.0.
 gen-client:
-    oapi-codegen -package wakeupapi -generate types,client docs/openapi/swagger.json > apps/mobile/lib/wakeupapi/client.go
+    npx -y openapi-typescript@latest <(python3 scripts/dev/swagger2-to-openapi3.py docs/openapi/swagger.json /dev/stdout) -o apps/mobile/lib/api/schema.ts
 
 # Verify all (used in CI and as the final acceptance gate)
 verify: lint test gen-docs
@@ -2588,6 +2601,11 @@ RESEND_FROM_EMAIL=no-reply@wakeup.app
 LIVEKIT_URL=ws://localhost:7880
 LIVEKIT_API_KEY=devkey
 LIVEKIT_API_SECRET=devsecretdevsecretdevsecret
+# Discord-style "you've been alone too long" disconnect — when a participant is
+# the only person in a room for this long, the lone-kick sweeper drops them via
+# LiveKit's RemoveParticipant admin RPC. Default 5m matches Discord; tune lower
+# for tighter calls or 0 to disable.
+ROOM_LONE_KICK_AFTER=5m
 
 # --- Push notifications (Expo) — operator must obtain after Expo project creation ---
 EXPO_ACCESS_TOKEN=
@@ -2618,7 +2636,7 @@ Install on your dev machine:
 - [ ] `golangci-lint` — `brew install golangci-lint` (or official installer)
 - [ ] `goose` — `go install github.com/pressly/goose/v3/cmd/goose@latest` (or `brew install goose`)
 - [ ] `swag` — `go install github.com/swaggo/swag/cmd/swag@latest`
-- [ ] `oapi-codegen` — `go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest`
+- [ ] Node + `npx` — `brew install node` (used by `just gen-client` to run `openapi-typescript`; no global install needed, `npx` fetches it on demand)
 - (LiveKit is part of the project's `docker-compose.yml` per §10.3 — you do NOT need to install it separately or sign up for LiveKit Cloud.)
 
 ### 14.2 GitHub repo + CodeRabbit
@@ -2921,8 +2939,8 @@ For each package: write the package, write exhaustive tests (every error path), 
   - Commit: `test(backend): raise coverage to ≥80% in <packages-touched>`
 - [ ] **13.9** Generate final OpenAPI: `just gen-docs`. Verify Swagger UI loads, every endpoint is listed, every endpoint has a description, and every documented `@Failure` is reachable from the handler.
   - Commit: `docs(backend): regenerate openapi spec`
-- [ ] **13.10** Generate mobile client stub: `just gen-client`. Commit the generated client.
-  - Commit: `feat(mobile): generate api client from openapi spec`
+- [ ] **13.10** Generate mobile TypeScript types: `just gen-client` (writes `apps/mobile/lib/api/schema.ts` via `openapi-typescript`). Commit the generated types. The data-fetching layer (TanStack Query hooks etc.) is layered on top during the Expo client phase — this milestone ships only the typed schema as the single source of truth between backend and mobile.
+  - Commit: `feat(mobile): generate api typescript types from openapi spec`
 - [ ] **13.11** Write a manual smoke-test script: register two users, become friends, create a group, send messages (one with an `Idempotency-Key`, retried, verify `Idempotent-Replay: true`), upload an attachment, verify presence updates, both users join the group's voice room (one toggles camera mid-call). Document as `docs/smoke.md`.
   - Commit: `docs(backend): add manual smoke test playbook`
 - [ ] **13.12** Final `just verify` — green. Final CodeRabbit review — clean.
@@ -2944,7 +2962,7 @@ The backend is **done** when, and only when, all of the following are true:
 8. ✅ A human can register, log in, add a friend, create a group, send a message, upload an attachment, see presence update in real time, and have two users join the same conversation's voice room (both audio and one with video toggled on) — all via Swagger UI + a LiveKit test client. No bugs, no surprises.
 9. ✅ The §12.7 WebSocket test matrix is fully green — every event has all five required subtests (fires, doesn't-fire, payload, multi-instance, idempotency) plus the connection-lifecycle subtable.
 10. ✅ The §12.8 voice/video matrix is fully green — token issuance, authorization, webhook handling, end-to-end LiveKit integration test (12.8.4), and multi-instance fan-out (12.8.5) all pass with a real LiveKit container.
-11. ✅ The mobile client stub at `apps/mobile/lib/wakeupapi/` compiles.
+11. ✅ The mobile TypeScript schema at `apps/mobile/lib/api/schema.ts` exists and matches the current OpenAPI spec (regenerate with `just gen-client`).
 
 Until all 11 are true, the backend is not done. Do not begin Phase 14 (mobile/Expo) until the operator has personally verified the Swagger smoke test and the §12.8.4 LiveKit end-to-end test and signed off. The §12.7 + §12.8 matrices are the **specific guarantee** that the realtime + voice/video backend is correct; they replace the equivalent reassurance you'd otherwise only get from a working frontend.
 

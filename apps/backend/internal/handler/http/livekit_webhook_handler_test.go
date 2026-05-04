@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
@@ -434,5 +436,77 @@ func TestWebhook_MultiInstanceFanout(t *testing.T) {
 	}
 	if p.UserID != userID || p.ConversationID != convID {
 		t.Errorf("payload = %+v, want UserID=%v ConversationID=%v", p, userID, convID)
+	}
+}
+
+// participant_left when the survivor count is exactly 1 schedules a
+// lone-user kick for the survivor. Spec §10.3.
+func TestWebhook_ParticipantLeftCountOneSchedulesLoneKick(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	wh := newWebhookHandler(t, h)
+	convID := uuid.New()
+	survivor := uuid.New()
+	leaver := uuid.New()
+	ctx := context.Background()
+	if _, err := h.RoomSvc.AddParticipant(ctx, convID, survivor); err != nil {
+		t.Fatalf("AddParticipant survivor: %v", err)
+	}
+	if _, err := h.RoomSvc.AddParticipant(ctx, convID, leaver); err != nil {
+		t.Fatalf("AddParticipant leaver: %v", err)
+	}
+
+	ev := makeParticipantEvent(t, "participant_left",
+		"conv:"+convID.String(), "user:"+leaver.String(), nil)
+	rec := callHandler(t, wh, signWebhookRequest(t, ev))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	// ZSET should now have an entry for our convID with a score in the
+	// future (now + lone-kick TTL).
+	score, err := h.Redis.ZScore(ctx, "room:lone_kicks_due", convID.String()).Result()
+	if err != nil {
+		t.Fatalf("ZScore lone_kicks_due: %v", err)
+	}
+	if score < float64(time.Now().Unix()) {
+		t.Errorf("expected future score, got %v", score)
+	}
+	gotUser, err := h.Redis.Get(ctx, "room:"+convID.String()+":lone_user").Result()
+	if err != nil {
+		t.Fatalf("GET lone_user: %v", err)
+	}
+	if gotUser != survivor.String() {
+		t.Errorf("lone_user = %q, want %q (the survivor)", gotUser, survivor)
+	}
+}
+
+// participant_joined that brings the count from 1 → 2 cancels any
+// pending lone-user kick for the conversation. Spec §10.3.
+func TestWebhook_ParticipantJoinedCountTwoCancelsLoneKick(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	wh := newWebhookHandler(t, h)
+	convID := uuid.New()
+	survivor := uuid.New()
+	rejoiner := uuid.New()
+	ctx := context.Background()
+	if _, err := h.RoomSvc.AddParticipant(ctx, convID, survivor); err != nil {
+		t.Fatalf("AddParticipant survivor: %v", err)
+	}
+	if err := h.RoomSvc.ScheduleLoneKick(ctx, convID, survivor); err != nil {
+		t.Fatalf("ScheduleLoneKick: %v", err)
+	}
+
+	ev := makeParticipantEvent(t, "participant_joined",
+		"conv:"+convID.String(), "user:"+rejoiner.String(), nil)
+	rec := callHandler(t, wh, signWebhookRequest(t, ev))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := h.Redis.ZScore(ctx, "room:lone_kicks_due", convID.String()).Result(); !errors.Is(err, redis.Nil) {
+		t.Errorf("ZScore after rejoin: err=%v (want redis.Nil — kick should be cancelled)", err)
+	}
+	if _, err := h.Redis.Get(ctx, "room:"+convID.String()+":lone_user").Result(); !errors.Is(err, redis.Nil) {
+		t.Errorf("lone_user not deleted: err=%v", err)
 	}
 }

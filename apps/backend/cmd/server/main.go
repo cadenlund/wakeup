@@ -228,12 +228,22 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("attachment service: %w", err)
 	}
+	livekitAdmin, err := roomsvc.NewLiveKitAdmin(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
+	if err != nil {
+		return fmt.Errorf("livekit admin client: %w", err)
+	}
+	loneKickAfter, err := cfg.RoomLoneKickAfterDuration()
+	if err != nil {
+		return err
+	}
 	roomSvc, err := roomsvc.New(roomsvc.Config{
 		Convs: convSvc, Users: users,
 		APIKey: cfg.LiveKitAPIKey, APISecret: cfg.LiveKitAPISecret,
-		LiveKitURL: cfg.LiveKitURL,
-		Redis:      redisClient,
-		Logger:     logger,
+		LiveKitURL:    cfg.LiveKitURL,
+		Redis:         redisClient,
+		Logger:        logger,
+		LiveKitAdmin:  livekitAdmin,
+		LoneKickAfter: loneKickAfter,
 	})
 	if err != nil {
 		return fmt.Errorf("room service: %w", err)
@@ -271,6 +281,14 @@ func run() error {
 		return fmt.Errorf("idempotency sweeper: %w", err)
 	}
 	jobRunner.Register(idempotencySweeper)
+	// §10.3 lone-user kick sweeper: drops participants who've been alone
+	// in a room past their deadline (Discord-style). Wired here so it
+	// shares graceful-shutdown with the rest of the runner.
+	loneKickSweeper, err := roomsvc.NewLoneKickSweeper(roomSvc, logger, 0)
+	if err != nil {
+		return fmt.Errorf("lone-kick sweeper: %w", err)
+	}
+	jobRunner.Register(loneKickSweeper)
 	jobRunner.Start(rootCtx)
 	defer jobRunner.Stop()
 
