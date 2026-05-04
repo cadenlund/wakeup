@@ -156,6 +156,10 @@ func TestSearch_NonMemberDoesNotSeeMessages(t *testing.T) {
 	if len(msgs) != 0 {
 		t.Errorf("non-member found %d messages — must be 0", len(msgs))
 	}
+	convs, _ := got["conversations"].([]any)
+	if len(convs) != 0 {
+		t.Errorf("non-member found %d conversations — must be 0", len(convs))
+	}
 	// Use alice to silence the unused-variable warning.
 	_ = alice
 }

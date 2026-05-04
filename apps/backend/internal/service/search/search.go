@@ -90,9 +90,11 @@ type Params struct {
 	Types []Type
 }
 
-// Search runs the unified search. Each section is fetched with its own
-// repo call; failures in one section don't fail the whole request —
-// the section comes back nil and the caller gets the others.
+// Search runs the unified search. Each requested section is fetched
+// with its own repo call; the first failure aborts and propagates.
+// Partial results aren't worth the complexity for a search box where
+// the user just retries — the value of failing fast is the caller
+// sees the underlying error instead of a quietly empty section.
 func (s *Service) Search(ctx context.Context, p Params) (Result, error) {
 	q := strings.TrimSpace(p.Query)
 	if len(q) < MinQueryLen {
