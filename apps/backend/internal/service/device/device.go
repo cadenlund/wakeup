@@ -71,6 +71,17 @@ func (s *Service) Register(ctx context.Context, userID uuid.UUID, expoToken stri
 	return tok, nil
 }
 
+// ListForUser returns every device token registered to userID, ordered
+// by created_at DESC (newest first — what the mobile settings/devices
+// screen wants). Empty slice when the user has never registered.
+func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]domain.DeviceToken, error) {
+	tokens, err := s.devices.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, apierror.Internal("list device tokens").WithCause(err)
+	}
+	return tokens, nil
+}
+
 // RegisterVoIP stores or refreshes the user's iOS PushKit token for
 // the §8.6 CallKit incoming-call ring. Idempotent on (user_id,
 // voip_token) — re-register bumps last_seen_at instead of duplicating.

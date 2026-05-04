@@ -1,35 +1,51 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 
 	mw "github.com/cadenlund/wakeup/apps/backend/internal/middleware"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/auth"
 )
 
+// UnreadCounter is the slice of message-repo this handler needs to
+// emit the X-Unread-Total response header on GET /v1/auth/me. Defining
+// it locally keeps tests stub-friendly without pulling in a real
+// pgxpool — the production wiring uses *messagerepo.Queries.
+type UnreadCounter interface {
+	CountUnreadForUser(ctx context.Context, userID uuid.UUID) (int64, error)
+}
+
 // AuthHandler hosts every /v1/auth/* endpoint. Composes the auth service
 // (§3.2) and the package-level validator. Goroutine-safe; instantiate
 // once in cmd/server/main.go.
 type AuthHandler struct {
-	svc *auth.Service
-	v   *validator.Validate
+	svc    *auth.Service
+	unread UnreadCounter
+	v      *validator.Validate
 }
 
 // NewAuthHandler wires up the handler. The validator can be shared
 // across all handlers — `httpapi.NewValidator()` returns one configured
 // to use JSON tag names so apierror.FieldError paths match the wire.
-func NewAuthHandler(svc *auth.Service, v *validator.Validate) (*AuthHandler, error) {
+//
+// `unread` is optional; when nil, GET /v1/auth/me skips the
+// X-Unread-Total header (graceful degradation).
+func NewAuthHandler(svc *auth.Service, unread UnreadCounter, v *validator.Validate) (*AuthHandler, error) {
 	if svc == nil {
 		return nil, errors.New("httpapi: AuthHandler requires non-nil auth service")
 	}
 	if v == nil {
 		return nil, errors.New("httpapi: AuthHandler requires non-nil validator")
 	}
-	return &AuthHandler{svc: svc, v: v}, nil
+	return &AuthHandler{svc: svc, unread: unread, v: v}, nil
 }
 
 // Mount attaches every /v1/auth/* route onto r. Caller controls the
@@ -192,16 +208,39 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	// the session owner. Falls back to auth.Me only if the middleware
 	// chain hasn't run for some reason — the production router always
 	// wires LoadUser upstream.
-	if eff := mw.UserFromContext(r.Context()); eff != nil {
-		WriteJSON(w, http.StatusOK, toMeResponse(*eff, mw.RealUserFromContext(r.Context())))
+	var (
+		effective    = mw.UserFromContext(r.Context())
+		impersonator = mw.RealUserFromContext(r.Context())
+	)
+	if effective == nil {
+		u, err := h.svc.Me(r.Context())
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		effective = &u
+	}
+	h.writeUnreadHeader(r.Context(), w, effective.ID)
+	WriteJSON(w, http.StatusOK, toMeResponse(*effective, impersonator))
+}
+
+// writeUnreadHeader sets X-Unread-Total based on the message-repo's
+// unread count. Best-effort: a count failure logs but doesn't fail the
+// request. The mobile badge gracefully degrades to "no count" when the
+// header is absent.
+func (h *AuthHandler) writeUnreadHeader(ctx context.Context, w http.ResponseWriter, userID uuid.UUID) {
+	if h.unread == nil {
 		return
 	}
-	u, err := h.svc.Me(r.Context())
+	n, err := h.unread.CountUnreadForUser(ctx, userID)
 	if err != nil {
-		WriteError(w, r, err)
+		slog.WarnContext(ctx, "auth: unread count for header failed",
+			slog.String("user_id", userID.String()),
+			slog.Any("err", err),
+		)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toMeResponse(u, nil))
+	w.Header().Set("X-Unread-Total", strconv.FormatInt(n, 10))
 }
 
 // RequestPasswordReset emails a reset link if the email belongs to a

@@ -102,6 +102,12 @@ WHERE status = 'pending'
   AND (requester_id = $1 OR addressee_id = $1)
 ORDER BY created_at DESC, id DESC`
 
+const listBlockedByUserSQL = `-- name: ListBlockedByUser :many
+SELECT id, requester_id, addressee_id, status, created_at, accepted_at
+FROM friendships
+WHERE status = 'blocked' AND requester_id = $1
+ORDER BY created_at DESC, id DESC`
+
 // scanRow decodes a single row into domain.Friendship. Centralized so
 // column order stays consistent across queries.
 func scanRow(row pgx.Row) (domain.Friendship, error) {
@@ -292,6 +298,30 @@ func (q *Queries) ListPendingByUser(ctx context.Context, userID uuid.UUID) ([]do
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
 		return nil, fmt.Errorf("friendship: list pending rows: %w", rowsErr)
+	}
+	return out, nil
+}
+
+// ListBlockedByUser returns rows where userID has BLOCKED another user
+// — only the blocker sees their block list (the addressee is unaware
+// they were blocked, by design). Used by GET /v1/blocks.
+func (q *Queries) ListBlockedByUser(ctx context.Context, userID uuid.UUID) ([]domain.Friendship, error) {
+	rows, err := q.db.Query(ctx, listBlockedByUserSQL, userID)
+	if err != nil {
+		return nil, fmt.Errorf("friendship: list blocked: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.Friendship
+	for rows.Next() {
+		f, scanErr := scanRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("friendship: list blocked scan: %w", scanErr)
+		}
+		out = append(out, f)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, fmt.Errorf("friendship: list blocked rows: %w", rowsErr)
 	}
 	return out, nil
 }

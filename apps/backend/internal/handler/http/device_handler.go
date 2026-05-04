@@ -37,9 +37,44 @@ func NewDeviceHandler(devices *devicesvc.Service, a *auth.Service, v *validator.
 
 // Mount attaches device routes onto r.
 func (h *DeviceHandler) Mount(r chi.Router) {
+	r.Get("/v1/devices", h.List)
 	r.Post("/v1/devices", h.Register)
 	r.Post("/v1/devices/voip", h.RegisterVoIP)
 	r.Delete("/v1/devices/{id}", h.Delete)
+}
+
+// List returns every device token registered to the caller. Used by
+// the mobile settings/devices screen (WAKEUPEXPO.md §5.1) so the user
+// can audit which devices have a push token on file and revoke any
+// stale ones.
+//
+// @Summary      List my device tokens
+// @Description  Returns every device token registered to the authenticated user, newest first. Pair with `DELETE /v1/devices/{id}` to revoke.
+// @Tags         devices
+// @Produce      json
+// @Security     CookieAuth
+// @Success      200  {object} DeviceTokenListResponse  "Device tokens"
+// @Header       200  {string} X-Request-ID             "Echoed request id"
+// @Failure      401  {object} ErrorResponse            "Not authenticated"
+// @Failure      429  {object} ErrorResponse            "Rate limited"
+// @Failure      500  {object} ErrorResponse            "Internal error"
+// @Router       /v1/devices [get]
+func (h *DeviceHandler) List(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	tokens, err := h.devices.ListForUser(r.Context(), uid)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	out := make([]DeviceTokenResponse, 0, len(tokens))
+	for _, t := range tokens {
+		out = append(out, toDeviceTokenResponse(t))
+	}
+	WriteJSON(w, http.StatusOK, DeviceTokenListResponse{Data: out})
 }
 
 // RegisterVoIP stores or refreshes the caller's iOS PushKit token. iOS

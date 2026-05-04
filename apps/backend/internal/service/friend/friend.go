@@ -300,6 +300,22 @@ func (s *Service) ListRequests(ctx context.Context, userID uuid.UUID) (ListReque
 	return out, nil
 }
 
+// ListBlocked returns the user_ids the caller has blocked. Only the
+// blocker sees their own block list (addressees are unaware), so this
+// returns just the addressee_id of every friendships row where the
+// caller is the requester and status='blocked'.
+func (s *Service) ListBlocked(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := s.friends.ListBlockedByUser(ctx, userID)
+	if err != nil {
+		return nil, apierror.Internal("list blocked friends").WithCause(err)
+	}
+	out := make([]uuid.UUID, 0, len(rows))
+	for _, f := range rows {
+		out = append(out, f.AddresseeID)
+	}
+	return out, nil
+}
+
 // Unfriend deletes an accepted friendship between actor and other.
 // Either side can unfriend.
 //

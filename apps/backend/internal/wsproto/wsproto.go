@@ -255,9 +255,18 @@ type RoomEndedPayload struct {
 	ConversationID uuid.UUID `json:"conversation_id"`
 }
 
-// HeartbeatPayload — `heartbeat` (C→S, every 30s when foregrounded).
-// Empty struct: the type itself is the signal.
-type HeartbeatPayload struct{}
+// HeartbeatPayload — `heartbeat`.
+//
+// C→S (every 30s when foregrounded): the client sends the bare event;
+// UnreadTotal is unset / ignored on the inbound direction.
+//
+// S→C (heartbeat ack): the server replies with the same event type
+// carrying the user's current unread message total. Mobile uses this
+// to keep the app-icon badge accurate (WAKEUPEXPO.md §7.5) without a
+// REST round-trip per heartbeat.
+type HeartbeatPayload struct {
+	UnreadTotal int64 `json:"unread_total,omitempty"`
+}
 
 // PresenceSetPayload — `presence.set` (C→S manual override).
 type PresenceSetPayload struct {

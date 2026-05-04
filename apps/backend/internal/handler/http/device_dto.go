@@ -26,6 +26,13 @@ type DeviceTokenResponse struct {
 	LastSeenAt time.Time `json:"last_seen_at" example:"2026-05-02T10:42:55.412Z"`
 }
 
+// DeviceTokenListResponse is the wire shape for GET /v1/devices.
+// Unpaginated — typical users have one to three devices, never enough
+// to warrant cursor pagination.
+type DeviceTokenListResponse struct {
+	Data []DeviceTokenResponse `json:"data"`
+}
+
 // toDeviceTokenResponse converts a domain.DeviceToken into the wire shape.
 // The user_id is intentionally omitted — the caller already knows it (it's
 // always the authenticated user) and the field is redundant on the wire.

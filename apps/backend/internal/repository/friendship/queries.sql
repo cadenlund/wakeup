@@ -74,3 +74,13 @@ FROM friendships
 WHERE status = 'pending'
   AND (requester_id = $1 OR addressee_id = $1)
 ORDER BY created_at DESC, id DESC;
+
+-- name: ListBlockedByUser :many
+-- Returns rows where the user has BLOCKED someone — only the blocker
+-- sees their block list, so filter by requester_id (the side that
+-- created the blocked relationship). The service layer maps these to
+-- public profiles for the GET /v1/blocks endpoint (WAKEUP.md §6.2).
+SELECT id, requester_id, addressee_id, status, created_at, accepted_at
+FROM friendships
+WHERE status = 'blocked' AND requester_id = $1
+ORDER BY created_at DESC, id DESC;

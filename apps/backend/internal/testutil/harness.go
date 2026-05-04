@@ -276,7 +276,7 @@ func New(t *testing.T) *Harness {
 		t.Fatalf("Harness: build room service: %v", err)
 	}
 	v := httpapi.NewValidator()
-	authHandler, err := httpapi.NewAuthHandler(authSvc, v)
+	authHandler, err := httpapi.NewAuthHandler(authSvc, msgs, v)
 	if err != nil {
 		t.Fatalf("Harness: build auth handler: %v", err)
 	}
@@ -336,7 +336,7 @@ func New(t *testing.T) *Harness {
 	t.Cleanup(wsBridge.Close)
 	wsHandler, err := wshandler.NewHandler(wshandler.HandlerConfig{
 		Hub: wsHub, Bridge: wsBridge, Broker: broker,
-		Auth: authSvc, Convs: convSvc,
+		Auth: authSvc, Convs: convSvc, Unread: msgs,
 		AllowedOrigins: []string{"*"},
 	})
 	if err != nil {

@@ -34,6 +34,14 @@ type FriendRequestsResponse struct {
 	Outgoing []FriendshipResponse `json:"outgoing"`
 }
 
+// BlockListResponse is the wire shape for GET /v1/blocks. Returns the
+// public profiles of users the caller has blocked. Unlike the friends
+// list, this isn't paginated — typical block lists are small (<100)
+// and the mobile settings/blocked screen wants the full set.
+type BlockListResponse struct {
+	Data []UserResponse `json:"data"`
+}
+
 // SendFriendRequestRequest is the body for POST /v1/friends/requests.
 type SendFriendRequestRequest struct {
 	Username string `json:"username" validate:"required,min=3,max=32,alphanum" example:"baron"`

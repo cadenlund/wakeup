@@ -103,6 +103,22 @@ FROM message_reads
 WHERE message_id = $1
 ORDER BY read_at DESC, user_id`
 
+const countUnreadForUserSQL = `-- name: CountUnreadForUser :one
+WITH last_read AS (
+    SELECT cm.conversation_id,
+           cm.user_id,
+           lr.created_at AS last_read_at
+    FROM conversation_members cm
+    LEFT JOIN messages lr ON lr.id = cm.last_read_message_id
+    WHERE cm.user_id = $1
+)
+SELECT COUNT(*)::bigint
+FROM messages m
+JOIN last_read r ON r.conversation_id = m.conversation_id
+WHERE m.sender_id <> $1
+  AND m.deleted_at IS NULL
+  AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)`
+
 // CreateParams is the input to Create.
 type CreateParams struct {
 	ID               uuid.UUID
@@ -295,4 +311,19 @@ func (q *Queries) ListReadsForMessage(ctx context.Context, messageID uuid.UUID) 
 		return nil, fmt.Errorf("message: list reads rows: %w", err)
 	}
 	return out, nil
+}
+
+// CountUnreadForUser returns the total number of unread messages
+// across every conversation userID is a member of. "Unread" excludes
+// messages userID authored, soft-deleted messages, and anything sent
+// at or before userID's last_read_message_id row's created_at.
+//
+// Surfaces the X-Unread-Total header on GET /v1/auth/me and the
+// `unread_total` field on the WS heartbeat (WAKEUPEXPO.md §7.5 badge).
+func (q *Queries) CountUnreadForUser(ctx context.Context, userID uuid.UUID) (int64, error) {
+	var n int64
+	if err := q.db.QueryRow(ctx, countUnreadForUserSQL, userID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("message: count unread: %w", err)
+	}
+	return n, nil
 }
