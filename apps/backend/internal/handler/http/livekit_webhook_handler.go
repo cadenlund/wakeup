@@ -277,16 +277,13 @@ func (h *LiveKitWebhookHandler) handleParticipantJoined(
 	}
 	// If this join brings the room to ≥2 participants, the previously-
 	// scheduled lone-user kick (if any) is no longer applicable. Cancel
-	// is idempotent so the no-pending-kick case is free.
+	// is idempotent so the no-pending-kick case is free. A failure
+	// here would mean the sweeper still fires later and disconnects
+	// the new joiner — return non-2xx so LiveKit retries this webhook.
+	// CancelLoneKick is also idempotent against the retry, so the
+	// retry's first action is a clean cancel without duplicate state.
 	if err := h.rooms.CancelLoneKick(ctx, convID); err != nil {
-		// Soft-fail: a sweep that fires anyway would call
-		// RemoveParticipant on an already-multiparty room, which the
-		// new joiner would experience as an unexpected disconnect.
-		// Log loudly so operators see this if it ever happens.
-		h.logger.Warn("livekit webhook: cancel lone kick",
-			slog.String("conv_id", convID.String()),
-			slog.String("error", err.Error()),
-		)
+		return apierror.Internal("livekit webhook: cancel lone kick").WithCause(err)
 	}
 	h.publish(ctx, convID, wsproto.EventRoomParticipantJoined, wsproto.RoomParticipantJoinedPayload{
 		ConversationID: convID,
@@ -336,11 +333,10 @@ func (h *LiveKitWebhookHandler) handleParticipantLeft(
 		// Room emptied entirely — broadcast room.ended and clear any
 		// lone-kick state (defensive: shouldn't be set when count was
 		// previously 1 because the survivor's leave gets here too).
+		// CancelLoneKick failure → retry the webhook so the cleanup
+		// completes; CancelLoneKick is idempotent under retry.
 		if err := h.rooms.CancelLoneKick(ctx, convID); err != nil {
-			h.logger.Warn("livekit webhook: cancel lone kick on empty room",
-				slog.String("conv_id", convID.String()),
-				slog.String("error", err.Error()),
-			)
+			return apierror.Internal("livekit webhook: cancel lone kick on empty room").WithCause(err)
 		}
 		h.publish(ctx, convID, wsproto.EventRoomEnded, wsproto.RoomEndedPayload{
 			ConversationID: convID,
@@ -352,23 +348,18 @@ func (h *LiveKitWebhookHandler) handleParticipantLeft(
 		// fires while we're still processing the first).
 		survivors, err := h.rooms.ListParticipants(ctx, convID)
 		if err != nil {
-			h.logger.Warn("livekit webhook: list survivors for lone kick",
-				slog.String("conv_id", convID.String()),
-				slog.String("error", err.Error()),
-			)
-			return nil
+			return apierror.Internal("livekit webhook: list survivors for lone kick").WithCause(err)
 		}
 		if len(survivors) != 1 {
 			// Race: the count changed between SCARD and SMEMBERS. The
-			// next webhook will reconcile.
+			// next webhook will reconcile, no need to retry this one.
 			return nil
 		}
+		// Schedule failure → 5xx so LiveKit retries; ScheduleLoneKick
+		// is idempotent (overwrites the existing entry with a fresh
+		// deadline). Better to retry than silently miss the kick.
 		if err := h.rooms.ScheduleLoneKick(ctx, convID, survivors[0]); err != nil {
-			h.logger.Warn("livekit webhook: schedule lone kick",
-				slog.String("conv_id", convID.String()),
-				slog.String("survivor_id", survivors[0].String()),
-				slog.String("error", err.Error()),
-			)
+			return apierror.Internal("livekit webhook: schedule lone kick").WithCause(err)
 		}
 	}
 	return nil

@@ -259,6 +259,12 @@ func New(t *testing.T) *Harness {
 		APIKey: LiveKitDevAPIKey, APISecret: LiveKitDevAPISecret,
 		LiveKitURL: "ws://localhost:7880",
 		Redis:      redisClient,
+		// Mirror cmd/server's default — without this the harness's
+		// room service would treat zero as "disabled" (per the new
+		// §10.3 semantics where zero means the operator explicitly
+		// turned the feature off), and webhook tests for
+		// schedule/cancel would observe a no-op.
+		LoneKickAfter: roomsvc.DefaultLoneKickAfter,
 	})
 	if err != nil {
 		t.Fatalf("Harness: build room service: %v", err)

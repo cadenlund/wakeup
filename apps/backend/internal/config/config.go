@@ -61,11 +61,13 @@ type Config struct {
 }
 
 // RoomLoneKickAfterDuration parses the §10.3 lone-user kick timeout
-// from its string env form. Returns 0 + nil when the value is empty
-// (the room service then falls through to its DefaultLoneKickAfter);
-// returns 0 + an error when the value can't be parsed so a fat-finger
-// in the .env file fails at boot rather than silently disabling the
-// feature. Use Go's standard duration syntax: "5m", "30s", "1h".
+// from its string env form. The koanf defaults populate this with
+// "5m" when the env is absent, so an empty value here means the
+// operator deliberately blanked it; treat that as "disable" (zero
+// duration). Returns 0 + an error when the value can't be parsed so
+// a fat-finger in the .env file fails at boot rather than silently
+// disabling the feature. Use Go's standard duration syntax:
+// "5m", "30s", "1h".
 func (c *Config) RoomLoneKickAfterDuration() (time.Duration, error) {
 	raw := strings.TrimSpace(c.RoomLoneKickAfter)
 	if raw == "" {
@@ -96,11 +98,17 @@ func (c *Config) CORSOriginList() []string {
 
 // Defaults applied below before anything else loads. Optional vars are blank
 // so the validation pass can see "missing" vs "user provided empty."
+//
+// room_lone_kick_after is the §10.3 lone-user kick timeout. The default
+// is applied here (not in room.New) so an explicit "0" or "-1s" in the
+// env stays meaningful — zero/negative disables the feature, while an
+// absent env var falls through to the documented 5m.
 var defaults = map[string]any{
-	"env":            "local",
-	"log_level":      "info",
-	"http_addr":      ":8080",
-	"session_domain": "localhost",
+	"env":                  "local",
+	"log_level":            "info",
+	"http_addr":            ":8080",
+	"session_domain":       "localhost",
+	"room_lone_kick_after": "5m",
 }
 
 // LoadOpts customizes Load. Production callers pass the zero value (which

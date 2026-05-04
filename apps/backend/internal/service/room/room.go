@@ -132,10 +132,13 @@ func New(cfg Config) (*Service, error) {
 	if now == nil {
 		now = time.Now
 	}
+	// LoneKickAfter semantics: a positive duration enables the
+	// feature; any non-positive value (zero or negative) disables it.
+	// Callers that want the default should pass DefaultLoneKickAfter
+	// explicitly — typically the config layer applies the default
+	// when ROOM_LONE_KICK_AFTER is unset, so an explicit "0" here
+	// stays meaningful.
 	loneKickAfter := cfg.LoneKickAfter
-	if loneKickAfter == 0 {
-		loneKickAfter = DefaultLoneKickAfter
-	}
 	return &Service{
 		convs: cfg.Convs, users: cfg.Users,
 		apiKey: cfg.APIKey, apiSecret: cfg.APISecret,
