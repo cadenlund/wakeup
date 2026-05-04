@@ -38,7 +38,48 @@ func NewDeviceHandler(devices *devicesvc.Service, a *auth.Service, v *validator.
 // Mount attaches device routes onto r.
 func (h *DeviceHandler) Mount(r chi.Router) {
 	r.Post("/v1/devices", h.Register)
+	r.Post("/v1/devices/voip", h.RegisterVoIP)
 	r.Delete("/v1/devices/{id}", h.Delete)
+}
+
+// RegisterVoIP stores or refreshes the caller's iOS PushKit token. iOS
+// only — Android uses a high-priority FCM data message via the Expo
+// path, registered through POST /v1/devices.
+//
+// @Summary      Register an iOS PushKit (VoIP) token
+// @Description  Stores (or refreshes) the caller's iOS PushKit token. Idempotent on (user_id, voip_token): re-registering the same token bumps `last_seen_at`. Required for the §8.6 CallKit incoming-call ring on iOS — Apple's PushKit transport wakes the app from a fully-killed state, which APNS / Expo push can't do.
+// @Tags         devices
+// @Accept       json
+// @Produce      json
+// @Security     CookieAuth
+// @Param        request  body     RegisterVoIPTokenRequest  true  "PushKit token"
+// @Success      201      {object} VoIPTokenResponse  "Persisted token"
+// @Header       201      {string} X-Request-ID       "Echoed request id"
+// @Failure      400      {object} ErrorResponse      "Malformed JSON"
+// @Failure      401      {object} ErrorResponse      "Not authenticated"
+// @Failure      404      {object} ErrorResponse      "VoIP storage not configured (server-side)"
+// @Failure      413      {object} ErrorResponse      "Request body too large"
+// @Failure      422      {object} ErrorResponse      "Validation failed"
+// @Failure      429      {object} ErrorResponse      "Rate limited"
+// @Failure      500      {object} ErrorResponse      "Internal error"
+// @Router       /v1/devices/voip [post]
+func (h *DeviceHandler) RegisterVoIP(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	var req RegisterVoIPTokenRequest
+	if e := DecodeJSON(r, h.v, &req); e != nil {
+		WriteError(w, r, e)
+		return
+	}
+	tok, err := h.devices.RegisterVoIP(r.Context(), uid, req.VoIPToken)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusCreated, toVoIPTokenResponse(tok))
 }
 
 // Register stores or refreshes the caller's Expo push token.

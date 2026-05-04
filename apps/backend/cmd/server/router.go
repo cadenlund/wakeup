@@ -243,6 +243,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Post("/v1/conversations/{id}/room/join", d.RoomHandler.Join)
 				r.Post("/v1/conversations/{id}/room/leave", d.RoomHandler.Leave)
 				r.Post("/v1/devices", d.DeviceHandler.Register)
+				r.Post("/v1/devices/voip", d.DeviceHandler.RegisterVoIP)
 				r.Delete("/v1/devices/{id}", d.DeviceHandler.Delete)
 				r.Post("/v1/contacts/match", d.ContactsHandler.Match)
 

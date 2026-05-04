@@ -2487,6 +2487,93 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/devices/voip": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Stores (or refreshes) the caller's iOS PushKit token. Idempotent on (user_id, voip_token): re-registering the same token bumps ` + "`" + `last_seen_at` + "`" + `. Required for the §8.6 CallKit incoming-call ring on iOS — Apple's PushKit transport wakes the app from a fully-killed state, which APNS / Expo push can't do.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "devices"
+                ],
+                "summary": "Register an iOS PushKit (VoIP) token",
+                "parameters": [
+                    {
+                        "description": "PushKit token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.RegisterVoIPTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Persisted token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.VoIPTokenResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "VoIP storage not configured (server-side)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/devices/{id}": {
             "delete": {
                 "security": [
@@ -5134,6 +5221,18 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.RegisterVoIPTokenRequest": {
+            "type": "object",
+            "required": [
+                "voip_token"
+            ],
+            "properties": {
+                "voip_token": {
+                    "type": "string",
+                    "example": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+                }
+            }
+        },
         "internal_handler_http.RoomParticipantRow": {
             "type": "object",
             "properties": {
@@ -5382,6 +5481,27 @@ const docTemplate = `{
                 "username": {
                     "type": "string",
                     "example": "caden"
+                }
+            }
+        },
+        "internal_handler_http.VoIPTokenResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "last_seen_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "voip_token": {
+                    "type": "string",
+                    "example": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
                 }
             }
         },
