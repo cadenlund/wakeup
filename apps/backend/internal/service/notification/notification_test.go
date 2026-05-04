@@ -67,6 +67,7 @@ func TestSendOfflinePush_PrefOffIsNoOp(t *testing.T) {
 	err := svc.SendOfflinePush(context.Background(), uuid.New(),
 		notificationpref.CategoryDirectMessages,
 		pushnotif.Notification{Title: "T", Body: "B"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("SendOfflinePush: %v", err)
@@ -94,7 +95,7 @@ func TestSendOfflinePush_PrefOnAndDevicesPushes(t *testing.T) {
 		Title: "Hello", Body: "World", Data: map[string]any{"type": "message"},
 	}
 	if err := svc.SendOfflinePush(context.Background(), uid,
-		notificationpref.CategoryDirectMessages, payload); err != nil {
+		notificationpref.CategoryDirectMessages, payload, nil); err != nil {
 		t.Fatalf("SendOfflinePush: %v", err)
 	}
 
@@ -129,6 +130,7 @@ func TestSendOfflinePush_NoDevicesIsNoErrorAndNoPush(t *testing.T) {
 	if err := svc.SendOfflinePush(context.Background(), uuid.New(),
 		notificationpref.CategoryFriendRequests,
 		pushnotif.Notification{Title: "T", Body: "B"},
+		nil,
 	); err != nil {
 		t.Fatalf("SendOfflinePush: %v", err)
 	}
@@ -149,6 +151,7 @@ func TestSendOfflinePush_ListErrorPropagates(t *testing.T) {
 	err := svc.SendOfflinePush(context.Background(), uuid.New(),
 		notificationpref.CategoryCalls,
 		pushnotif.Notification{Title: "T", Body: "B"},
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected error from ListByUser failure")
@@ -175,6 +178,7 @@ func TestSendOfflinePush_PushErrorWrapsAndReturns(t *testing.T) {
 	err := svc.SendOfflinePush(context.Background(), uuid.New(),
 		notificationpref.CategoryGroupMessages,
 		pushnotif.Notification{Title: "T", Body: "B"},
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected error from Pusher.Send failure")

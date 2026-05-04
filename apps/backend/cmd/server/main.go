@@ -187,8 +187,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("notificationpref service: %w", err)
 	}
+	pushSuppression, err := notifsvc.NewPushSuppression(pool)
+	if err != nil {
+		return fmt.Errorf("push suppression: %w", err)
+	}
 	notificationSvc, err := notifsvc.New(notifsvc.Config{
 		Prefs: notifPrefSvc, Devices: devicesRepo, Pusher: pusher,
+		Suppression: pushSuppression,
 	})
 	if err != nil {
 		return fmt.Errorf("notification service: %w", err)

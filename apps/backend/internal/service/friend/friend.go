@@ -39,9 +39,11 @@ type PresenceLister interface {
 }
 
 // OfflinePusher is the slice of notification.Service this package needs.
-// Same shape as notification.Service.SendOfflinePush.
+// Same shape as notification.Service.SendOfflinePush. The trailing
+// *uuid.UUID is the optional conversation scope — friend requests pass
+// nil because they aren't conversation-scoped (no per-conv mute applies).
 type OfflinePusher interface {
-	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification) error
+	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification, convID *uuid.UUID) error
 }
 
 // Service composes the friendship + user repositories. Goroutine-safe.
@@ -157,7 +159,7 @@ func (s *Service) maybePushFriendRequest(ctx context.Context, f domain.Friendshi
 			"friendship_id": f.ID.String(),
 		},
 	}
-	if err := s.notifications.SendOfflinePush(ctx, f.AddresseeID, notificationpref.CategoryFriendRequests, payload); err != nil {
+	if err := s.notifications.SendOfflinePush(ctx, f.AddresseeID, notificationpref.CategoryFriendRequests, payload, nil); err != nil {
 		s.logger.Warn("friend: offline-push: send",
 			slog.String("addressee_id", f.AddresseeID.String()),
 			slog.String("error", err.Error()),

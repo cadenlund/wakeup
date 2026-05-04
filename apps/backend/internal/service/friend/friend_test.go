@@ -64,7 +64,7 @@ type notifierCall struct {
 	Payload   pushnotif.Notification
 }
 
-func (f *fakeNotifier) SendOfflinePush(_ context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification) error {
+func (f *fakeNotifier) SendOfflinePush(_ context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification, _ *uuid.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, notifierCall{Recipient: recipientID, Category: category, Payload: payload})

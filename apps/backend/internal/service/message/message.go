@@ -46,9 +46,11 @@ type PresenceLister interface {
 
 // OfflinePusher is the slice of notification.Service this package needs.
 // Same shape as notification.Service.SendOfflinePush so the harness wires
-// the real service in directly; tests can stub.
+// the real service in directly; tests can stub. The trailing *uuid.UUID
+// is the conversation scope — message pushes always pass &convID so
+// per-conv mute (§10.2) gates delivery.
 type OfflinePusher interface {
-	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification) error
+	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification, convID *uuid.UUID) error
 }
 
 // Service is the message service.
@@ -254,7 +256,7 @@ func (s *Service) fanOutOfflinePush(ctx context.Context, convID uuid.UUID, creat
 		if ps.Status == domain.PresenceOnline || ps.Status == domain.PresenceAway {
 			continue
 		}
-		if err := s.notifications.SendOfflinePush(ctx, ps.UserID, category, payload); err != nil {
+		if err := s.notifications.SendOfflinePush(ctx, ps.UserID, category, payload, &convID); err != nil {
 			s.logger.Warn("message: offline-push: send",
 				slog.String("recipient_id", ps.UserID.String()),
 				slog.String("category", string(category)),

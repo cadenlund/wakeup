@@ -48,9 +48,12 @@ type PresenceLister interface {
 	ListForUsers(ctx context.Context, ids []uuid.UUID) ([]domain.PresenceState, error)
 }
 
-// OfflinePusher is the slice of notification.Service this package needs.
+// OfflinePusher is the slice of notification.Service this package
+// needs. The trailing *uuid.UUID is the conversation scope — call
+// pushes (room.started) pass &convID so per-conv mute (§10.2) gates
+// delivery.
 type OfflinePusher interface {
-	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification) error
+	SendOfflinePush(ctx context.Context, recipientID uuid.UUID, category notificationpref.Category, payload pushnotif.Notification, convID *uuid.UUID) error
 }
 
 // LiveKitWebhookHandler is the §10.4 unauthenticated POST
@@ -236,7 +239,7 @@ func (h *LiveKitWebhookHandler) fanOutRoomStartedPush(ctx context.Context, convI
 		if ps.Status == domain.PresenceOnline || ps.Status == domain.PresenceAway {
 			continue
 		}
-		if err := h.notifications.SendOfflinePush(ctx, ps.UserID, notificationpref.CategoryCalls, payload); err != nil {
+		if err := h.notifications.SendOfflinePush(ctx, ps.UserID, notificationpref.CategoryCalls, payload, &convID); err != nil {
 			h.logger.Warn("livekit webhook: room_started push: send",
 				slog.String("recipient_id", ps.UserID.String()),
 				slog.String("error", err.Error()),

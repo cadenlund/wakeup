@@ -219,8 +219,13 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build admin service: %v", err)
 	}
+	pushSuppression, err := notifsvc.NewPushSuppression(pool)
+	if err != nil {
+		t.Fatalf("Harness: build push suppression: %v", err)
+	}
 	notificationSvc, err := notifsvc.New(notifsvc.Config{
 		Prefs: notifSvc, Devices: devices, Pusher: pusher,
+		Suppression: pushSuppression,
 	})
 	if err != nil {
 		t.Fatalf("Harness: build notification service: %v", err)
