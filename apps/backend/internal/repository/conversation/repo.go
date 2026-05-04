@@ -82,8 +82,12 @@ SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
 FROM conversations c
 JOIN conversation_members m ON m.conversation_id = c.id
 WHERE m.user_id = $1
-  AND ($2::timestamptz IS NULL OR ($2::timestamptz, $3::uuid) > (c.last_message_at, c.id))
-ORDER BY c.last_message_at DESC, c.id DESC
+  AND ($2::timestamptz IS NULL
+       OR (m.pinned_at IS NULL AND ($2::timestamptz, $3::uuid) > (c.last_message_at, c.id)))
+ORDER BY (m.pinned_at IS NOT NULL) DESC,
+         m.pinned_at DESC NULLS LAST,
+         c.last_message_at DESC,
+         c.id DESC
 LIMIT $4`
 
 const getDirectByPairSQL = `-- name: GetDirectByPair :one

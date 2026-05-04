@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -379,12 +378,7 @@ func (h *ConversationHandler) SetPin(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, e)
 		return
 	}
-	var pinnedAt *time.Time
-	if req.Pinned {
-		now := time.Now()
-		pinnedAt = &now
-	}
-	updated, err := h.convs.SetPin(r.Context(), uid, id, pinnedAt)
+	updated, err := h.convs.SetPin(r.Context(), uid, id, *req.Pinned)
 	if err != nil {
 		WriteError(w, r, err)
 		return

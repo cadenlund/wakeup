@@ -88,8 +88,12 @@ type SetMuteRequest struct {
 
 // SetPinRequest is the body for PATCH /v1/conversations/{id}/pin.
 // Server stamps `pinned_at = now()` when true, NULL when false.
+//
+// `Pinned` is a pointer so we can distinguish an omitted field from an
+// explicit `false`. validator/v10's `required` on a non-pointer bool
+// rejects `false`, which would mean callers couldn't unpin.
 type SetPinRequest struct {
-	Pinned bool `json:"pinned" validate:"required" example:"true"`
+	Pinned *bool `json:"pinned" validate:"required" example:"true"`
 }
 
 // ConversationMemberResponse is the wire shape returned by

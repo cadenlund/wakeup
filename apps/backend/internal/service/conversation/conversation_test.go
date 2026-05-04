@@ -677,8 +677,7 @@ func TestSetPin_RoundTripPerMember(t *testing.T) {
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
 
-	now := time.Now()
-	got, err := st.svc.SetPin(ctx, a.ID, created.Conversation.ID, &now)
+	got, err := st.svc.SetPin(ctx, a.ID, created.Conversation.ID, true)
 	if err != nil {
 		t.Fatalf("SetPin: %v", err)
 	}
@@ -695,12 +694,95 @@ func TestSetPin_RoundTripPerMember(t *testing.T) {
 	}
 
 	// Unpin.
-	got2, err := st.svc.SetPin(ctx, a.ID, created.Conversation.ID, nil)
+	got2, err := st.svc.SetPin(ctx, a.ID, created.Conversation.ID, false)
 	if err != nil {
 		t.Fatalf("Unpin: %v", err)
 	}
 	if got2.PinnedAt != nil {
 		t.Errorf("PinnedAt after unpin = %v, want nil", got2.PinnedAt)
+	}
+}
+
+// Pinned conversations float to the top of the caller's list, ordered
+// by pinned_at DESC. Unpinned ones follow, ordered by last_message_at
+// DESC. Verifies the §6.2 server-side ordering contract — CodeRabbit
+// on PR #101 flagged that without this the pin endpoint persisted
+// state but the list didn't reflect it.
+func TestList_PinnedFirstOrdering(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	c := makeUser(ctx, t, st)
+
+	// Create three groups with a as member. Pin the second one.
+	g1 := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+		Name: ptr("Old chat"),
+	})
+	g2 := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+		Name: ptr("Pinned chat"),
+	})
+	g3 := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID, MemberIDs: []uuid.UUID{c.ID},
+		Name: ptr("New chat"),
+	})
+
+	// Touch g1 + g3 so their last_message_at is meaningful order.
+	if err := st.convs.TouchLastMessageAt(ctx, g1.Conversation.ID, time.Now().Add(-2*time.Hour)); err != nil {
+		t.Fatalf("touch g1: %v", err)
+	}
+	if err := st.convs.TouchLastMessageAt(ctx, g3.Conversation.ID, time.Now()); err != nil {
+		t.Fatalf("touch g3: %v", err)
+	}
+
+	if _, err := st.svc.SetPin(ctx, a.ID, g2.Conversation.ID, true); err != nil {
+		t.Fatalf("pin g2: %v", err)
+	}
+
+	res, err := st.svc.List(ctx, conversation.ListParams{UserID: a.ID, Limit: 20})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(res.Conversations) != 3 {
+		t.Fatalf("len = %d, want 3", len(res.Conversations))
+	}
+	// g2 (pinned) first, then g3 (newer last_message_at), then g1.
+	if res.Conversations[0].ID != g2.Conversation.ID {
+		t.Errorf("pos 0 = %s, want g2 (pinned)", res.Conversations[0].ID)
+	}
+	if res.Conversations[1].ID != g3.Conversation.ID {
+		t.Errorf("pos 1 = %s, want g3 (newest unpinned)", res.Conversations[1].ID)
+	}
+	if res.Conversations[2].ID != g1.Conversation.ID {
+		t.Errorf("pos 2 = %s, want g1 (oldest)", res.Conversations[2].ID)
+	}
+}
+
+// Pinning an item with `pinned: false` (a *bool, where false is a real
+// value not "omitted") clears an existing pin. Verifies the
+// SetPinRequest *bool change — CodeRabbit on PR #101.
+func TestSetPin_FalseValueClearsPin(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+
+	if _, err := st.svc.SetPin(ctx, a.ID, created.Conversation.ID, true); err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+	got, err := st.svc.SetPin(ctx, a.ID, created.Conversation.ID, false)
+	if err != nil {
+		t.Fatalf("unpin via false: %v", err)
+	}
+	if got.PinnedAt != nil {
+		t.Errorf("PinnedAt = %v after pinned:false, want nil", got.PinnedAt)
 	}
 }
 

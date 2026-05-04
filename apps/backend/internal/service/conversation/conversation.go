@@ -422,15 +422,22 @@ func (s *Service) SetMute(ctx context.Context, actor, convID uuid.UUID, mutedUnt
 	return updated, nil
 }
 
-// SetPin toggles the per-member pin marker. pinnedAt = nil unpins; a
-// non-nil timestamp (typically now()) pins. The handler converts the
-// client's `{ pinned: bool }` body into the right pinnedAt value.
-func (s *Service) SetPin(ctx context.Context, actor, convID uuid.UUID, pinnedAt *time.Time) (domain.ConversationMember, error) {
+// SetPin toggles the per-member pin marker. The handler passes a
+// boolean — the service stamps `now()` on pin and clears on unpin so
+// the timestamp policy stays in one place (CodeRabbit on PR #101 —
+// the original handler-side timestamp generation blurred the
+// handler→service boundary).
+func (s *Service) SetPin(ctx context.Context, actor, convID uuid.UUID, pinned bool) (domain.ConversationMember, error) {
 	if _, err := s.convs.GetMember(ctx, convID, actor); err != nil {
 		if errors.Is(err, convrepo.ErrNotFound) {
 			return domain.ConversationMember{}, apierror.NotFound("conversation")
 		}
 		return domain.ConversationMember{}, apierror.Internal("get member").WithCause(err)
+	}
+	var pinnedAt *time.Time
+	if pinned {
+		now := time.Now()
+		pinnedAt = &now
 	}
 	updated, err := s.convs.SetPin(ctx, convID, actor, pinnedAt)
 	if err != nil {
