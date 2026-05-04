@@ -157,6 +157,63 @@ func TestUpdateProfile_PatchesEachField(t *testing.T) {
 	}
 }
 
+func TestUpdateProfile_BioAndStatusEmojiRoundTrip(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	uid := makeUser(t, st)
+
+	bio := "Building things at night."
+	emoji := "🛌"
+	got, err := st.svc.UpdateProfile(context.Background(), user.UpdateProfileParams{
+		UserID:      uid,
+		Bio:         &bio,
+		StatusEmoji: &emoji,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile bio+emoji: %v", err)
+	}
+	if got.Bio == nil || *got.Bio != bio {
+		t.Errorf("Bio = %v, want %q", got.Bio, bio)
+	}
+	if got.StatusEmoji == nil || *got.StatusEmoji != emoji {
+		t.Errorf("StatusEmoji = %v, want %q", got.StatusEmoji, emoji)
+	}
+
+	// Sending nil leaves the existing values alone (COALESCE pattern).
+	newName := "After Bio"
+	got2, err := st.svc.UpdateProfile(context.Background(), user.UpdateProfileParams{
+		UserID:      uid,
+		DisplayName: &newName,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile name only: %v", err)
+	}
+	if got2.Bio == nil || *got2.Bio != bio {
+		t.Errorf("Bio after no-op patch = %v, want unchanged %q", got2.Bio, bio)
+	}
+	if got2.StatusEmoji == nil || *got2.StatusEmoji != emoji {
+		t.Errorf("StatusEmoji after no-op patch = %v, want unchanged %q", got2.StatusEmoji, emoji)
+	}
+
+	// Empty string is a valid stored value (UI hides it but DB allows it
+	// since CHECK is `<= 280` / `<= 8`, not `> 0`).
+	blank := ""
+	got3, err := st.svc.UpdateProfile(context.Background(), user.UpdateProfileParams{
+		UserID:      uid,
+		Bio:         &blank,
+		StatusEmoji: &blank,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile clear: %v", err)
+	}
+	if got3.Bio == nil || *got3.Bio != "" {
+		t.Errorf("Bio after clear = %v, want empty string", got3.Bio)
+	}
+	if got3.StatusEmoji == nil || *got3.StatusEmoji != "" {
+		t.Errorf("StatusEmoji after clear = %v, want empty string", got3.StatusEmoji)
+	}
+}
+
 func TestUpdateProfile_RejectsInvalidColorScheme(t *testing.T) {
 	t.Parallel()
 	st := newStack(t)

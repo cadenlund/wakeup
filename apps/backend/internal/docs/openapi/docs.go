@@ -3472,7 +3472,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Patches ` + "`" + `display_name` + "`" + `, ` + "`" + `avatar_url` + "`" + `, or ` + "`" + `color_scheme` + "`" + `. Each field is optional; nil values are left unchanged.",
+                "description": "Patches ` + "`" + `display_name` + "`" + `, ` + "`" + `avatar_url` + "`" + `, ` + "`" + `color_scheme` + "`" + `, ` + "`" + `bio` + "`" + `, or ` + "`" + `status_emoji` + "`" + `. Each field is optional; omitted (or null) values are left unchanged. Send ` + "`" + `\"\"` + "`" + ` for ` + "`" + `bio` + "`" + `/` + "`" + `status_emoji` + "`" + ` to clear them.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4519,6 +4519,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "https://wakeup.app/avatars/caden.png"
                 },
+                "bio": {
+                    "type": "string",
+                    "example": "Building things at night."
+                },
                 "color_scheme": {
                     "type": "string",
                     "example": "system"
@@ -4545,6 +4549,10 @@ const docTemplate = `{
                 "role": {
                     "type": "string",
                     "example": "user"
+                },
+                "status_emoji": {
+                    "type": "string",
+                    "example": "🛌"
                 },
                 "username": {
                     "type": "string",
@@ -4913,6 +4921,11 @@ const docTemplate = `{
                     "maxLength": 2048,
                     "example": "https://wakeup.app/avatars/caden.png"
                 },
+                "bio": {
+                    "type": "string",
+                    "maxLength": 280,
+                    "example": "Building things at night."
+                },
                 "color_scheme": {
                     "type": "string",
                     "enum": [
@@ -4927,6 +4940,11 @@ const docTemplate = `{
                     "maxLength": 64,
                     "minLength": 1,
                     "example": "Caden Lund"
+                },
+                "status_emoji": {
+                    "type": "string",
+                    "maxLength": 8,
+                    "example": "🛌"
                 }
             }
         },
@@ -4977,6 +4995,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "https://wakeup.app/avatars/caden.png"
                 },
+                "bio": {
+                    "type": "string",
+                    "example": "Building things at night."
+                },
                 "created_at": {
                     "type": "string",
                     "example": "2026-05-02T09:31:21.810Z"
@@ -4988,6 +5010,10 @@ const docTemplate = `{
                 "id": {
                     "type": "string",
                     "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "status_emoji": {
+                    "type": "string",
+                    "example": "🛌"
                 },
                 "username": {
                     "type": "string",

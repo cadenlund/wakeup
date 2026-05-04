@@ -156,7 +156,7 @@ func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 // UpdateMe patches writable fields on the authenticated user.
 //
 // @Summary      Update current user's profile
-// @Description  Patches `display_name`, `avatar_url`, or `color_scheme`. Each field is optional; nil values are left unchanged.
+// @Description  Patches `display_name`, `avatar_url`, `color_scheme`, `bio`, or `status_emoji`. Each field is optional; omitted (or null) values are left unchanged. Send `""` for `bio`/`status_emoji` to clear them.
 // @Tags         users
 // @Accept       json
 // @Produce      json
@@ -187,6 +187,8 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		DisplayName: req.DisplayName,
 		AvatarURL:   req.AvatarURL,
 		ColorScheme: req.ColorScheme,
+		Bio:         req.Bio,
+		StatusEmoji: req.StatusEmoji,
 	})
 	if err != nil {
 		WriteError(w, r, err)

@@ -15,9 +15,15 @@ type CreateParams struct {
 
 // UpdateParams is the input to Queries.Update. Pointer fields use NULL
 // semantics: nil means "don't change," non-nil means "set to this value."
+//
+// Bio + StatusEmoji: empty string is a valid stored value (the UI treats
+// "" the same as "no bio displayed"). Pass nil to leave unchanged; pass
+// a *"" to actively blank the field.
 type UpdateParams struct {
 	ID          uuid.UUID
 	DisplayName *string
 	AvatarURL   *string
 	ColorScheme *string
+	Bio         *string
+	StatusEmoji *string
 }
