@@ -174,10 +174,10 @@ apps/mobile/
 | API client codegen | **Orval** + `openapi-typescript` | Orval reads the openapi-typescript schema, emits typed React Query hooks per endpoint |
 | Local state | **Zustand** | Tiny stores for theme, selected conv, draft text, call state, biometric toggle |
 | Persisted state | **`@react-native-async-storage/async-storage`** + **`expo-secure-store`** | AsyncStorage for non-sensitive prefs; SecureStore (Keychain/Keystore) for anything biometric-locked |
-| Chat UI | **`react-native-gifted-chat`** | Bubble + composer; we customise the renderers, not rebuild them |
-| Voice/video SDK | **`@livekit/react-native`** + **`@livekit/react-native-webrtc`** | Hooks (`useTracks`, `useParticipants`, `useRoomContext`); custom UI on top |
-| Audio routing | **`react-native-incall-manager`** | Speakerphone toggle + proximity sensor for ear-piece mode |
-| Native call UI | **`react-native-callkeep`** | iOS CallKit + Android ConnectionService — incoming call rings/displays from the lock screen, audio session integrates with Siri / Bluetooth / car-play. Required for App Store review of any VoIP app |
+| Chat UI | **`react-native-gifted-chat`** *(dev-client only)* | Bubble + composer; we customise the renderers, not rebuild them. Pulls in `react-native-keyboard-controller` which crashes Expo Go on bundle load (`new NativeEventEmitter()` requires a non-null arg) — added back when the Phase 0.6 dev client lands, alongside Phase 6.1 (conversation thread) |
+| Voice/video SDK | **`@livekit/react-native`** + **`@livekit/react-native-webrtc`** *(dev-client only)* | Hooks (`useTracks`, `useParticipants`, `useRoomContext`); custom UI on top. Native libs not in Expo Go's pre-built module set; added back at Phase 9.1 |
+| Audio routing | **`react-native-incall-manager`** *(dev-client only)* | Speakerphone toggle + proximity sensor for ear-piece mode. Same Expo Go incompatibility — added back at Phase 9.x |
+| Native call UI | **`react-native-callkeep`** *(dev-client only)* | iOS CallKit + Android ConnectionService — incoming call rings/displays from the lock screen, audio session integrates with Siri / Bluetooth / car-play. Required for App Store review of any VoIP app. Same Expo Go incompatibility — added back at Phase 9.x |
 | Push notifications | **`expo-notifications`** | Token registration + foreground/background handlers |
 | Local push categories | **`expo-notifications`** action buttons | Accept/Decline buttons on incoming-call notifications |
 | VoIP push (iOS) | **PushKit** via `react-native-callkeep` config | Wakes the app from a fully-killed state for incoming calls. Standard Expo push tokens don't fire when the app is force-quit |
@@ -1103,6 +1103,7 @@ Every entry below is a YAML file under `.maestro/flows/` (or one level deeper fo
 | `notifications-toggle.yaml` | settings/notifications → toggle "Friend requests" off → assertVisible the disabled state, refetch confirms persisted. |
 | `devices-list.yaml` | settings/devices → seeded token row visible → tap Revoke → row disappears. |
 | `theme-picker.yaml` | settings/theme → tap a non-default scheme swatch → root view re-paints (assertion: scheme name persists in AsyncStorage on relaunch). |
+| `gallery.yaml` | Phase 1.4 only — tab 2 renders Gallery; scheme picker buttons + Buttons + Badges + Card + Input + Switch + SignInForm visible. Replaced when Phase 5.1 ships the conversations tab (this flow is deleted at that milestone). |
 | `privacy-toggle.yaml` | settings/privacy → biometric lock toggle on → lock-after picker reachable → AsyncStorage flag persisted. |
 | `account-edit.yaml` | settings/account → change display name → save → `(tabs)/profile` shows new name. |
 | `delete-account.yaml` | settings/delete-account → confirm → re-enter password → `(auth)/login` visible (Apple-mandated path). |
@@ -1387,16 +1388,16 @@ For every checked milestone in §16:
 1. Read the milestone's spec section.
 2. **Check the relevant Expo skill** (see §15.1 below). The Claude Code session has the `expo:*` plugin installed; consult its skills before writing code that overlaps a documented Expo concern (data fetching, native UI, OTA updates, deployment, widgets, etc.). Skill lookup is free; reinventing what the skill documents is not.
 3. Implement.
-4. Add or extend the Maestro flow.
+4. **Write the Maestro flow IN THE SAME COMMIT/PR.** Every screen-bearing milestone in §16 names its `.maestro/flows/<name>.yaml` — that file is part of the milestone's deliverable, not a follow-up. Use the §12.7 catalog as the assertion checklist. CR's `apps/mobile/.maestro/**` path-instructions enforce this.
 5. Run `just mobile-verify` until clean (type-check + lint).
-6. Run the Maestro flow via the Maestro MCP. Capture screenshots.
+6. **Drive the simulator via the Maestro MCP and confirm the bundle loads + the screen renders.** Use `mcp__maestro__list_devices` → `mcp__maestro__inspect_screen` (or `mcp__maestro__take_screenshot`) to verify there's no Metro runtime error before handing the QR to the operator. Capture screenshots into the PR description. **Asking the operator to do the smoke test the MCP could've done first is a process violation — skipping this step has cost real review cycles.**
 7. Run `just mobile-tunnel` and post the QR code in the conversation. **Stop. Wait for the operator to scan + review on their phone.** Don't proceed without explicit "looks good."
 8. Apply corrections from the operator's review.
 9. Commit with the documented message.
 10. Open PR. Resolve CodeRabbit feedback.
 11. Squash-merge.
 
-Two non-negotiables in this loop: (a) the Expo skill consultation in step 2 — every milestone touches at least one — and (b) the QR-scan review in step 7. Skipping either is a process violation.
+Three non-negotiables in this loop: (a) the Expo skill consultation in step 2 — every milestone touches at least one; (b) the Maestro flow + MCP simulator verification in steps 4 and 6 — the implementer's smoke test happens BEFORE the operator's phone review; (c) the QR-scan review in step 7. Skipping any of the three is a process violation.
 
 ### 15.1 Expo skills cheat-sheet
 
