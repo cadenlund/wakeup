@@ -1,0 +1,56 @@
+name: Mobile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - ".github/workflows/mobile.yml"
+
+# Cancel previous runs of this workflow when a new commit lands on the
+# same branch — keeps the queue short on rebased PRs.
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # conform validates the whole PR commit range, needs full history
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      # Bun's lockfile is the single source of truth; --frozen-lockfile
+      # fails if package.json drifts from bun.lock — exactly what we want
+      # in CI so a forgotten bun install doesn't sneak through.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The Orval-generated hooks land in Phase 2.3. Until then there
+      # are no generated artifacts to validate, so the schema/hooks gen
+      # step is documented here as a TODO rather than a no-op step.
+      # TODO(phase-2.3): just gen-client && bunx orval
+
+      - name: Type-check
+        run: bunx tsc --noEmit
+
+      - name: Lint
+        run: bunx eslint . --max-warnings 0
+
+      - name: Format check
+        run: bunx prettier --check .
+
+      - name: Expo Doctor
+        run: bunx expo-doctor

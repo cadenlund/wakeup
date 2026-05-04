@@ -30,8 +30,12 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files. .env.example is committed as documentation; everything
+# else is treated as a secret-bearing file and stays out of git. Real
+# values go in eas.json profiles (build-time) or EAS Secrets (runtime).
+.env
+.env.*
+!.env.example
 
 # typescript
 *.tsbuildinfo
