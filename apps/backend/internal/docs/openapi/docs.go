@@ -1038,6 +1038,87 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/contacts/match": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Privacy-preserving contacts sync. Client SHA-256s each contact email (` + "`" + `sha256(lower(trim(email)))` + "`" + `), hex-encodes, and POSTs the slice. Server hex-decodes and matches against ` + "`" + `users.email_hash` + "`" + ` (bytea, indexed). Unmatched hashes are not echoed and not logged. Soft-deleted users are excluded. Cap 1000 entries per request — chunk client-side past that.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "contacts"
+                ],
+                "summary": "Match contacts by email hash",
+                "parameters": [
+                    {
+                        "description": "Hashes to look up",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ContactsMatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Matched users (may be empty)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ContactsMatchResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request body too large",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/conversations": {
             "get": {
                 "security": [
@@ -4157,6 +4238,37 @@ const docTemplate = `{
             "properties": {
                 "user": {
                     "$ref": "#/definitions/internal_handler_http.MeResponse"
+                }
+            }
+        },
+        "internal_handler_http.ContactsMatchRequest": {
+            "type": "object",
+            "required": [
+                "email_hashes"
+            ],
+            "properties": {
+                "email_hashes": {
+                    "description": "EmailHashes is a slice of lowercase hex SHA-256 strings (exactly\n64 chars each). Cap: 1000 entries — chunk client-side past that.\nLength check at the validator; lowercase-hex check at the service\n(regex ` + "`" + `/^[0-9a-f]{64}$/` + "`" + `). Two passes keep the malformed-input\nerror path typed (Validation, not Internal).",
+                    "type": "array",
+                    "maxItems": 1000,
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    ]
+                }
+            }
+        },
+        "internal_handler_http.ContactsMatchResponse": {
+            "type": "object",
+            "properties": {
+                "matched": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.UserResponse"
+                    }
                 }
             }
         },

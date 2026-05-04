@@ -7,6 +7,7 @@ package testutil
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -134,9 +135,35 @@ func StartMinIO(t *testing.T) string {
 			return
 		}
 		minioURL = "http://" + url
+		// tcminio.Run waits for the container, but the MinIO process inside
+		// can take another ~second to finish initialization — an early
+		// CreateBucket can hit XMinioServerNotInitialized under heavy
+		// parallel load. Poll /minio/health/live until 200 OK or timeout
+		// before returning so callers see a ready server.
+		minioErr = waitForMinIOReady(minioURL)
 	})
 	if minioErr != nil {
 		t.Fatalf("%v (is Docker running?)", minioErr)
 	}
 	return minioURL
+}
+
+// waitForMinIOReady polls /minio/health/live until 200 OK. The endpoint
+// is documented at https://min.io/docs/minio/linux/operations/monitoring/healthcheck-probe.html
+// and returns 200 only after MinIO has finished initializing — i.e. it's
+// the right gate to clear the XMinioServerNotInitialized error window.
+func waitForMinIOReady(baseURL string) error {
+	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(baseURL + "/minio/health/live")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("StartMinIO: server did not become ready within 30s")
 }

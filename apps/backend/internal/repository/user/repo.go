@@ -131,6 +131,14 @@ SELECT id, username, display_name, email, password_hash, avatar_url, bio, status
 FROM users
 WHERE id = ANY($1::uuid[])`
 
+const matchByEmailHashesSQL = `-- name: MatchByEmailHashes :many
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+FROM users
+WHERE deleted_at IS NULL
+  AND email_hash = ANY(
+      SELECT decode(h, 'hex') FROM unnest($1::text[]) AS h
+  )`
+
 // scanUser decodes one row into domain.User. Centralized so every method
 // uses the same column order — keeps the row-shape promise consistent.
 func scanUser(row pgx.Row) (domain.User, error) {
@@ -339,6 +347,39 @@ func (q *Queries) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]domain.User
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
 		return nil, fmt.Errorf("user: list by ids rows: %w", rowsErr)
+	}
+	return users, nil
+}
+
+// MatchByEmailHashes returns active users whose email's SHA-256 (lower-
+// cased, hex-encoded by the client) appears in `hexHashes`. Each entry
+// must be exactly 64 lowercase hex chars — the service validates the
+// shape so a malformed input fails the whole batch with a typed error
+// rather than reaching `decode` and panicking. Returned users are not
+// in any guaranteed order; the caller maps by ID / hash if order matters.
+//
+// Soft-deleted users are excluded by the partial index condition; an
+// account that's been deleted shouldn't surface in contact-sync results.
+func (q *Queries) MatchByEmailHashes(ctx context.Context, hexHashes []string) ([]domain.User, error) {
+	if len(hexHashes) == 0 {
+		return nil, nil
+	}
+	rows, err := q.db.Query(ctx, matchByEmailHashesSQL, hexHashes)
+	if err != nil {
+		return nil, fmt.Errorf("user: match by email hashes: %w", err)
+	}
+	defer rows.Close()
+
+	users := make([]domain.User, 0, len(hexHashes))
+	for rows.Next() {
+		u, scanErr := scanUser(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("user: match by email hashes scan: %w", scanErr)
+		}
+		users = append(users, u)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, fmt.Errorf("user: match by email hashes rows: %w", rowsErr)
 	}
 	return users, nil
 }

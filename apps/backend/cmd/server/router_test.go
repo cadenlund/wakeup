@@ -19,6 +19,7 @@ import (
 	httpapi "github.com/cadenlund/wakeup/apps/backend/internal/handler/http"
 	wshandler "github.com/cadenlund/wakeup/apps/backend/internal/handler/ws"
 	"github.com/cadenlund/wakeup/apps/backend/internal/ratelimit"
+	contactssvc "github.com/cadenlund/wakeup/apps/backend/internal/service/contacts"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
@@ -88,6 +89,14 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("admin handler: %v", err)
 	}
+	contactsSvc, err := contactssvc.New(contactssvc.Config{Users: h.UserRepo})
+	if err != nil {
+		t.Fatalf("contacts service: %v", err)
+	}
+	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, h.AuthSvc, v)
+	if err != nil {
+		t.Fatalf("contacts handler: %v", err)
+	}
 	livekitWebhookHandler, err := httpapi.NewLiveKitWebhookHandler(
 		h.RoomSvc, h.Broker,
 		lkauth.NewSimpleKeyProvider(testutil.LiveKitDevAPIKey, testutil.LiveKitDevAPISecret),
@@ -136,6 +145,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 		RoomHandler:           roomHandler,
 		DeviceHandler:         deviceHandler,
 		AdminHandler:          adminHandler,
+		ContactsHandler:       contactsHandler,
 		LiveKitWebhookHandler: livekitWebhookHandler,
 		WSHandler:             wsHandler,
 		RateLimitAuth:         rateLimitTier{Scope: "auth" + suffix, Limit: 10000, Window: time.Minute},
