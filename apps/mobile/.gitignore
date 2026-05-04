@@ -30,8 +30,17 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files. .env.example is committed as documentation; everything
+# else is treated as a secret-bearing file and stays out of git. Real
+# values go in eas.json profiles (build-time) or EAS Secrets (runtime).
+.env
+.env.*
+!.env.example
+
+# Play Store service account JSON, referenced by serviceAccountKeyPath
+# in eas.json. Never commit — it's the credentials for production
+# Android submission.
+google-service-account*.json
 
 # typescript
 *.tsbuildinfo

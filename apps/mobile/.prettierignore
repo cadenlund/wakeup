@@ -6,6 +6,7 @@ ios
 android
 bun.lock
 package-lock.json
+expo-env.d.ts
 lib/api/schema.ts
 lib/api/hooks
 .maestro/screenshots

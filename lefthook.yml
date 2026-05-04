@@ -15,6 +15,34 @@ pre-commit:
       # the hook's heavy parallel load. CI runs without -short so
       # full coverage still happens before merge.
       run: cd apps/backend && go test -race -count=1 -short ./...
+    # Mobile mirrors the backend's pre-commit shape: format-on-stage,
+    # lint, type-check. Component tests are NOT run pre-commit — the
+    # suite is small enough that GH Actions (.github/workflows/mobile.yml)
+    # catches them, and pre-commit must stay fast or developers bypass
+    # it. See WAKEUPEXPO.md §13.5a.
+    #
+    # The `root: apps/mobile/` directive scopes {staged_files} to that
+    # subtree AND strips the prefix, so e.g. `apps/mobile/app/foo.tsx`
+    # arrives at the command as just `app/foo.tsx`. Without root, the
+    # `cd apps/mobile && eslint apps/mobile/foo.tsx` form would fail
+    # to resolve the file.
+    mobile-format:
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx,js,jsx,json,md}"
+      run: bunx prettier --write --ignore-path .prettierignore {staged_files}
+      stage_fixed: true
+    mobile-lint:
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx,js,jsx}"
+      run: bunx eslint --max-warnings 0 {staged_files}
+    # Type-check runs over the whole package, not just staged files —
+    # tsc can't safely isolate to one file (a change in foo.ts can
+    # break bar.ts which isn't staged). Fast enough on the current
+    # tree; revisit if it becomes a bottleneck.
+    mobile-tsc:
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx}"
+      run: bunx tsc --noEmit
 
 commit-msg:
   commands:

@@ -47,6 +47,7 @@ module.exports = [
       "web-build/**",
       "ios/**",
       "android/**",
+      "expo-env.d.ts",
       "lib/api/schema.ts",
       "lib/api/hooks/**",
     ],

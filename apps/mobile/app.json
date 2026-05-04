@@ -1,28 +1,80 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "Wakeup",
+    "slug": "wakeup",
+    "scheme": "wakeup",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "icon": "./assets/images/icon.png",
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#FAFAFA"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "app.wakeup.client",
+      "buildNumber": "1",
+      "associatedDomains": ["applinks:wakeup.app"],
+      "infoPlist": {
+        "UIBackgroundModes": ["voip", "audio", "remote-notification"],
+        "NSCameraUsageDescription": "Required to share video on calls.",
+        "NSMicrophoneUsageDescription": "Required to talk on calls.",
+        "NSFaceIDUsageDescription": "Used to unlock the app.",
+        "NSPhotoLibraryUsageDescription": "Used to set your profile picture.",
+        "NSUserTrackingUsageDescription": "We don't track you across other apps; this prompt is required by Apple.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": ["E174.1"]
+          }
+        ]
+      }
     },
     "android": {
+      "package": "app.wakeup.client",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#FAFAFA"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.MANAGE_OWN_CALLS",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "https", "host": "wakeup.app", "pathPrefix": "/" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -31,12 +83,18 @@
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
+      ["expo-local-authentication", { "faceIDPermission": "Used to unlock the app." }],
+      ["expo-image-picker", { "photosPermission": "Used to set your profile picture." }],
       "expo-secure-store",
-      "@sentry/react-native",
-      "expo-tracking-transparency"
+      "expo-tracking-transparency",
+      ["@sentry/react-native/expo", { "organization": "wakeup", "project": "mobile" }],
+      "@livekit/react-native-expo-plugin",
+      ["react-native-android-widget", { "widgets": [] }]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "runtimeVersion": { "policy": "appVersion" }
   }
 }

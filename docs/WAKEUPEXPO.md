@@ -1253,6 +1253,34 @@ mobile-verify: mobile-gen-hooks
     cd apps/mobile && bunx eslint . --max-warnings 0
 ```
 
+### 13.5a Lefthook pre-commit additions
+
+`lefthook.yml` already runs `gofmt` + `golangci-lint` + `go test` on staged Go files. The mobile package gets the same shape so a bad commit is caught locally before CI:
+
+```yaml
+pre-commit:
+  parallel: true
+  commands:
+    # ... (existing Go entries) ...
+    mobile-format:
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx,js,jsx,json,md}"
+      run: bunx prettier --write --ignore-path .prettierignore {staged_files}
+      stage_fixed: true
+    mobile-lint:
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx,js,jsx}"
+      run: bunx eslint --max-warnings 0 {staged_files}
+    mobile-tsc:
+      root: "apps/mobile/"
+      glob: "**/*.{ts,tsx}"
+      run: bunx tsc --noEmit
+```
+
+`root: apps/mobile/` scopes `{staged_files}` to that subtree AND strips the prefix, so `apps/mobile/app/foo.tsx` arrives at the command as just `app/foo.tsx`. Without `root`, the `cd apps/mobile && eslint apps/mobile/foo.tsx` form fails to resolve the file.
+
+Component tests run in CI only — the jest-expo suite is small enough that the latency hit on every commit isn't worth the catch rate, and a slow pre-commit hook gets bypassed (`--no-verify`) which defeats the point. The §13.7 GitHub Actions workflow runs the full battery (tsc + eslint + prettier --check + expo-doctor) on every push to `main` and every PR.
+
 ### 13.6 EAS Update channels
 
 - `production` → `eas update --channel=production` after every commit to `main`.
