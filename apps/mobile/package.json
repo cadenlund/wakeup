@@ -50,6 +50,7 @@
     "react-native-gesture-handler": "~2.28.0",
     "react-native-gifted-chat": "^3.3.2",
     "react-native-incall-manager": "^4.2.1",
+    "react-native-keyboard-controller": "1.18.5",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
@@ -66,11 +67,21 @@
     "eslint-config-expo": "~10.0.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
-    "jest-expo": "^55.0.16",
+    "jest-expo": "~54.0.17",
     "openapi-typescript": "^7.13.0",
     "orval": "^8.9.1",
     "prettier": "^3.8.3",
     "typescript": "~5.9.2"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-callkeep",
+          "react-native-incall-manager"
+        ]
+      }
+    }
   },
   "private": true
 }
