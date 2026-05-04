@@ -19,5 +19,48 @@ reviews:
     - path: "apps/backend/internal/{argon2id,session,apierror,pagination,ratelimit,pubsub,mailer,pushnotif,objectstore,wsproto}/**"
       instructions: |
         These are utility packages. They must not import from internal/repository, internal/service, internal/handler, or internal/middleware.
+    - path: "apps/mobile/**"
+      instructions: |
+        Mobile is an Expo + Expo Router + NativeWind v5 app per docs/WAKEUPEXPO.md.
+        The locked tech stack lives in WAKEUPEXPO.md §3 — do not propose libraries
+        outside that list (no axios, no styled-components, no Redux, no swr).
+
+        Hard rules CodeRabbit must enforce:
+          1. NEVER hand-roll fetch calls against /v1/*. Every API call must route
+             through the Orval-generated React Query hook (or a thin wrapper around
+             one). Bypassing the wrapper bypasses idempotency, auth, and toasts.
+          2. Mutations MUST attach an Idempotency-Key (UUID v7) via lib/api/idempotency.ts.
+             Retried mutations reuse the SAME key.
+          3. Auth is cookie-only via scs (`credentials: 'include'`). Reject any code
+             that reads, copies, or sends a Bearer token, or stores the session
+             cookie content.
+          4. NO Go inside apps/mobile/ — it's TypeScript only. The TS API client is
+             generated from the backend's swagger.json via openapi-typescript + Orval.
+          5. Sensitive data goes in expo-secure-store, not AsyncStorage. Theme,
+             biometric toggle, last-seen timestamps go in AsyncStorage.
+          6. Every screen needs a Maestro flow under .maestro/flows/. Flag missing
+             coverage on any new route added under app/.
+          7. Push registration writes via POST /v1/devices (Expo) and
+             POST /v1/devices/voip (PushKit, iOS only). DO NOT register Expo tokens
+             through any path other than lib/push/register.ts.
+          8. WS dispatch lives in lib/ws/dispatcher.ts only — components never
+             subscribe to the WebSocket directly. Every event documented in
+             WAKEUP.md §7.2 must be handled there.
+          9. RNR components are copy-in (components/themed/) — flag any attempt to
+             npm-install RNR as a runtime dependency.
+         10. expo-image is the project's image component — flag any use of
+             react-native's <Image> for avatars / attachments.
+    - path: "apps/mobile/lib/api/**"
+      instructions: |
+        Generated artifacts (schema.ts, hooks/*.ts) are produced by `just gen-client`
+        and `just mobile-gen-hooks` — do not hand-edit. Editing them is a sign the
+        backend's swagger annotation needs the fix instead.
+    - path: "apps/mobile/.maestro/**"
+      instructions: |
+        Maestro flow files are YAML. Each flow file targets exactly one user-visible
+        outcome (e.g. "send a message", "join a call"). Cross-flow dependencies go
+        through `runFlow:` includes, not by chaining unrelated assertions in one file.
+        Every flow ends with at least one `assertVisible:` so a silent failure shows
+        up in CI.
 chat:
   auto_reply: true

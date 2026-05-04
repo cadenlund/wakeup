@@ -1010,6 +1010,79 @@ The Maestro MCP (`@mobile-dev-inc/maestro-mcp`) is installed at the start of Pha
 
 The MCP only drives the iOS Simulator / Android Emulator — it does NOT drive Expo Go on a physical device. That's the operator's job via the QR code.
 
+### 12.7 Flow catalog (v1)
+
+Every entry below is a YAML file under `.maestro/flows/` (or one level deeper for shared sub-flows). The implementer creates the file the first time the matching milestone in §16 is touched. CI fails if a screen in §5.1 has no flow file.
+
+**Shared sub-flows** (used by every screen-level flow via `runFlow:`):
+
+| File | What it does |
+|---|---|
+| `flows/_shared/login.yaml` | `clearState: true` + tap email field + type seeded test user creds + tap Submit + assert `(tabs)/index` is visible. Every authenticated flow starts with this. |
+| `flows/_shared/register.yaml` | New-account flow. Used by `auth-register.yaml` directly and seeded into per-test-suite cleanup. |
+| `flows/_shared/seed-friend.yaml` | Logs in, navigates to Friends, sends a request to a second seeded user. Required by every flow that needs an existing friendship (DM auto-create, conversation create, presence assertions). |
+| `flows/_shared/seed-conversation.yaml` | Logs in and creates a direct conversation with the seeded peer. Required by `conversation-thread.yaml` and onward. |
+
+**Per-screen flows** (one per `.tsx` route in §5.1):
+
+| File | Asserts |
+|---|---|
+| `auth-login.yaml` | login form submits → tab bar visible. |
+| `auth-register.yaml` | register form submits → tab bar visible. |
+| `auth-forgot-password.yaml` | enter email → "Check your email" copy visible. |
+| `auth-reset-password.yaml` | deep-link from URL with token + form submits → login screen visible. |
+| `conversations-empty.yaml` | fresh user → "No conversations yet" copy visible. |
+| `conversations-list.yaml` | seed two conversations → both rows render in `last_message_at` order. |
+| `conv-pin-mute.yaml` | long-press a row → pin toggles (row floats to top); mute opens sheet → 1hr selection updates row badge. |
+| `conversation-create.yaml` | "+" button → multi-select two friends + group name → `(tabs)/index` shows new row. |
+| `conversation-thread.yaml` | open existing conversation → message list renders with two seeded messages, newest at the bottom. |
+| `conversation-send.yaml` | type body → tap send → message appears optimistically → still present after a 2s wait (round-trip succeeded). |
+| `group-info.yaml` | open group conversation → tap header → member list shows seeded admin + member. |
+| `group-add-member.yaml` | as admin, tap Add Member → multi-select friend → member appears in list. |
+| `group-leave.yaml` | tap Leave Group → confirm sheet → conversation removed from `(tabs)/index`. |
+| `friends-empty.yaml` | fresh user → "Find your friends" empty state visible. |
+| `friends-list.yaml` | seed accepted friend → row renders with display name + presence dot. |
+| `friends-add.yaml` | search by username → request sent → "Request sent" toast visible. |
+| `friends-accept.yaml` | inbound request row → tap Accept → row promotes to friends list. |
+| `friends-decline.yaml` | inbound request row → tap Decline → row disappears. |
+| `friends-block.yaml` | friend row context menu → Block → row gone from friends, present on `settings/blocked`. |
+| `friends-unblock.yaml` | `settings/blocked` → tap Unblock → row gone. |
+| `presence-set.yaml` | profile tab → long-press avatar → choose DND → red dot + "Do Not Disturb" caption render. |
+| `notifications-toggle.yaml` | settings/notifications → toggle "Friend requests" off → assertVisible the disabled state, refetch confirms persisted. |
+| `devices-list.yaml` | settings/devices → seeded token row visible → tap Revoke → row disappears. |
+| `theme-picker.yaml` | settings/theme → tap a non-default scheme swatch → root view re-paints (assertion: scheme name persists in AsyncStorage on relaunch). |
+| `account-edit.yaml` | settings/account → change display name → save → `(tabs)/profile` shows new name. |
+| `account-delete.yaml` | settings/account → Delete → confirm → re-enter password → `(auth)/login` visible. |
+| `account-logout.yaml` | settings/account → Logout → `(auth)/login` visible + cookie cleared (re-launching does not auto-auth). |
+| `profile-edit.yaml` | settings/profile-edit → bio + status emoji → save → profile renders both. |
+| `search.yaml` | type "wak" in search modal → users / conversations / messages results all render. |
+| `event-banner.yaml` | seeded WS message arrives while not on conversation screen → banner appears → tap → routes to thread. |
+| `force-upgrade.yaml` | mock `/v1/healthz` → set `min_client_version` ahead of `expoConfig.version` → blocking modal appears + cannot dismiss. |
+| `network-banner.yaml` | toggle airplane mode (Maestro `setAirplaneMode`) → `<NetworkBanner>` appears within 1s. |
+| `admin-list.yaml` | seeded admin → admin tab → user list visible. |
+| `admin-user-detail.yaml` | tap a user row → role/lock fields visible + impersonate button enabled. |
+| `admin-impersonate-start-end.yaml` | start impersonation → `<ImpersonationBanner>` visible (driven by `impersonated_by` on `GET /v1/auth/me`) → End → banner gone. |
+| `admin-audit.yaml` | audit tab → seeded action rows render with actor / action / target / timestamp. |
+
+**Call flows** (require LiveKit container; gated behind `MAESTRO_LIVEKIT=1`):
+
+| File | Asserts |
+|---|---|
+| `call-incoming-ring.yaml` | seeded WS `room.started` → CallKit / Android-equivalent ring → tap Accept → `<CallOverlay>` visible. |
+| `call-toggle-video.yaml` | in active call → tap camera → tile shows video; tap again → back to avatar. |
+| `call-pip.yaml` | navigate away from call → corner bubble snaps in; tap → returns to full overlay. |
+| `call-decline.yaml` | incoming ring → tap Decline → ring stops, no overlay. |
+
+Each flow file ends with at least one `assertVisible:` so a silent failure is caught by `bunx maestro test .maestro/`. Screenshots are taken at the final assertion point and uploaded to the PR by the per-milestone CI workflow (§13.7).
+
+### 12.8 Flow assertion conventions
+
+- **`assertVisible: "literal text"`** is preferred over `assertVisible: { id: "test-id" }` — the literal text is what the operator sees on the QR review, so the flow asserts the same thing.
+- **`tapOn:` uses accessibility labels**, not test ids. Every interactive element has `accessibilityLabel` set in JSX (`<Button accessibilityLabel="Send" />`); flows tap the label. This survives copy edits worse than hard-coded strings, but it pays back during the §10 accessibility audit because the labels are already there.
+- **Time-sensitive checks use `extendedWaitUntil:` with a generous timeout** (10s default). The operator's network is sometimes slow on cell — flaky flows are worse than slow flows.
+- **State pollution between flows is forbidden.** `clearState: true` runs at the top of every screen-level flow. Sub-flows don't clear state; their parents do. Cross-flow seeds go through API setup, not by chaining UI flows.
+- **Screenshots go in `.maestro/screenshots/<flow-name>/`** and are committed alongside the flow. CI compares the latest screenshot to the committed one and posts the diff in the PR — operator-visible regressions get caught at review time, not in the wild.
+
 ---
 
 ## 13. Tooling & config
