@@ -64,6 +64,7 @@ import (
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
 	roomsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/room"
+	searchsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/search"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 )
@@ -347,6 +348,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("contacts handler: %w", err)
 	}
+	searchSvc, err := searchsvc.New(searchsvc.Config{
+		Users: userSvc, Convs: convsRepo, Msgs: msgsRepo,
+	})
+	if err != nil {
+		return fmt.Errorf("search service: %w", err)
+	}
+	searchHandler, err := httpapi.NewSearchHandler(searchSvc, authSvc, v)
+	if err != nil {
+		return fmt.Errorf("search handler: %w", err)
+	}
 	livekitWebhookHandler, err := httpapi.NewLiveKitWebhookHandler(
 		roomSvc, broker,
 		lkauth.NewSimpleKeyProvider(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret),
@@ -412,6 +423,7 @@ func run() error {
 		DeviceHandler:         deviceHandler,
 		AdminHandler:          adminHandler,
 		ContactsHandler:       contactsHandler,
+		SearchHandler:         searchHandler,
 		LiveKitWebhookHandler: livekitWebhookHandler,
 		WSHandler:             wsHandler,
 	}

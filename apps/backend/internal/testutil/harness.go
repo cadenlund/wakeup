@@ -60,6 +60,7 @@ import (
 	notifprefsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
 	presencesvc "github.com/cadenlund/wakeup/apps/backend/internal/service/presence"
 	roomsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/room"
+	searchsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/search"
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/session"
 )
@@ -324,6 +325,16 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build contacts handler: %v", err)
 	}
+	searchSvc, err := searchsvc.New(searchsvc.Config{
+		Users: userSvc, Convs: convs, Msgs: msgs,
+	})
+	if err != nil {
+		t.Fatalf("Harness: build search service: %v", err)
+	}
+	searchHandler, err := httpapi.NewSearchHandler(searchSvc, authSvc, v)
+	if err != nil {
+		t.Fatalf("Harness: build search handler: %v", err)
+	}
 
 	// §8 WebSocket: build hub + bridge + upgrade handler so harness
 	// users can dial /v1/ws like any other route. The bridge owns one
@@ -360,6 +371,7 @@ func New(t *testing.T) *Harness {
 	roomHandler.Mount(router)
 	deviceHandler.Mount(router)
 	contactsHandler.Mount(router)
+	searchHandler.Mount(router)
 	// Admin routes are gated by RequireAdmin so non-admin sessions hit
 	// 403 just like in production. Mount the handler under a sub-router
 	// that wraps every /v1/admin/* path.

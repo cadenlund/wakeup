@@ -90,6 +90,17 @@ ORDER BY (m.pinned_at IS NOT NULL) DESC,
          c.id DESC
 LIMIT $4`
 
+const searchByUserAndNameSQL = `-- name: SearchByUserAndName :many
+SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
+       c.created_at, c.updated_at, c.last_message_at
+FROM conversations c
+JOIN conversation_members m ON m.conversation_id = c.id
+WHERE m.user_id = $1
+  AND c.type = 'group'
+  AND c.name ILIKE '%' || $2::text || '%'
+ORDER BY c.last_message_at DESC, c.id DESC
+LIMIT $3`
+
 const getDirectByPairSQL = `-- name: GetDirectByPair :one
 SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
@@ -278,6 +289,33 @@ func (q *Queries) ListConversationsByUser(ctx context.Context, userID uuid.UUID,
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
 		return nil, fmt.Errorf("conversation: list by user rows: %w", rowsErr)
+	}
+	return out, nil
+}
+
+// SearchByUserAndName returns up to limit group conversations the user
+// is a member of whose name contains the query (case-insensitive). Used
+// by GET /v1/search (mobile §5.1 global search). Direct conversations
+// have no name and are excluded.
+func (q *Queries) SearchByUserAndName(ctx context.Context, userID uuid.UUID, query string, limit int) ([]domain.Conversation, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := q.db.Query(ctx, searchByUserAndNameSQL, userID, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("conversation: search by name: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Conversation
+	for rows.Next() {
+		c, scanErr := scanConversation(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("conversation: search scan: %w", scanErr)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("conversation: search rows: %w", err)
 	}
 	return out, nil
 }

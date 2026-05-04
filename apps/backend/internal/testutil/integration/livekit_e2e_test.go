@@ -72,6 +72,14 @@ func joinRoom(t *testing.T, h *testutil.Harness, c *http.Client, convID string, 
 // backlog — a per-test LiveKit container with a per-test config
 // file is the simplest path forward and is left for a follow-up.
 func TestLiveKit_EndToEnd(t *testing.T) {
+	// ICE candidate negotiation goes out to public STUN servers and is
+	// flaky under heavy parallel test load (the lefthook full-suite run
+	// reliably reproduces it). Skip under `go test -short` so the local
+	// pre-commit hook stays deterministic; CI runs without `-short` and
+	// gets the full coverage.
+	if testing.Short() {
+		t.Skip("livekit e2e: skipping under -short (run without -short in CI)")
+	}
 	t.Parallel()
 	h := testutil.New(t)
 	env := testutil.StartLiveKit(t, "")

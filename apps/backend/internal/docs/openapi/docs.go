@@ -3846,6 +3846,78 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/search": {
+            "get": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Searches across friends (username/display_name trigram), group conversations (name substring), and messages (body full-text). The optional ` + "`" + `types` + "`" + ` query param caps the search to a comma-joined subset (` + "`" + `users` + "`" + `, ` + "`" + `conversations` + "`" + `, ` + "`" + `messages` + "`" + `); empty = all. Each section is hard-capped at 10 results so the mobile global-search modal renders fast — drill-downs use the per-section endpoints. Min query length: 2.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "Unified search",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"wake\"",
+                        "description": "Search query (min 2 chars)",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"users,conversations,messages\"",
+                        "description": "Comma-joined sections to include",
+                        "name": "types",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Up to 10 hits per section",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.SearchResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed (q too short, unknown type)",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/users": {
             "get": {
                 "security": [
@@ -5448,6 +5520,79 @@ const docTemplate = `{
                 "started_at": {
                     "type": "string",
                     "example": "2026-05-02T10:42:55.412Z"
+                }
+            }
+        },
+        "internal_handler_http.SearchConversationRow": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string",
+                    "example": "https://wakeup.app/avatars/group.png"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "last_message_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Wakeup Crew"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "group"
+                }
+            }
+        },
+        "internal_handler_http.SearchMessageRow": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "example": "hey what time are we meeting?"
+                },
+                "conversation_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "sender_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
+        "internal_handler_http.SearchResponse": {
+            "type": "object",
+            "properties": {
+                "conversations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.SearchConversationRow"
+                    }
+                },
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.SearchMessageRow"
+                    }
+                },
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_http.UserResponse"
+                    }
                 }
             }
         },

@@ -74,6 +74,7 @@ type routerDeps struct {
 	DeviceHandler         *httpapi.DeviceHandler
 	AdminHandler          *httpapi.AdminHandler
 	ContactsHandler       *httpapi.ContactsHandler
+	SearchHandler         *httpapi.SearchHandler
 	LiveKitWebhookHandler *httpapi.LiveKitWebhookHandler
 	WSHandler             *wshandler.Handler
 
@@ -122,7 +123,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 	if d.Cfg == nil || d.Logger == nil || d.Pool == nil || d.Redis == nil ||
 		d.Sessions == nil || d.Limiter == nil ||
 		d.UserSvc == nil || d.AuthSvc == nil || d.NotifPrefSvc == nil || d.FriendSvc == nil || d.ConvSvc == nil || d.MsgSvc == nil || d.AttSvc == nil || d.PresenceSvc == nil || d.RoomSvc == nil || d.DeviceSvc == nil || d.AdminSvc == nil || d.IdempotencyRepo == nil ||
-		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.DeviceHandler == nil || d.AdminHandler == nil || d.ContactsHandler == nil || d.LiveKitWebhookHandler == nil || d.WSHandler == nil {
+		d.UserHandler == nil || d.AuthHandler == nil || d.FriendHandler == nil || d.ConversationHandler == nil || d.MessageHandler == nil || d.AttachmentHandler == nil || d.PresenceHandler == nil || d.RoomHandler == nil || d.DeviceHandler == nil || d.AdminHandler == nil || d.ContactsHandler == nil || d.SearchHandler == nil || d.LiveKitWebhookHandler == nil || d.WSHandler == nil {
 		return nil, errors.New("buildRouter: all routerDeps fields are required")
 	}
 
@@ -289,6 +290,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Get("/v1/presence/friends", d.PresenceHandler.ListFriendsPresence)
 				r.Get("/v1/widget/friends", d.PresenceHandler.WidgetFriends)
 				r.Get("/v1/conversations/{id}/room", d.RoomHandler.Get)
+				r.Get("/v1/search", d.SearchHandler.Search)
 				r.Get("/v1/devices", d.DeviceHandler.List)
 				r.Get("/v1/blocks", d.FriendHandler.ListBlocks)
 				r.Get("/v1/ws", d.WSHandler.Upgrade)
