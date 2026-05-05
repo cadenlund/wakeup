@@ -50,10 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      # Backend env (matches .env.example dev defaults). The Android
-      # emulator reaches the host backend at 10.0.2.2; the Go server
-      # itself binds 0.0.0.0:8080.
-      ENV: development
+      # ENV=test flips buildMailer / buildPusher / buildSentry into
+      # noop mode when their integration creds (RESEND_API_KEY,
+      # EXPO_ACCESS_TOKEN, SENTRY_DSN) are blank — so the suite never
+      # sends a real email, push, or Sentry event no matter what the
+      # flow exercises.
+      ENV: test
       HTTP_ADDR: ":8080"
       DATABASE_URL: postgres://wakeup:wakeup@localhost:5432/wakeup?sslmode=disable
       REDIS_URL: redis://localhost:6379/0
@@ -65,13 +67,6 @@ jobs:
       S3_FORCE_PATH_STYLE: "true"
       LOG_LEVEL: info
       SESSION_SECRET: ci-only-not-secret-32bytes-long-padding
-      # Reset password URL — the flow uses the wakeup://reset deep
-      # link in dev; mailer skipped at this layer because the flow
-      # only walks the form, doesn't redeem a real token.
-      RESET_PASSWORD_APP_URL_BASE: "wakeup://reset?token="
-      RESET_PASSWORD_WEB_URL_BASE: "http://localhost:8081/reset?token="
-      RESEND_API_KEY: ci-stub
-      RESEND_FROM_EMAIL: "no-reply@wakeup.test"
 
     steps:
       - uses: actions/checkout@v4
