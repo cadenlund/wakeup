@@ -1,7 +1,9 @@
 // Login screen (Phase 3.1). Username-or-email + password → POST
-// /v1/auth/login. The backend sets an scs cookie on success;
-// `useGetV1AuthMe` refetch in onSuccess re-resolves the auth gate
-// and the router pushes us into (tabs).
+// /v1/auth/login. The backend sets an scs cookie on success.
+// onSuccess primes the me-query cache from the response envelope, then
+// imperatively routes to the next group based on `onboarded_at`. The
+// cache prime ensures Stack.Protected's guards have flipped by the
+// time the navigation lands, so the user doesn't bounce.
 import { Link, useRouter } from 'expo-router';
 import { Moon } from 'lucide-react-native';
 import * as React from 'react';
@@ -31,19 +33,19 @@ export default function LoginScreen() {
     mutation: {
       onSuccess: async (response) => {
         haptics.success();
-        // Login envelope is `{ user: MeResponse }`; we don't push
-        // it directly (the orval response shape is the wrapped
-        // `{data, status, headers}` envelope at the type layer, but
-        // apiFetch returns the unwrapped body). Instead we surface
-        // the embedded user object into the me-query cache so
-        // AuthGate observes `onboarded_at` synchronously and skips
-        // the onboarding carousel for already-onboarded accounts.
+        // Login envelope is `{ user: MeResponse }`; orval types it as
+        // the wrapped `{data, status, headers}` envelope but apiFetch
+        // returns the unwrapped body. Prime the me-query cache so the
+        // root layout's auth state flips synchronously, then await the
+        // canonical /me refetch before navigating — by the time we
+        // call router.replace the (tabs) / (onboarding) guard is true,
+        // so Stack.Protected accepts the new route instead of bouncing.
         const body = response as unknown as { user?: { id?: string; onboarded_at?: string } };
         if (body?.user?.id) {
           qc.setQueryData(getGetV1AuthMeQueryKey(), body.user);
         }
         await qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        router.replace('/(tabs)');
+        router.replace(body?.user?.onboarded_at ? '/(tabs)' : '/(onboarding)');
       },
     },
   });

@@ -1,4 +1,4 @@
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import { LogOut } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable } from 'react-native';
@@ -14,12 +14,19 @@ export default function TabLayout() {
 
   // Temporary in-app logout for end-to-end testing of the auth +
   // onboarding flow. Real settings/logout UX lands in Phase 6.
+  //
+  // `removeQueries` (not `invalidateQueries`) is required — the auth-
+  // gate hook trusts cached `me` over a transient error so a 401
+  // refetch alone wouldn't flip `isAuthenticated` to false. After the
+  // cache is cleared we route to /login imperatively; Stack.Protected
+  // wouldn't redirect reliably from inside (tabs) on its own.
   const qc = useQueryClient();
+  const router = useRouter();
   const logout = usePostV1AuthLogout({
     mutation: {
-      onSettled: async () => {
-        await qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        // AuthGate sees the 401-shaped me result and bounces to /login.
+      onSettled: () => {
+        qc.removeQueries({ queryKey: getGetV1AuthMeQueryKey() });
+        router.replace('/login');
       },
     },
   });

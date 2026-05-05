@@ -16,6 +16,7 @@ import { FieldError } from '@/components/ui/field-error';
 import { Label } from '@/components/ui/label';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Text } from '@/components/ui/text';
+import { APIError } from '@/lib/api/client';
 import { usePostV1AuthPasswordResetConfirm } from '@/lib/api/hooks/auth/auth';
 import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
 import { haptics } from '@/lib/haptics';
@@ -38,6 +39,19 @@ export default function ResetScreen() {
         haptics.success();
         toast.success('Password reset', 'Sign in with your new password.');
         router.replace('/login');
+      },
+      onError: (err) => {
+        // Expired tokens are dead — no useful retry on this screen.
+        // Route the user back to /login. The global mutation toast
+        // (lib/api/query-client.ts) shows the backend's "Reset link
+        // has expired…" message; we add a haptic + reroute on top.
+        // Other 4xx (bad token, used) and network errors fall through
+        // to the inline `topError` text below.
+        const msg = err instanceof APIError ? (err.body?.message ?? '') : '';
+        if (/expired/i.test(msg)) {
+          haptics.warning();
+          router.replace('/login');
+        }
       },
     },
   });

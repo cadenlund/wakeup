@@ -490,26 +490,44 @@ func run() error {
 // production) a missing key is a startup error — silently no-op'ing
 // would turn a bad secret rollout into a silent password-reset outage
 // (CodeRabbit caught this on PR #28).
+//
+// The two reset-link bases (app deep link, browser URL) default to the
+// local-dev values in `local`/`test`. In any other env both are required
+// — there is no production fallback because every deployment owns its
+// own domain and bundle id, and a wrong default would silently email
+// links that point nowhere we control.
 func buildMailer(cfg *config.Config) (mailer.Mailer, error) {
+	isDev := cfg.Env == "local" || cfg.Env == "test"
+
 	if cfg.ResendAPIKey == "" {
-		switch cfg.Env {
-		case "local", "test":
+		if isDev {
 			return noopMailer{}, nil
-		default:
-			return nil, fmt.Errorf("mailer: RESEND_API_KEY is required in env=%s", cfg.Env)
 		}
+		return nil, fmt.Errorf("mailer: RESEND_API_KEY is required in env=%s", cfg.Env)
 	}
-	resetURL := cfg.ResetPasswordURLBase
-	if resetURL == "" {
-		// Production default. Local dev should set
-		// RESET_PASSWORD_URL_BASE in .env (e.g. wakeup://reset?token=)
-		// so the email link deep-links into the dev client.
-		resetURL = "https://wakeup.app/auth/reset?token="
+
+	appURL := cfg.ResetPasswordAppURLBase
+	webURL := cfg.ResetPasswordWebURLBase
+	if isDev {
+		if appURL == "" {
+			// Mobile scheme is "wakeup" (apps/mobile/app.json); reset.tsx
+			// reads the token via useLocalSearchParams.
+			appURL = "wakeup://reset?token="
+		}
+		if webURL == "" {
+			// Expo Router web defaults to :8081 and serves the (auth)/reset
+			// route at /reset.
+			webURL = "http://localhost:8081/reset?token="
+		}
+	} else if appURL == "" || webURL == "" {
+		return nil, fmt.Errorf("mailer: RESET_PASSWORD_APP_URL_BASE and RESET_PASSWORD_WEB_URL_BASE are required in env=%s", cfg.Env)
 	}
+
 	return mailer.New(mailer.Config{
-		APIKey:       cfg.ResendAPIKey,
-		FromEmail:    cfg.ResendFromEmail,
-		ResetURLBase: resetURL,
+		APIKey:          cfg.ResendAPIKey,
+		FromEmail:       cfg.ResendFromEmail,
+		ResetAppURLBase: appURL,
+		ResetWebURLBase: webURL,
 	})
 }
 

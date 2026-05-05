@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,14 +17,18 @@ import (
 
 // makeUser inserts a user via direct SQL. The user repository's MakeUser
 // fixture isn't reachable from here without a circular import; raw SQL is
-// fine for fixture data.
+// fine for fixture data. Uses the bare UUID hex for the username —
+// UUIDv7 timestamps can collide on the leading bytes when generated
+// within the same millisecond, which broke a multi-user test that took
+// an 8-char prefix.
 func makeUser(ctx context.Context, t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	id := uuid.Must(uuid.NewV7())
+	suffix := strings.ReplaceAll(id.String(), "-", "")
 	_, err := pool.Exec(ctx, `
 		INSERT INTO users (id, username, display_name, email, password_hash)
 		VALUES ($1, $2, 'T', $3, 'h')
-	`, id, "u_"+id.String()[:8], id.String()+"@x.test")
+	`, id, "u_"+suffix, id.String()+"@x.test")
 	if err != nil {
 		t.Fatalf("makeUser: %v", err)
 	}
@@ -57,7 +62,7 @@ func TestCreate_Get_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestGet_ExpiredReturnsErrNotFound(t *testing.T) {
+func TestGet_ExpiredReturnsErrExpired(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pool := testutil.NewTestDB(t)
@@ -68,8 +73,60 @@ func TestGet_ExpiredReturnsErrNotFound(t *testing.T) {
 	if err := repo.Create(ctx, h, uid, time.Now().UTC().Add(-time.Hour)); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := repo.Get(ctx, h); !errors.Is(err, passwordreset.ErrNotFound) {
-		t.Fatalf("expected ErrNotFound, got %v", err)
+	if _, err := repo.Get(ctx, h); !errors.Is(err, passwordreset.ErrExpired) {
+		t.Fatalf("expected ErrExpired, got %v", err)
+	}
+}
+
+func TestGet_MissingReturnsErrNotFound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := passwordreset.New(pool)
+	if _, err := repo.Get(ctx, hash("never-created")); !errors.Is(err, passwordreset.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing row, got %v", err)
+	}
+}
+
+func TestMarkAllUsedForUser_InvalidatesPreviousTokens(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := passwordreset.New(pool)
+
+	uid := makeUser(ctx, t, pool)
+	old1 := hash("old-1")
+	old2 := hash("old-2")
+	if err := repo.Create(ctx, old1, uid, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("Create old1: %v", err)
+	}
+	if err := repo.Create(ctx, old2, uid, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("Create old2: %v", err)
+	}
+
+	n, err := repo.MarkAllUsedForUser(ctx, uid)
+	if err != nil {
+		t.Fatalf("MarkAllUsedForUser: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 rows invalidated, got %d", n)
+	}
+	for _, h := range [][]byte{old1, old2} {
+		if _, err := repo.Get(ctx, h); !errors.Is(err, passwordreset.ErrNotFound) {
+			t.Errorf("expected old token to be ErrNotFound after invalidation, got %v", err)
+		}
+	}
+	// No blast radius onto another user's tokens.
+	other := makeUser(ctx, t, pool)
+	otherToken := hash("other-user")
+	if err := repo.Create(ctx, otherToken, other, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("Create other: %v", err)
+	}
+	if _, err := repo.MarkAllUsedForUser(ctx, uid); err != nil {
+		t.Fatalf("second MarkAllUsedForUser: %v", err)
+	}
+	if _, err := repo.Get(ctx, otherToken); err != nil {
+		t.Errorf("other user's token should still be live: %v", err)
 	}
 }
 

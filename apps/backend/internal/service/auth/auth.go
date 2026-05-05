@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -281,23 +282,50 @@ func (s *Service) Me(ctx context.Context) (domain.User, error) {
 //
 // Internal errors (random failure, DB transport hiccup, mailer outage)
 // are swallowed at the service boundary so they don't leak via a 500
-// only on the existing-account path. The underlying cause is left to
-// be logged at the handler/middleware layer when slog is wired in.
+// only on the existing-account path — but they ARE logged here so a
+// silent Resend outage or DB hiccup doesn't disappear into the void.
 func (s *Service) RequestPasswordReset(ctx context.Context, email string) error {
 	// Always do the random+hash work, even for unknown emails, so the
 	// CPU cost of the call doesn't differ between cases.
-	rawToken, _ := generateToken(s.tokenEntropy)
+	rawToken, err := generateToken(s.tokenEntropy)
+	if err != nil {
+		slog.ErrorContext(ctx, "auth: password-reset token generation failed", slog.Any("err", err))
+		return nil
+	}
 	tokenHash := sha256Bytes(rawToken)
 	expiresAt := s.now().UTC().Add(PasswordResetTTL)
 
 	u, err := s.users.GetByEmail(ctx, strings.TrimSpace(email))
 	if err != nil {
-		return nil // unknown email — silent no-op
+		return nil // unknown email — silent no-op (not an error)
+	}
+	// Single-active-token policy: invalidate any previous live tokens
+	// for this user before issuing a new one. Resending the reset email
+	// silently kills the older link so a leaked-but-stale token can't
+	// be used after the user requested a fresh one.
+	if _, err := s.resets.MarkAllUsedForUser(ctx, u.ID); err != nil {
+		slog.ErrorContext(ctx, "auth: invalidate previous password-reset tokens failed",
+			slog.String("user_id", u.ID.String()),
+			slog.Any("err", err),
+		)
+		return nil
 	}
 	// Best-effort persist + mail. Errors are intentionally not surfaced
-	// to the caller — the always-204 contract trumps an internal failure.
-	_ = s.resets.Create(ctx, tokenHash, u.ID, expiresAt)
-	_ = s.mail.SendPasswordReset(ctx, u.Email, rawToken)
+	// to the caller — the always-204 contract trumps an internal failure —
+	// but log them so operators can see real outages.
+	if err := s.resets.Create(ctx, tokenHash, u.ID, expiresAt); err != nil {
+		slog.ErrorContext(ctx, "auth: persist password-reset token failed",
+			slog.String("user_id", u.ID.String()),
+			slog.Any("err", err),
+		)
+		return nil
+	}
+	if err := s.mail.SendPasswordReset(ctx, u.Email, rawToken); err != nil {
+		slog.ErrorContext(ctx, "auth: send password-reset email failed",
+			slog.String("user_id", u.ID.String()),
+			slog.Any("err", err),
+		)
+	}
 	return nil
 }
 
@@ -335,6 +363,13 @@ func (s *Service) ConfirmPasswordReset(ctx context.Context, p ConfirmPasswordRes
 
 	entry, err := resets.Get(ctx, tokenHash)
 	if err != nil {
+		if errors.Is(err, passwordreset.ErrExpired) {
+			// Distinguished from ErrNotFound so the client can show a
+			// "your link expired, request a new one" message. Disclosing
+			// "expired" specifically is harmless — see ErrExpired's
+			// comment in passwordreset/repo.go.
+			return apierror.Unauthorized("Reset link has expired. Request a new one from the sign-in screen.")
+		}
 		if errors.Is(err, passwordreset.ErrNotFound) {
 			return apierror.Unauthorized("invalid reset token")
 		}
@@ -361,10 +396,15 @@ func (s *Service) ConfirmPasswordReset(ctx context.Context, p ConfirmPasswordRes
 	}
 
 	// Best-effort: kill all sessions for the user so a stolen-cookie
-	// attacker is logged out. We deliberately ignore errors here — if
-	// it fails, the password change still went through, which is the
-	// security-critical part.
-	_ = s.LogoutAll(ctx, entry.UserID)
+	// attacker is logged out. We deliberately don't fail the request
+	// here — the password change still went through, which is the
+	// security-critical part — but log so an SCS outage is visible.
+	if err := s.LogoutAll(ctx, entry.UserID); err != nil {
+		slog.WarnContext(ctx, "auth: logout-all after password reset failed",
+			slog.String("user_id", entry.UserID.String()),
+			slog.Any("err", err),
+		)
+	}
 	return nil
 }
 

@@ -37,9 +37,17 @@ type Config struct {
 	S3Bucket         string `koanf:"s3_bucket"`
 	S3ForcePathStyle bool   `koanf:"s3_force_path_style"` // true for MinIO
 
-	ResendAPIKey         string `koanf:"resend_api_key"`
-	ResendFromEmail      string `koanf:"resend_from_email"`
-	ResetPasswordURLBase string `koanf:"reset_password_url_base"`
+	ResendAPIKey    string `koanf:"resend_api_key"`
+	ResendFromEmail string `koanf:"resend_from_email"`
+
+	// Two reset-link bases — the email renders both as buttons so
+	// recipients can pick "Open in app" (deep link) or "Open in browser"
+	// (web URL). The token is appended verbatim to each. In `local`/`test`
+	// these default to `wakeup://reset?token=` and
+	// `http://localhost:8081/reset?token=`. In any other env both are
+	// required at boot.
+	ResetPasswordAppURLBase string `koanf:"reset_password_app_url_base"`
+	ResetPasswordWebURLBase string `koanf:"reset_password_web_url_base"`
 
 	LiveKitURL       string `koanf:"livekit_url"`
 	LiveKitAPIKey    string `koanf:"livekit_api_key"`
