@@ -9,6 +9,7 @@ import * as React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 
+import { ForceUpgradeGate } from '@/components/force-upgrade-gate';
 import { NetworkBanner } from '@/components/network-banner';
 import { ToastRoot } from '@/components/toast-root';
 import { RootErrorBoundary } from '@/components/ui/root-error-boundary';
@@ -37,10 +38,12 @@ function RootLayout() {
         <ThemeProvider>
           <NetworkBanner />
           <RootErrorBoundary>
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-            </Stack>
+            <ForceUpgradeGate>
+              <Stack>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+              </Stack>
+            </ForceUpgradeGate>
           </RootErrorBoundary>
           <ToastRoot />
         </ThemeProvider>

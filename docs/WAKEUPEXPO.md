@@ -1472,19 +1472,19 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 ### Phase 2 — API client
 
-- [ ] **2.1** `just gen-client` produces `lib/api/schema.ts`. Confirm the file compiles with `tsc --noEmit`.
+- [x] **2.1** `just gen-client` produces `lib/api/schema.ts`. Confirm the file compiles with `tsc --noEmit`.
   - Commit: `chore(mobile): generate openapi schema types`
-- [ ] **2.2** `lib/api/client.ts` fetcher with cookie support, idempotency-key injection, error → toast mapping.
+- [x] **2.2** `lib/api/client.ts` fetcher with cookie support, idempotency-key injection, error → toast mapping.
   - Commit: `feat(mobile): add api fetch wrapper with idempotency keys`
-- [ ] **2.3** Orval config (`lib/api/orval.config.ts`) wired to the generated schema. `bunx orval` produces `lib/api/hooks/*.ts`. CI runs this in `mobile-verify`.
+- [x] **2.3** Orval config (`lib/api/orval.config.ts`) wired to the generated schema. `bunx orval` produces `lib/api/hooks/*.ts`. CI runs this in `mobile-verify`.
   - Commit: `feat(mobile): generate react-query hooks via orval`
-- [ ] **2.4** `useIdempotencyKey()` helper, unit-tested.
+- [x] **2.4** `useIdempotencyKey()` helper, unit-tested.
   - Commit: `feat(mobile): add idempotency key hook`
-- [ ] **2.5** Mutation retry config per §4.10 (4xx never retries, 5xx + network up to 3× with exp backoff, idempotency-key reused). Unit-tested with mocked failures.
+- [x] **2.5** Mutation retry config per §4.10 (4xx never retries, 5xx + network up to 3× with exp backoff, idempotency-key reused). Unit-tested with mocked failures.
   - Commit: `feat(mobile): add offline-aware mutation retry config`
-- [ ] **2.6** TanStack Query `persistQueryClient` wired to AsyncStorage (`query-cache:v1`, `mutation-cache:v1`). Test: queue a mutation offline, kill app, reopen, confirm replay on reconnect.
+- [x] **2.6** TanStack Query `persistQueryClient` wired to AsyncStorage (`query-cache:v1`, `mutation-cache:v1`). Test: queue a mutation offline, kill app, reopen, confirm replay on reconnect.
   - Commit: `feat(mobile): persist query and mutation caches for offline replay`
-- [ ] **2.7** `/v1/healthz` poll on every authenticated foreground; `<ForceUpgradeGate>` blocks the app when `min_client_version > current`. Manual test: spoof a higher min via env override.
+- [x] **2.7** `/v1/healthz` poll on every authenticated foreground; `<ForceUpgradeGate>` blocks the app when `min_client_version > current`. Manual test: spoof a higher min via env override.
   - Commit: `feat(mobile): add force-upgrade gate via healthz`
 
 ### Phase 3 — Auth screens
