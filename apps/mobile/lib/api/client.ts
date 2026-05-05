@@ -100,7 +100,22 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInitExt =
   const contentType = res.headers.get('content-type') ?? '';
   const isJson = contentType.includes('application/json');
   const bodyText = await res.text();
-  const body: unknown = isJson && bodyText ? JSON.parse(bodyText) : bodyText;
+  let body: unknown = bodyText;
+  if (isJson && bodyText) {
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      // Malformed JSON shouldn't surface as a raw SyntaxError —
+      // callers depend on `error instanceof APIError` for retry +
+      // toast logic. Preserve that contract on error responses;
+      // for ok-but-invalid bodies, throw a plain Error so the
+      // failure stays visible. (CR on PR #115.)
+      if (!res.ok) {
+        throw new APIError(res.status, null, `HTTP ${res.status}`);
+      }
+      throw new Error('Invalid JSON response body');
+    }
+  }
 
   if (!res.ok) {
     const errorBody = isJson && isAPIErrorResponse(body) ? body.error : null;
