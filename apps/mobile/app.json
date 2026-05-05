@@ -10,7 +10,7 @@
       "output": "static",
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-router", "@sentry/react-native"],
+    "plugins": ["expo-router", "@sentry/react-native", "expo-font"],
     "experiments": {
       "typedRoutes": true,
       "tsconfigPaths": true
