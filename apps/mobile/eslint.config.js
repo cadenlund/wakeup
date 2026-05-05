@@ -5,7 +5,11 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // `lib/api/schema.ts`, `lib/api/hooks/`, and `lib/api/model/` are
+    // emitted by `just gen-client` (openapi-typescript + orval). Don't
+    // lint generated output — fixing the generator's style nits would
+    // be undone on every regen.
+    ignores: ['dist/*', 'lib/api/schema.ts', 'lib/api/hooks/**', 'lib/api/model/**'],
   },
   {
     rules: {
