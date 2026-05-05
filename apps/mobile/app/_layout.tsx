@@ -7,10 +7,12 @@ import { Sentry, navigationIntegration } from '@/lib/sentry';
 import { Stack, useNavigationContainerRef } from 'expo-router';
 import * as React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 
 import { NetworkBanner } from '@/components/network-banner';
 import { ToastRoot } from '@/components/toast-root';
 import { RootErrorBoundary } from '@/components/ui/root-error-boundary';
+import { queryClient, queryPersister } from '@/lib/api/query-client';
 import { ThemeProvider } from '@/lib/theme/provider';
 
 export const unstable_settings = {
@@ -28,18 +30,22 @@ function RootLayout() {
   }, [navContainerRef]);
 
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <NetworkBanner />
-        <RootErrorBoundary>
-          <Stack>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-          </Stack>
-        </RootErrorBoundary>
-        <ToastRoot />
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{ persister: queryPersister, maxAge: 24 * 60 * 60 * 1000 }}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <NetworkBanner />
+          <RootErrorBoundary>
+            <Stack>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+            </Stack>
+          </RootErrorBoundary>
+          <ToastRoot />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </PersistQueryClientProvider>
   );
 }
 
