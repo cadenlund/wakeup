@@ -1,0 +1,79 @@
+# Phase 3.0 — post-login onboarding carousel.
+#
+# Asserts: register-fresh user lands on slide 1, "Next" advances
+# through three info slides, the profile slide accepts a bio and
+# status-emoji pick, the theme picker swatches are tappable, and
+# tapping "Get started" on slide 6 lands the user on the (tabs)
+# group with onboarded_at populated server-side.
+#
+# Avatar upload isn't asserted here — the system photo-library
+# picker is OS UI, not part of the app, and Maestro can't drive
+# the OS picker reliably across iOS/Android. Avatar-specific
+# coverage lives in components/avatar-picker render tests.
+appId: app.wakeup.client
+---
+- launchApp:
+    clearState: true
+    # iOS-only: wipes the system "Use Strong Password?" sheet that
+    # otherwise covers the register form on a fresh sim. No-op on
+    # Android (the field there doesn't trigger a system sheet).
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# --- Slide 1: Just your friends -------------------------------------
+- assertVisible: 'Just your friends'
+- takeScreenshot: onboarding-slide-1
+- tapOn:
+    id: onboarding-info-next-0
+
+# --- Slide 2: DMs and group chats -----------------------------------
+- assertVisible: 'DMs and group chats'
+- tapOn:
+    id: onboarding-info-next-1
+
+# --- Slide 3: Voice + video rooms -----------------------------------
+- assertVisible: 'Voice + video rooms'
+- tapOn:
+    id: onboarding-info-next-2
+
+# --- Slide 4: profile -----------------------------------------------
+# Display name is read-only (set at register, edited later). Bio +
+# status emoji are wired through to PATCH /v1/users/me; we type a
+# short bio and pick an emoji from the picker modal.
+- assertVisible: 'Set up your profile'
+- tapOn:
+    id: onboarding-bio
+- inputText: 'maestro test bio'
+- hideKeyboard
+- tapOn:
+    id: onboarding-emoji
+- assertVisible: 'What are you up to?'
+# Each grid cell has accessibilityLabel `Pick <emoji>` (set by
+# StatusEmojiPicker). Maestro can't match the bare emoji glyph
+# (rendered as an image, not text), so tap the a11y label.
+- tapOn: 'Pick 🛌'
+- takeScreenshot: onboarding-profile-filled
+- tapOn:
+    id: onboarding-profile-next
+
+# --- Slide 5: theme picker ------------------------------------------
+- assertVisible: 'Pick your vibe'
+- tapOn: 'Theme aurora'
+- takeScreenshot: onboarding-theme-aurora
+- tapOn:
+    id: onboarding-theme-next
+
+# --- Slide 6: handoff -----------------------------------------------
+- assertVisible: "You're all set"
+- takeScreenshot: onboarding-finish
+- tapOn:
+    id: onboarding-finish
+
+# After finish, AuthGate routes to (tabs). Gallery is the placeholder
+# tab home until Phase 5 ships the conversations list. Either way,
+# the temporary header logout button proves we're past the carousel.
+- extendedWaitUntil:
+    visible: 'Log out'
+    timeout: 10000
+- assertVisible: 'Log out'
+- takeScreenshot: onboarding-tabs

@@ -1,0 +1,59 @@
+# Reusable register-fresh sub-flow per WAKEUPEXPO §12.1 / §12.7.
+#
+# Mints a unique-per-run test account by hashing Date.now() down to
+# alphanumeric characters and reuses the same identifier as both the
+# username and the email's local-part so flows that branch on
+# "logged in as <X>" can compose without juggling state. The parent
+# flow is responsible for `clearState: true` — sub-flows MUST NOT
+# clear state (state pollution between flows is a §12.8 violation).
+#
+# Outputs (read by parent flows via ${output.<name>}):
+#   - output.username       random 12-char username (always lowercase)
+#   - output.email          ${output.username}@maestro.wakeup.test
+#   - output.displayName    "Maestro <username>" — visible name
+#   - output.password       fixed test password (no need to randomise;
+#                            the account is freshly minted per run)
+appId: app.wakeup.client
+---
+- runScript:
+    file: register-fresh.js
+# AuthGate lands an unauthenticated cold-launched user on /login.
+# Hop over to /register via the cross-link if we landed there.
+# `runFlow.when.visible` skips the inner commands when the parent
+# flow already navigated to /register itself.
+- runFlow:
+    when:
+      visible: 'Welcome back. We saved your spot.'
+    commands:
+      - tapOn:
+          id: login-go-register
+- extendedWaitUntil:
+    visible:
+      id: register-display-name
+    timeout: 10000
+- tapOn:
+    id: register-display-name
+- inputText: ${output.displayName}
+- tapOn:
+    id: register-username
+- inputText: ${output.username}
+- tapOn:
+    id: register-email
+- inputText: ${output.email}
+# Email is the last field above the keyboard's reach; the password
+# input lives below the keyboard once it's up. Drop the keyboard
+# so the password field is tappable, then re-summon it implicitly
+# by tapping into the field.
+- hideKeyboard
+- tapOn:
+    id: register-password
+- inputText: ${output.password}
+- hideKeyboard
+- tapOn:
+    id: register-submit
+# AuthGate routes a freshly registered user (onboarded_at = null)
+# straight into the onboarding carousel. Wait until the first slide
+# is up so callers can tapOn elements without racing the redirect.
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
