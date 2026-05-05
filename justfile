@@ -84,16 +84,15 @@ gen-docs-check: gen-docs
 gen-client: gen-docs
     #!/usr/bin/env bash
     set -euo pipefail
-    # mktemp + trap so concurrent invocations don't collide on a fixed
-    # /tmp path and the intermediate file gets cleaned up even if the
-    # generator exits non-zero. (CodeRabbit on PR #81.) The leading
-    # shebang turns this whole recipe into one bash script under `just`
-    # so the trap survives across the python + npx steps.
-    mkdir -p apps/mobile/lib/api
-    tmp=$(mktemp -t wakeup-openapi3.XXXXXX.json)
-    trap 'rm -f "$tmp"' EXIT
-    python3 scripts/dev/swagger2-to-openapi3.py docs/openapi/swagger.json "$tmp"
-    npx -y openapi-typescript@7.4.4 "$tmp" -o apps/mobile/lib/api/schema.ts
+    # The converted OpenAPI 3 file is committed alongside the
+    # Swagger 2 source so downstream tools (Orval for hooks,
+    # openapi-typescript for the schema, future SDKs) all read from
+    # one canonical artifact instead of each running their own
+    # conversion.
+    mkdir -p apps/mobile/lib/api docs/openapi
+    python3 scripts/dev/swagger2-to-openapi3.py docs/openapi/swagger.json docs/openapi/openapi.json
+    npx -y openapi-typescript@7.4.4 docs/openapi/openapi.json -o apps/mobile/lib/api/schema.ts
+    cd apps/mobile && bunx orval --config ./lib/api/orval.config.ts
 
 # Verify all (used in CI and as the final acceptance gate)
 verify: lint test gen-docs-check
