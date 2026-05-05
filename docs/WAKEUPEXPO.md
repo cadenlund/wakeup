@@ -578,7 +578,7 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 
 | Route | Purpose | Endpoints | WS events |
 |---|---|---|---|
-| `(onboarding)/index` | **Post-login** 6-slide carousel (welcome → chat+calls → themes → profile → theme picker → find friends). Per-account flag `users.onboarded_at`; AuthGate routes here when authenticated AND `onboarded_at` is null. Finishing calls `POST /v1/users/me/onboarding/complete`. | `POST /v1/users/me/onboarding/complete`, `PATCH /v1/users/me`, `POST /v1/friends/requests` | — |
+| `(onboarding)/index` | **Post-login** 6-slide carousel (welcome → chat+calls → themes → profile → theme picker → find friends). Per-account flag `users.onboarded_at`; AuthGate routes here when authenticated AND `onboarded_at` is null. Finishing calls `POST /v1/users/me/onboard`. | `POST /v1/users/me/onboard`, `PATCH /v1/users/me`, `POST /v1/friends/requests` | — |
 | `(auth)/login` | username/email + password | `POST /v1/auth/login` | — |
 | `(auth)/register` | new account | `POST /v1/auth/register` | — |
 | `(auth)/forgot` | email entry | `POST /v1/auth/password-reset/request` | — |
@@ -624,7 +624,7 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 - `<RootErrorBoundary>` — root-level React error boundary per §4.10. Reports to Sentry, shows fallback + Reload button.
 - `<NetworkBanner>` — thin offline indicator surfaced at the top of every screen when `useNetworkState().online === false`.
 - `<ForceUpgradeGate>` — full-screen blocking modal when `min_client_version > current` per §4.10.
-- `<OnboardingCarousel>` — **post-login** swipeable intro shown once per account. Six slides: 3 informational (welcome / chat+calls / themes), profile setup (bio + status emoji + display-name confirmation; avatar upload deferred until `expo-image-picker` lands), interactive theme + light/dark picker, and "find friends" by username (or skip). Per-account flag `users.onboarded_at` (set when the carousel calls `POST /v1/users/me/onboarding/complete`); the AuthGate routes signed-in users here while the flag is null and re-checks `me.onboarded_at` on every render — signing in on a new device for an existing account skips the carousel.
+- `<OnboardingCarousel>` — **post-login** swipeable intro shown once per account. Six slides: 3 informational (welcome / chat+calls / themes), profile setup (bio + status emoji + display-name confirmation; avatar upload deferred until `expo-image-picker` lands), interactive theme + light/dark picker, and "find friends" by username (or skip). Per-account flag `users.onboarded_at` (set when the carousel calls `POST /v1/users/me/onboard`); the AuthGate routes signed-in users here while the flag is null and re-checks `me.onboarded_at` on every render — signing in on a new device for an existing account skips the carousel.
 - `<MessageContextMenu>` — wraps RNR's `<ContextMenu>` around `<ChatBubble>`. Long-press on a bubble surfaces: Copy, React (v2 stub for now), Report, Delete (own messages only).
 - `<PullToRefresh>` — thin wrapper around RN's `RefreshControl` that fires `haptics.tap()` past the trigger threshold and surfaces a themed spinner. Used by the conversations list and friends tab.
 - `<AppIconSwitcher>` — invoked from the theme picker. Calls `expo-dynamic-app-icon` (or the equivalent native module) with the icon name matching the selected scheme. iOS-only; on Android the launcher icon is fixed (per §10.5).
@@ -1086,7 +1086,7 @@ Every entry below is a YAML file under `.maestro/flows/` (or one level deeper fo
 
 | File | Asserts |
 |---|---|
-| `onboarding.yaml` | post-login carousel — register fresh user, swipe through 6 slides, set bio + emoji on the profile slide, pick a theme, finish, assert tabs visible. Server-side flag `users.onboarded_at` is set by `POST /v1/users/me/onboarding/complete`. |
+| `onboarding.yaml` | post-login carousel — register fresh user, swipe through 6 slides, set bio + emoji on the profile slide, pick a theme, finish, assert tabs visible. Server-side flag `users.onboarded_at` is set by `POST /v1/users/me/onboard`. |
 | `auth-login.yaml` | login form submits → tab bar visible. |
 | `auth-register.yaml` | register form submits → tab bar visible. |
 | `auth-forgot-password.yaml` | enter email → "Check your email" copy visible. |
@@ -1500,7 +1500,7 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 ### Phase 3 — Auth screens
 
-- [x] **3.0** `(onboarding)/index.tsx` **post-login** carousel: 6 slides (welcome → chat+calls → themes teaser → profile (bio + status_emoji + display_name confirm; avatar deferred) → theme picker (interactive scheme + light/dark) → find friends (username + send request, or skip)). Per-account flag `users.onboarded_at` set by `POST /v1/users/me/onboarding/complete`. AuthGate routes here when authenticated AND `me.onboarded_at` is null. Maestro flow `onboarding.yaml`.
+- [x] **3.0** `(onboarding)/index.tsx` **post-login** carousel: 6 slides (welcome → chat+calls → themes teaser → profile (bio + status_emoji + display_name confirm; avatar deferred) → theme picker (interactive scheme + light/dark) → find friends (username + send request, or skip)). Per-account flag `users.onboarded_at` set by `POST /v1/users/me/onboard`. AuthGate routes here when authenticated AND `me.onboarded_at` is null. Maestro flow `onboarding.yaml`.
   - Commit: `feat(mobile): post-login onboarding carousel`
 - [x] **3.1** `(auth)/_layout.tsx` stack, no tab bar. `(auth)/login.tsx` form using RNR Input + Button. `useLogin` mutation. Maestro flow `auth-login.yaml`.
   - Commit: `feat(mobile): add login screen`

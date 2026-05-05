@@ -32,7 +32,7 @@ import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const segments = useSegments();
-  const { data, error, isLoading, isFetched } = useGetV1AuthMe({
+  const { data, isLoading, isFetched } = useGetV1AuthMe({
     query: {
       retry: false,
       refetchOnWindowFocus: true,
@@ -50,7 +50,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   // the response as `{data, status, headers}`. Cast to the actual
   // runtime shape the backend sends (MeResponse fields directly).
   const me = data as { id?: string; onboarded_at?: string } | undefined;
-  const isAuthenticated = !!me?.id && !error;
+  // Trust cached `me` over a transient `error` — TanStack keeps the
+  // last successful response when a refetch fails (offline, cold
+  // 5xx, etc.) and CR rightly flagged that AND-ing in `!error` would
+  // bounce a logged-in user out on the first network blip. Treat
+  // unauthenticated as "we've actually finished a fetch and there's
+  // no cached me." (CR on PR #117.)
+  const isAuthenticated = !!me?.id;
   const isUnauthenticated = isFetched && !isAuthenticated;
   const onboardingDone = !!me?.onboarded_at;
 

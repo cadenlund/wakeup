@@ -21,6 +21,7 @@ import { useRouter } from 'expo-router';
 import { ChevronLeft, MessageCircleHeart, Phone, UserPlus, Users } from 'lucide-react-native';
 import * as React from 'react';
 import {
+  AccessibilityInfo,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -100,10 +101,41 @@ export default function OnboardingScreen() {
   const me = meEnvelope as MeShape | undefined;
 
   // --- profile slide state ------------------------------------------------
+  // useState's initial-value runs ONCE; if the /me query resolves
+  // after the carousel mounts (or if the user lands here on a re-
+  // login with cached values absent from the first render) the
+  // fields stay empty and a no-edit Continue would PATCH "" over
+  // saved values. Hydrate via effect when the server values arrive
+  // and the user hasn't touched the field yet. (CR on PR #117.)
   const [bio, setBio] = React.useState(me?.bio ?? '');
   const [statusEmoji, setStatusEmoji] = React.useState(me?.status_emoji ?? '');
+  const bioTouched = React.useRef(false);
+  const emojiTouched = React.useRef(false);
+  React.useEffect(() => {
+    if (!bioTouched.current && me?.bio) setBio(me.bio);
+  }, [me?.bio]);
+  React.useEffect(() => {
+    if (!emojiTouched.current && me?.status_emoji) setStatusEmoji(me.status_emoji);
+  }, [me?.status_emoji]);
   const patchMe = usePatchV1UsersMe();
   const profileFieldErrors = useFieldErrors(patchMe.error);
+
+  // Reduced-motion: turn off the horizontal scroll animation when the
+  // OS setting is on. (CR + §10.5 accessibility baseline.)
+  const [reduceMotion, setReduceMotion] = React.useState(false);
+  React.useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((v) => {
+      if (mounted) setReduceMotion(v);
+    });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (v) =>
+      setReduceMotion(v)
+    );
+    return () => {
+      mounted = false;
+      sub?.remove();
+    };
+  }, []);
 
   // --- theme slide state --------------------------------------------------
   const selected = useThemeStore((s) => s.selected);
@@ -148,7 +180,7 @@ export default function OnboardingScreen() {
 
   const goTo = (target: number) => {
     setPage(target);
-    scrollRef.current?.scrollTo({ x: target * width, animated: true });
+    scrollRef.current?.scrollTo({ x: target * width, animated: !reduceMotion });
   };
 
   const advance = () => goTo(Math.min(page + 1, SLIDE_COUNT - 1));
@@ -299,7 +331,10 @@ export default function OnboardingScreen() {
                     accessibilityLabel="Bio"
                     aria-labelledby="onb-bio-label"
                     value={bio}
-                    onChangeText={setBio}
+                    onChangeText={(text) => {
+                      bioTouched.current = true;
+                      setBio(text);
+                    }}
                     multiline
                     maxLength={280}
                     // Fixed height (not minHeight) so the parent flex
@@ -318,7 +353,10 @@ export default function OnboardingScreen() {
                   <StatusEmojiPicker
                     testID="onboarding-emoji"
                     value={statusEmoji}
-                    onChange={setStatusEmoji}
+                    onChange={(next) => {
+                      emojiTouched.current = true;
+                      setStatusEmoji(next);
+                    }}
                     disabled={patchMe.isPending}
                   />
                   <FieldError message={profileFieldErrors.status_emoji} />

@@ -90,11 +90,24 @@ export function AvatarPicker({ avatarUrl, displayName, size = DEFAULT_SIZE, test
 
   const handleAsset = async (asset: ImagePicker.ImagePickerAsset) => {
     const file = await assetToFormDataFile(asset);
-    if (!file) return;
-    // Cast — orval's body type expects Blob, but on RN the
-    // {uri,name,type} shape is what FormData accepts. The wire
-    // payload is the same; the type is only a build-time check.
-    await upload.mutateAsync({ data: { file: file as unknown as Blob } });
+    if (!file) {
+      // assetToFormDataFile returns null when the web fetch+blob
+      // path fails — surface a toast so the user isn't left wondering
+      // why nothing happened. Native paths can't fail here.
+      toast.error("Couldn't read photo", 'Pick another image and try again.');
+      return;
+    }
+    // mutate (not mutateAsync) so a backend failure flows through
+    // the mutation's onError → toast. Using mutateAsync would also
+    // bubble the rejection out of this async fn as an unhandled
+    // promise — toast already covers UX, the rejection would just
+    // hit Sentry as noise. (CR on PR #117.)
+    upload.mutate({
+      // Cast — orval's body type expects Blob, but on RN the
+      // {uri,name,type} shape is what FormData accepts. Wire payload
+      // is identical; the type assertion is build-time only.
+      data: { file: file as unknown as Blob },
+    });
   };
 
   const onPickLibrary = async () => {
@@ -132,9 +145,10 @@ export function AvatarPicker({ avatarUrl, displayName, size = DEFAULT_SIZE, test
     if (asset) await handleAsset(asset);
   };
 
-  const onRemove = async () => {
+  const onRemove = () => {
     closeSheet();
-    await removeAvatar.mutateAsync();
+    // mutate (not mutateAsync) — same reasoning as handleAsset.
+    removeAvatar.mutate();
   };
 
   const initial = (displayName?.trim()?.[0] ?? '?').toUpperCase();
