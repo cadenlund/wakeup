@@ -8,6 +8,41 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 )
 
+// avatarURLPresigner is the package-wide hook the MeResponse /
+// UserResponse mappers call to turn the stored S3 object key (e.g.
+// "avatars/<uid>/<obj>.png") into a short-lived signed URL the
+// client can drop into <Image>. Wired once from cmd/server/main.go
+// after the user service is constructed; tests + early-boot paths
+// leave it nil and the mappers pass the raw key through unchanged.
+//
+// We deliberately use a free-function pointer rather than threading
+// a presigner through 19 call sites or sticking a context onto every
+// DTO mapper — presigning is sync HMAC work, not I/O, and the value
+// is the same per-key for the duration of the TTL.
+var avatarURLPresigner func(key string) (string, error)
+
+// SetAvatarURLPresigner configures the package-wide presigner. Calling
+// with nil restores the no-op behaviour (used by unit tests that don't
+// boot a storage layer).
+func SetAvatarURLPresigner(p func(key string) (string, error)) {
+	avatarURLPresigner = p
+}
+
+// presignAvatarKey upgrades a stored avatar key to a signed URL
+// in-place. Returns the input untouched when the presigner isn't set
+// or when the key is already a full URL — the helper is shaped this
+// way so callers can chain it inline without nil-checking the *string.
+func presignAvatarKey(key *string) *string {
+	if key == nil || *key == "" || avatarURLPresigner == nil {
+		return key
+	}
+	url, err := avatarURLPresigner(*key)
+	if err != nil || url == "" {
+		return key
+	}
+	return &url
+}
+
 // --- Public user views ---------------------------------------------------
 
 // UserResponse is the public profile view used in lists, message senders,
@@ -67,7 +102,7 @@ type ImpersonatorInfo struct {
 func toMeResponse(u domain.User, impersonator *domain.User) MeResponse {
 	resp := MeResponse{
 		ID: u.ID, Username: u.Username, DisplayName: u.DisplayName,
-		Email: u.Email, AvatarURL: u.AvatarURL,
+		Email: u.Email, AvatarURL: presignAvatarKey(u.AvatarURL),
 		Bio: u.Bio, StatusEmoji: u.StatusEmoji,
 		ColorScheme: u.ColorScheme,
 		Role:        u.Role,

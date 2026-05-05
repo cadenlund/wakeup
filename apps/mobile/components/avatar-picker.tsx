@@ -163,7 +163,21 @@ export function AvatarPicker({ avatarUrl, displayName, size = DEFAULT_SIZE, test
             />
           ) : (
             <View className="flex-1 items-center justify-center">
-              <Text style={{ color: fg, fontSize: size * 0.42 }} className="font-semibold">
+              <Text
+                // RN's auto line-height + Android font padding crops a
+                // single big capital letter (descender-heavy / tall-cap
+                // fonts read as "chopped"). Pin the line box explicitly
+                // and turn off Android's extra padding so the glyph
+                // sits flush-centered in the circle.
+                style={{
+                  color: fg,
+                  fontSize: size * 0.42,
+                  lineHeight: size * 0.5,
+                  includeFontPadding: false,
+                  textAlign: 'center',
+                  textAlignVertical: 'center',
+                }}
+                className="font-semibold">
                 {initial}
               </Text>
             </View>

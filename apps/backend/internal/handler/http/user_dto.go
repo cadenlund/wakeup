@@ -71,7 +71,7 @@ func toUserResponse(u domain.User) UserResponse {
 	}
 	return UserResponse{
 		ID: u.ID, Username: u.Username, DisplayName: u.DisplayName,
-		AvatarURL: u.AvatarURL, Bio: u.Bio, StatusEmoji: u.StatusEmoji,
+		AvatarURL: presignAvatarKey(u.AvatarURL), Bio: u.Bio, StatusEmoji: u.StatusEmoji,
 		CreatedAt: u.CreatedAt,
 	}
 }

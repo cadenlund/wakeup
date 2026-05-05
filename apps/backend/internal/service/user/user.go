@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -269,6 +270,29 @@ func (s *Service) SoftDeleteAccount(ctx context.Context, userID uuid.UUID) error
 		return apierror.Internal("soft delete").WithCause(err)
 	}
 	return nil
+}
+
+// avatarPresignTTL is the read window we hand to the client for an
+// avatar URL. Long enough that a chat list scroll won't refresh
+// while the user is staring at it, short enough that a leaked URL
+// expires before it matters. The me query invalidates often enough
+// that the client has a fresh URL on every meaningful state change
+// (login, profile update, onboarding finish, etc.).
+const avatarPresignTTL = 1 * time.Hour
+
+// PresignAvatarGetURL turns an S3 object key (e.g. "avatars/<uid>/<obj>.png")
+// into a short-lived signed URL the mobile/web client can drop into
+// <Image src=...>. Pass values that already look like a URL through
+// untouched so the caller doesn't have to inspect the field shape —
+// future migrations to a CDN-prefixed avatar_url won't break.
+func (s *Service) PresignAvatarGetURL(ctx context.Context, key string) (string, error) {
+	if key == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(key, "http://") || strings.HasPrefix(key, "https://") {
+		return key, nil
+	}
+	return s.storage.PresignGet(ctx, key, avatarPresignTTL, "")
 }
 
 // MarkOnboarded stamps the per-account onboarding-completed timestamp.

@@ -187,6 +187,15 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("user service: %w", err)
 	}
+	// Wire the package-wide avatar URL presigner that MeResponse /
+	// UserResponse mappers use to convert stored S3 keys into signed
+	// URLs the client can drop into <Image>. context.Background() is
+	// fine here: the underlying AWS presigner is sync HMAC work and
+	// the mappers run on already-cancelled-aware request goroutines
+	// that finish before the value is observed by the client anyway.
+	httpapi.SetAvatarURLPresigner(func(key string) (string, error) {
+		return userSvc.PresignAvatarGetURL(context.Background(), key)
+	})
 	notifPrefSvc, err := notifprefsvc.New(notifprefsvc.Config{Prefs: prefsRepo})
 	if err != nil {
 		return fmt.Errorf("notificationpref service: %w", err)
