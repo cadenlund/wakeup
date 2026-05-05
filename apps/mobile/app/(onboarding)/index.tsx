@@ -1,22 +1,24 @@
 // Post-login onboarding carousel (Phase 3.0). Six slides:
 //
-//   1. Welcome — what Wakeup is.
-//   2. Chat + calls — friend-graph value prop.
-//   3. Sleep-cycle themes — quick teaser before the picker on
-//      slide 5.
-//   4. Profile — display name (prefilled from /me) + bio + status
-//      emoji. Avatar upload is deferred until expo-image-picker
-//      lands on a fresh dev-client build; for now it shows a
-//      placeholder + "Skip for now" copy.
-//   5. Theme picker — interactive scheme grid + light/dark mode
-//      toggle. Persists to local theme store + writes to backend
-//      via PATCH /v1/users/me/notifications.
-//   6. Find your friends — username + "Add" → POST /v1/friends/
-//      requests. "Skip for now" finishes onboarding without sending
-//      a request.
+//   1. Just your friends      — friend-graph value prop.
+//   2. DMs and group chats    — chat shape.
+//   3. Voice + video rooms    — calls value prop.
+//   4. Profile                — AvatarPicker + bio + status emoji.
+//                               Display name is prefilled from /me
+//                               (set at register, edited later in
+//                               settings).
+//   5. Theme picker           — scheme grid + light/dark/system row.
+//                               Persists to the local theme store
+//                               only; the backend's color_scheme
+//                               column tracks light/dark/system, not
+//                               the named scheme.
+//   6. You're all set         — handoff CTA. The friend-search
+//                               component lives in the friends tab
+//                               (Phase 4) and gets re-mounted here
+//                               in a follow-up.
 //
-// Finish: POST /v1/users/me/onboarding/complete → invalidate
-// `me` query → AuthGate flips and routes to (tabs).
+// Finish: POST /v1/users/me/onboard → cache write-through with the
+// returned MeResponse → AuthGate flips and routes to (tabs).
 import { useRouter } from 'expo-router';
 import { ChevronLeft, MessageCircleHeart, Phone, UserPlus, Users } from 'lucide-react-native';
 import * as React from 'react';
@@ -172,10 +174,28 @@ export default function OnboardingScreen() {
   });
 
   // --- carousel mechanics -------------------------------------------------
+  // Profile slide is index 3 (0=Just your friends … 3=Profile …).
+  // Tracked here so the scroll handler can fire a fire-and-forget
+  // save when the user swipes off it. CR rightly flagged that the
+  // explicit Continue button was the only persistence path — a
+  // horizontal swipe past the profile would silently drop edits.
+  const PROFILE_SLIDE = 3;
+  const persistProfileEditsIfDirty = React.useCallback(() => {
+    const trimmedBio = bio.trim();
+    const trimmedEmoji = statusEmoji.trim();
+    const dirty = trimmedBio !== (me?.bio ?? '') || trimmedEmoji !== (me?.status_emoji ?? '');
+    if (!dirty || patchMe.isPending) return;
+    patchMe.mutate({ data: { bio: trimmedBio, status_emoji: trimmedEmoji } });
+  }, [bio, statusEmoji, me?.bio, me?.status_emoji, patchMe]);
+
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset.x;
     const next = Math.round(x / Math.max(width, 1));
-    if (next !== page) setPage(next);
+    if (next === page) return;
+    if (page === PROFILE_SLIDE && next !== PROFILE_SLIDE) {
+      persistProfileEditsIfDirty();
+    }
+    setPage(next);
   };
 
   const goTo = (target: number) => {
