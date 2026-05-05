@@ -20,6 +20,7 @@
 // Finish: POST /v1/users/me/onboard → cache write-through with the
 // returned MeResponse → AuthGate flips and routes to (tabs).
 import { useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import { ChevronLeft, MessageCircleHeart, Phone, UserPlus, Users } from 'lucide-react-native';
 import * as React from 'react';
 import {
@@ -40,6 +41,7 @@ import { InfoIllustration } from '@/components/onboarding/info-illustration';
 import { SlideFrame } from '@/components/onboarding/slide-frame';
 import { StatusEmojiPicker } from '@/components/onboarding/status-emoji-picker';
 import { ThemePicker } from '@/components/onboarding/theme-picker';
+import { VideoEmbed } from '@/components/onboarding/video-embed';
 import { Button } from '@/components/ui/button';
 import { FieldError } from '@/components/ui/field-error';
 import { Input } from '@/components/ui/input';
@@ -55,7 +57,7 @@ import { useThemeColor } from '@/lib/theme/use-theme-color';
 // ---------------------------------------------------------------------------
 // Slide content — kept declarative so the order is one place to change.
 
-const SLIDE_COUNT = 6;
+const SLIDE_COUNT = 7;
 
 const INFO_SLIDES = [
   {
@@ -284,7 +286,18 @@ export default function OnboardingScreen() {
           <View key={i} style={{ width }} className="flex-1">
             <SlideFrame>
               <View className="flex-1 justify-center gap-10">
-                <InfoIllustration Icon={slide.Icon} />
+                {i === 0 ? (
+                  <View className="items-center gap-6">
+                    <Image
+                      source={require('../../assets/logo.png')}
+                      style={{ width: 180, height: 180 }}
+                      contentFit="contain"
+                      accessibilityLabel="Wakeup logo"
+                    />
+                  </View>
+                ) : (
+                  <InfoIllustration Icon={slide.Icon} />
+                )}
                 <View className="gap-3">
                   <Text className="text-center text-4xl font-bold tracking-tight text-primary-foreground">
                     {slide.title}
@@ -463,7 +476,39 @@ export default function OnboardingScreen() {
           </SlideFrame>
         </View>
 
-        {/* --- Slide 6: friends placeholder ------------------------- */}
+        {/* --- Slide 6: see it in action (video walkthrough) -------- */}
+        <View style={{ width }} className="flex-1">
+          <SlideFrame>
+            <View className="flex-1 justify-center gap-6">
+              <View className="gap-3">
+                <Text className="text-center text-3xl font-bold tracking-tight text-primary-foreground">
+                  See it in action
+                </Text>
+                <Text className="text-center text-base leading-6 text-primary-foreground/80">
+                  A 30-second tour of profiles, conversations, friends, and the sleep-cycle
+                  themes — tap to play.
+                </Text>
+              </View>
+              <VideoEmbed
+                play={page === 5}
+                uri="https://embed.app.guidde.com/playbooks/7A4dVBaHRaNZxyu6HBhdta?mode=videoOnly"
+              />
+            </View>
+            <Footer>
+              <Button
+                size="lg"
+                variant="secondary"
+                testID="onboarding-video-next"
+                accessibilityRole="button"
+                accessibilityLabel="Next slide"
+                onPress={advance}>
+                <Text>Next</Text>
+              </Button>
+            </Footer>
+          </SlideFrame>
+        </View>
+
+        {/* --- Slide 7: friends placeholder ------------------------- */}
         {/* The actual friend-search component lives in the friends
             tab (Phase 4). We'll mount it here later once it exists
             so onboarding stays a single source of search behaviour.

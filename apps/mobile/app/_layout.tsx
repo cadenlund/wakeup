@@ -10,6 +10,7 @@ import { Sentry, navigationIntegration, sentryEnabled } from '@/lib/sentry';
 
 import { Stack, useNavigationContainerRef } from 'expo-router';
 import * as React from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 
@@ -36,37 +37,62 @@ function RootLayout() {
   }, [navContainerRef]);
 
   return (
-    <PersistQueryClientProvider
-      client={queryClient}
-      persistOptions={{
-        persister: queryPersister,
-        maxAge: 24 * 60 * 60 * 1000,
-        // Only allowlisted, non-sensitive queries get dehydrated to
-        // AsyncStorage. Chat / friends / profile data stays in
-        // memory and refetches on launch. (CR on PR #115.)
-        dehydrateOptions: {
-          shouldDehydrateQuery: (query) => shouldPersistQuery(query.queryKey),
-        },
-      }}>
-      <SafeAreaProvider>
-        <ThemeProvider>
-          <NetworkBanner />
-          <RootErrorBoundary>
-            <ForceUpgradeGate>
-              <AuthGate>
-                <Stack>
-                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                  <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-                  <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
-                  <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-                </Stack>
-              </AuthGate>
-            </ForceUpgradeGate>
-          </RootErrorBoundary>
-          <ToastRoot />
-        </ThemeProvider>
-      </SafeAreaProvider>
-    </PersistQueryClientProvider>
+    // GestureHandlerRootView wraps everything so any descendant
+    // (Swipeable rows on Friends, ReanimatedSwipeable on the
+    // conversations list, etc.) actually receives gestures. Required
+    // by react-native-gesture-handler — without it, GestureDetector
+    // throws on first render.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{
+          persister: queryPersister,
+          maxAge: 24 * 60 * 60 * 1000,
+          // Only allowlisted, non-sensitive queries get dehydrated to
+          // AsyncStorage. Chat / friends / profile data stays in
+          // memory and refetches on launch. (CR on PR #115.)
+          //
+          // Also: only persist queries that have actually settled
+          // successfully. Without the `status === 'success'` gate,
+          // an in-flight query at app-suspend time gets persisted
+          // as `pending`, and on next launch its hydration ends up
+          // rejecting the dangling promise — surfacing as the
+          // "A query that was dehydrated as pending ended up
+          // rejecting" warning. We only want stable cache snapshots
+          // restored, never half-finished requests.
+          dehydrateOptions: {
+            shouldDehydrateQuery: (query) =>
+              query.state.status === 'success' && shouldPersistQuery(query.queryKey),
+          },
+        }}>
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <NetworkBanner />
+            <RootErrorBoundary>
+              <ForceUpgradeGate>
+                <AuthGate>
+                  <Stack>
+                    <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                    <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+                    <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
+                    <Stack.Screen name="conversation/[id]" />
+                    <Stack.Screen
+                      name="settings"
+                      options={{ presentation: 'modal', headerShown: false }}
+                    />
+                    <Stack.Screen name="invite-friend" options={{ presentation: 'modal' }} />
+                    <Stack.Screen name="group/new" options={{ presentation: 'modal' }} />
+                    <Stack.Screen name="group/[id]/members" />
+                    <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+                  </Stack>
+                </AuthGate>
+              </ForceUpgradeGate>
+            </RootErrorBoundary>
+            <ToastRoot />
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </PersistQueryClientProvider>
+    </GestureHandlerRootView>
   );
 }
 

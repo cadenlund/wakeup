@@ -4,12 +4,16 @@
 // experience is consistent across platforms.
 //
 // The layout owns scroll + keyboard handling so individual screens
-// just declare their form fields as direct children. (Screens that
-// need their own scroll behaviour can opt out by importing the
-// raw children pattern, but auth flows are simple enough that one
-// pattern fits all of them.)
+// just declare their form fields as direct children. The Wakeup
+// logo + wordmark sit above the card so every auth screen carries
+// the brand without each screen repeating the markup.
+import { Image } from 'expo-image';
 import * as React from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+
+import { Text } from '@/components/ui/text';
+
+const LOGO_SOURCE = require('../assets/logo.png');
 
 export function AuthScreenLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -27,8 +31,21 @@ export function AuthScreenLayout({ children }: { children: React.ReactNode }) {
       <ScrollView
         contentContainerClassName="flex-grow items-center justify-center px-4 py-10"
         keyboardShouldPersistTaps="handled">
-        <View className="w-full max-w-md rounded-3xl bg-card p-6 shadow-2xl shadow-black/20">
-          {children}
+        <View className="w-full max-w-md items-center gap-6">
+          <View className="items-center gap-2">
+            <Image
+              source={LOGO_SOURCE}
+              style={{ width: 88, height: 88 }}
+              contentFit="contain"
+              accessibilityLabel="Wakeup logo"
+            />
+            <Text className="text-3xl font-bold tracking-tight text-primary-foreground">
+              Wakeup
+            </Text>
+          </View>
+          <View className="w-full rounded-3xl bg-card p-6 shadow-2xl shadow-black/20">
+            {children}
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
