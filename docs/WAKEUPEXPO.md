@@ -1453,21 +1453,21 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
   - Commit: `feat(mobile): add theme store with async-storage persistence`
 - [ ] **1.4** Install **all** RNR components and auth blocks per §3.1 in one batch (~30 components + 5 auth blocks). The set is intentionally complete because RNR is copy-in, not a runtime dependency. Verify a `<Button>`, `<Card>`, and the `<SignInForm>` block render with theme tokens applied. Operator scans the QR and reviews the gallery.
   - Commit: `feat(mobile): install react-native-reusables foundation`
-- [ ] **1.5** `<EmptyState>` + `<Skeleton>` wrappers in `components/ui/`.
+- [x] **1.5** `<EmptyState>` + `<Skeleton>` wrappers in `components/ui/`.
   - Commit: `feat(mobile): add empty-state and skeleton primitives`
-- [ ] **1.6** Toast wrapper (`lib/toast.ts`) per §4.6. `ToastRoot` mounted at root layout.
+- [x] **1.6** Toast wrapper (`lib/toast.ts`) per §4.6. `ToastRoot` mounted at root layout.
   - Commit: `feat(mobile): wire burnt toast wrapper`
-- [ ] **1.7** Haptics wrapper (`lib/haptics.ts`) per §4.11 with three preset shapes (`tap`, `success`, `warning`). Unit-test via mock.
+- [x] **1.7** Haptics wrapper (`lib/haptics.ts`) per §4.11 with three preset shapes (`tap`, `success`, `warning`). Unit-test via mock.
   - Commit: `feat(mobile): add haptics wrapper`
-- [ ] **1.8** Sentry init in `app/_layout.tsx` per §4.10. DSN read from `EXPO_PUBLIC_SENTRY_DSN`. Test crash button verifies it lands.
+- [x] **1.8** Sentry init in `app/_layout.tsx` per §4.10. DSN read from `EXPO_PUBLIC_SENTRY_DSN`. Test crash button verifies it lands.
   - Commit: `feat(mobile): wire sentry crash and error reporting`
-- [ ] **1.9** `<RootErrorBoundary>` mounted at root. Triggers a fallback render + reports to Sentry. Manual smoke: throw inside a screen, confirm fallback shows.
+- [x] **1.9** `<RootErrorBoundary>` mounted at root. Triggers a fallback render + reports to Sentry. Manual smoke: throw inside a screen, confirm fallback shows.
   - Commit: `feat(mobile): add root error boundary`
-- [ ] **1.10** `lib/network/state.ts` + `<NetworkBanner>` mounted at root. Toggle airplane mode → banner appears within 1s.
+- [x] **1.10** `lib/network/state.ts` + `<NetworkBanner>` mounted at root. Toggle airplane mode → banner appears within 1s.
   - Commit: `feat(mobile): add network state hook and offline banner`
-- [ ] **1.11** Swap RN `<Image>` import → `expo-image` `<Image>` everywhere via codemod. ESLint rule `no-restricted-imports` blocks future RN `<Image>` use.
+- [x] **1.11** Swap RN `<Image>` import → `expo-image` `<Image>` everywhere via codemod. ESLint rule `no-restricted-imports` blocks future RN `<Image>` use.
   - Commit: `feat(mobile): standardise on expo-image`
-- [ ] **1.12** `<FlashList>` adopted as the list primitive — wrap in `components/ui/List.tsx` so the conversation list and message list both pass through. ESLint rule blocks bare `<FlatList>`.
+- [x] **1.12** `<FlashList>` adopted as the list primitive — wrap in `components/ui/List.tsx` so the conversation list and message list both pass through. ESLint rule blocks bare `<FlatList>`.
   - Commit: `feat(mobile): adopt flash-list as default list primitive`
 
 ### Phase 2 — API client

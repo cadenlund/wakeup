@@ -6,6 +6,7 @@
 // (§5.1) when Phase 5 lands. Keeping it here as the reviewable
 // surface for the operator's per-milestone gate (§12.5).
 import { Stack } from 'expo-router';
+import { Inbox } from 'lucide-react-native';
 import * as React from 'react';
 import { ScrollView, View } from 'react-native';
 
@@ -19,13 +20,17 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Text } from '@/components/ui/text';
 import { SCHEMES, type SchemeOrSystem } from '@/lib/theme/schemes';
 import { useThemeStore, type ModePreference } from '@/lib/theme/store';
+import { haptics } from '@/lib/haptics';
+import { toast } from '@/lib/toast';
 
 const MODE_PREFERENCES: ModePreference[] = ['light', 'dark', 'system'];
 
@@ -172,6 +177,83 @@ export default function GalleryScreen() {
         <View className="flex-row items-center gap-3 pt-2">
           <Switch checked={switchOn} onCheckedChange={setSwitchOn} />
           <Text>{switchOn ? 'Notifications on' : 'Notifications off'}</Text>
+        </View>
+      </View>
+
+      <Separator />
+
+      <View className="gap-3">
+        <Text variant="h2">Toasts</Text>
+        <View className="flex-row flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onPress={() => toast.success('Saved', 'Your changes are live.')}>
+            <Text>Success</Text>
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onPress={() => toast.error('Failed to save', 'Try again in a moment.')}>
+            <Text>Error</Text>
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onPress={() => toast.info('Reconnecting…', 'Lost connection to server.')}>
+            <Text>Info</Text>
+          </Button>
+        </View>
+      </View>
+
+      <Separator />
+
+      <View className="gap-3">
+        <Text variant="h2">Haptics</Text>
+        <View className="flex-row flex-wrap gap-2">
+          <Button size="sm" variant="outline" onPress={() => haptics.tap()}>
+            <Text>tap</Text>
+          </Button>
+          <Button size="sm" variant="outline" onPress={() => haptics.success()}>
+            <Text>success</Text>
+          </Button>
+          <Button size="sm" variant="outline" onPress={() => haptics.warning()}>
+            <Text>warning</Text>
+          </Button>
+        </View>
+      </View>
+
+      <Separator />
+
+      <View className="gap-3">
+        <Text variant="h2">Skeleton</Text>
+        <View className="gap-2">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-1/2" />
+          <View className="flex-row items-center gap-3 pt-2">
+            <Skeleton className="h-12 w-12 rounded-full" />
+            <View className="flex-1 gap-2">
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-3 w-1/3" />
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <Separator />
+
+      <View className="gap-3">
+        <Text variant="h2">Empty state</Text>
+        <View className="overflow-hidden rounded-xl border border-border bg-card">
+          <EmptyState
+            icon={<Inbox size={40} color="hsl(var(--muted-foreground))" />}
+            title="No conversations yet"
+            subtitle="Start a chat with a friend to see it here."
+            cta={{
+              label: 'Find friends',
+              onPress: () => {},
+            }}
+          />
         </View>
       </View>
 
