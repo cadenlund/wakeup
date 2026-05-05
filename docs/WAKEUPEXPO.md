@@ -74,7 +74,7 @@ apps/mobile/
 ├── eas.json                      # EAS Build + EAS Update channels
 ├── package.json
 ├── tsconfig.json
-├── tailwind.config.ts            # NativeWind v5 theme tokens (10 schemes, see §4.5)
+├── tailwind.config.js            # NativeWind v4 + shadcn token mapping (10 schemes, see §4.5)
 ├── global.css                    # @tailwind base + @theme overrides per scheme
 ├── babel.config.js
 ├── metro.config.js
@@ -168,7 +168,7 @@ apps/mobile/
 |---|---|---|
 | Runtime | **Expo SDK 51+** | Locked; tracks the version EAS Hosting publishes |
 | Routing | **Expo Router v3** (file-based) | Folder = screen; parallel routes for the call overlay |
-| Styling | **NativeWind v5** | Tailwind classes adapted for RN; the `@tailwind base` directive in `global.css` plus per-scheme `@theme` overrides drives 10 schemes |
+| Styling | **NativeWind v4 (stable)** + **Tailwind v3** | Scaffolded via `npx rn-new --nativewind`. shadcn HSL channel format (`H S% L%`) in `global.css`, wrapped via `hsl(var(--name) / <alpha-value>)` in `tailwind.config.js`. 10-scheme palette has dual source of truth: CSS for web, `lib/theme/palettes.ts` injected via `vars()` for native. NW v5 preview abandoned 2026-05-04 after multiple runtime bugs. |
 | Foundation components | **react-native-reusables** (RNR) | shadcn-style copy-in components — see §3.1 below for the full v1 install list, including their auth blocks |
 | Server state | **TanStack Query v5** | Caching, retries, optimistic updates, cache invalidation hooks |
 | API client codegen | **Orval** + `openapi-typescript` | Orval reads the openapi-typescript schema, emits typed React Query hooks per endpoint |
@@ -339,39 +339,37 @@ success, success-foreground
 
 Why shadcn-shaped: `react-native-reusables` ships components built against this vocabulary verbatim (`<Button variant="destructive">` reads `bg-destructive text-destructive-foreground`). Renaming RNR's tokens to a smaller set would mean editing every component on every CLI re-add — drift we don't need. The full set lands at Phase 1.2 alongside the 10 schemes.
 
-**`global.css` structure (NativeWind v5 + Tailwind v4):**
+**`global.css` structure (NativeWind v4 + Tailwind v3, shadcn-style):**
 
 ```css
-@import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/preflight.css" layer(base);
-@import "tailwindcss/utilities.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* Wakeup's `dark:` Tailwind variant matches the [data-mode="dark"]
- * attribute the ThemeProvider toggles on the wrapping View — NOT
- * the OS Appearance signal, so the variant fires correctly when the
- * user picks a dark scheme on a light-mode device and vice versa. */
-@variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
-
-/* Default `@theme` block holds the daylight-light palette so every
- * @media-less Tailwind utility resolves cleanly on a fresh mount
- * before the provider hydrates. */
-@layer theme {
-  @theme {
-    --color-background: ...;
-    /* … 14 more tokens … */
-  }
+/* Default scheme: shadcn-neutral light. The provider always upgrades
+ * this to a real scheme on hydration, but we keep neutral-light as a
+ * sane fallback so the very first frame doesn't flash unstyled. */
+:root {
+  --background: 0 0% 100%;
+  /* HSL channels — wrapped to `hsl(var(--background) / <alpha-value>)`
+   * by tailwind.config.js for shadcn-style alpha modifier support. */
+  /* … 18 more tokens … */
 }
+.dark:root { /* shadcn-neutral dark */ }
 
 /* Per-scheme × per-mode overrides. */
-[data-theme="sunrise"][data-mode="light"] { … }
-[data-theme="sunrise"][data-mode="dark"]  { … }
+[data-theme="sunrise"]:root           { /* light */ }
+[data-theme="sunrise"].dark:root      { /* dark */ }
 /* … 18 more blocks … */
 ```
 
 **Implementation (`lib/theme/`):**
 - `schemes.ts` registers the 10 schemes with their lucide icons. The `mode: "light" | "dark"` field that classified schemes in the original spec is gone; mode is independent.
 - `store.ts` (Zustand) tracks `selected: SchemeOrSystem`, `osMode: "light" | "dark"`, `effective: Scheme`, `mode: "light" | "dark"`. `effective` resolves `system` to a default scheme; `mode` mirrors OS Appearance and can be user-overridden in a future iteration.
-- `provider.tsx` mounts a `<View data-theme={effective} data-mode={mode}>` at the root. NativeWind v5 matches the `[data-theme="…"][data-mode="…"]` selectors against this attribute pair.
+- `palettes.ts` mirrors the 10 schemes × 2 modes from `global.css` as a TS object for native injection — see "Dual source of truth" note below.
+- `provider.tsx` mounts a wrapping `<View>` with three signals: `dataSet={{ theme: effective }}` for web (`[data-theme]:root` selectors match), `style={vars(palettes[effective][mode])}` for native (NW v4 doesn't compile per-scheme variable-only rules into the native bundle, so we inject directly), and `className="dark"` when in dark mode (drives RNR's `dark:` utilities and the `.dark:root` cascade on web).
+
+**Dual source of truth for the 10-scheme palette** — accepted complexity. NW v4's compiler reads `[data-theme]:root` blocks for **web** (browser CSS engine handles cascade), but the native bundle drops rules that only define CSS variables. So `lib/theme/palettes.ts` mirrors the same values for **native** and the provider injects them via NW's `vars()` helper. A scheme tweak requires editing both files. Trade is annoying but the alternative (build step that codegens TS from CSS) was more complexity than the rate of scheme edits justifies.
 - The picker at `app/settings/theme.tsx` renders 11 swatches (10 + system), each showing both the light- and dark-mode preview side-by-side (96×48 each). Tap → `useThemeStore.setScheme(name)`.
 - Scheme persists across launches via AsyncStorage. On first launch, default = `system` (resolves to `daylight` light or `midnight` dark depending on OS mode).
 
@@ -1267,7 +1265,7 @@ Three profiles: `development` (with dev client, points at local backend), `previ
 
 - Install per the `expo-tailwind-setup` skill's docs.
 - `tailwind.config.ts` extends the default palette with our 10 themed token tables.
-- `global.css` imports Tailwind base + per-scheme `@theme` blocks gated by a `[data-theme="…"]` attribute on the root view (NativeWind v5's mechanism).
+- `global.css` declares Tailwind v3 directives + per-scheme `[data-theme="…"]:root` and `[data-theme="…"].dark:root` blocks (web source of truth). `lib/theme/palettes.ts` mirrors the same values as a TS object (native source of truth, injected via NW's `vars()`).
 
 ### 13.5 Justfile additions (root repo)
 
@@ -1365,7 +1363,7 @@ This is the literal first-run sequence for the operator after `WAKEUP.md` Phase 
 
 1. **Initialise the Expo app.** `cd apps/mobile && bunx create-expo-app@latest --template tabs`. Move the generated files to match §2. Commit.
 2. **Install the locked stack** from §3 in one shot. `bun add` the runtime deps; `bun add -D` the dev deps.
-3. **Wire NativeWind v5** per the `expo-tailwind-setup` skill. Add `global.css`, `tailwind.config.ts`. Add the 10-scheme tokens in §4.5. Smoke-test by changing the root view background between two schemes.
+3. **Scaffold via `npx rn-new --nativewind`** — generates known-good `babel.config.js` + `metro.config.js` + `tailwind.config.js` + `nativewind-env.d.ts` for NW v4 + SDK 54. Add the 10-scheme tokens to `global.css` AND `lib/theme/palettes.ts` per §4.5. Smoke-test by changing the root view background between two schemes.
 4. **Install ALL RNR components and auth blocks** per §3.1 in one batch. `npx @react-native-reusables/cli@latest init` then `npx @react-native-reusables/cli@latest add <every-name-in-§3.1>`. Verify a Button + a Sign-In form render with theme tokens.
 5. **Generate API types + hooks.** `just gen-client` writes `lib/api/schema.ts`. Add `lib/api/orval.config.ts`. Run `just mobile-gen-hooks` → `lib/api/hooks/*.ts`. Verify a sample query compiles.
 6. **Wire the auth screens** per §5.1, using RNR's prebuilt forms (`sign-in-form`, `sign-up-form`, `forgot-password-form`, `reset-password-form`). Login + Register first; password reset can wait.
@@ -1447,7 +1445,7 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 ### Phase 1 — Theming + foundation
 
-- [ ] **1.1** NativeWind v5 wired per the `expo-tailwind-setup` skill. `global.css`, `tailwind.config.ts` in place.
+- [ ] **1.1** Mobile app scaffolded via `npx rn-new --nativewind` (NW v4 + Tailwind v3); generated configs in place.
   - Commit: `feat(mobile): wire nativewind v5`
 - [ ] **1.2** Add the 10 sleep-cycle schemes from §4.5 to `tailwind.config.ts`. Each scheme has its `@theme` block. Smoke-test by switching the root via a debug keystroke.
   - Commit: `feat(mobile): add ten sleep-cycle color schemes`

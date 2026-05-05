@@ -1,50 +1,24 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
 node_modules/
-
-# Expo
 .expo/
 dist/
-web-build/
-expo-env.d.ts
-
-# Native
-.kotlin/
-*.orig.*
+npm-debug.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.orig.*
+web-build/
+# expo router
+expo-env.d.ts
 
-# Metro
-.metro-health-check*
 
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
+
+ios
+android
 
 # macOS
 .DS_Store
-*.pem
 
-# local env files. .env.example is committed as documentation; everything
-# else is treated as a secret-bearing file and stays out of git. Real
-# values go in eas.json profiles (build-time) or EAS Secrets (runtime).
-.env
-.env.*
-!.env.example
-
-# Play Store service account JSON, referenced by serviceAccountKeyPath
-# in eas.json. Never commit — it's the credentials for production
-# Android submission.
-google-service-account*.json
-
-# typescript
-*.tsbuildinfo
-
-# generated native folders
-/ios
-/android
+# Temporary files created by Metro to check the health of the file watcher
+.metro-health-check*

@@ -1,17 +1,19 @@
 // Package notificationpref is the service layer for per-user push-
-// notification toggles. Composes the notificationpref repository (§3.4)
-// behind a thin apierror-typed surface.
+// notification toggles AND theme preferences. Composes the
+// notificationpref repository (§3.4) behind a thin apierror-typed
+// surface.
 //
-// Three methods:
+// Methods:
 //   - GetForUser     : returns the row, auto-creating a defaults row
-//     (all true) on first call.
-//   - UpdateForUser  : patches any subset of category booleans. Ensures
-//     the row exists first so a brand-new user's first
-//     patch succeeds without a separate Get call.
+//     (all booleans true, theme = 'system'/'system') on first call.
+//   - UpdateForUser  : patches any subset of fields. Ensures the row
+//     exists first so a brand-new user's first patch succeeds without a
+//     separate Get call. Validates theme enum values before delegating
+//     to the repo so the DB CHECK constraint never trips.
 //   - ShouldNotify   : per-category bool check used by §11 trigger sites.
-//     Defaults to true if no row exists (a fresh user
-//     gets all-true via the schema defaults). Fails open
-//     on DB errors — better to over-notify than miss.
+//     Defaults to true if no row exists (a fresh user gets all-true via
+//     the schema defaults). Fails open on DB errors — better to
+//     over-notify than miss.
 package notificationpref
 
 import (
@@ -62,11 +64,30 @@ const (
 // nil-means-unchanged semantics — matches the repo's COALESCE pattern
 // and lets handlers forward partial PATCH bodies straight through.
 type UpdateParams struct {
-	UserID         uuid.UUID
-	DirectMessages *bool
-	GroupMessages  *bool
-	FriendRequests *bool
-	Calls          *bool
+	UserID              uuid.UUID
+	DirectMessages      *bool
+	GroupMessages       *bool
+	FriendRequests      *bool
+	Calls               *bool
+	ThemeScheme         *string
+	ThemeModePreference *string
+}
+
+// validThemeSchemes mirrors the CHECK constraint in migration 0012 for
+// `theme_scheme`. Centralized so the service rejects bad values with a
+// clean apierror.Validation rather than letting them hit Postgres and
+// surface as a generic 500.
+var validThemeSchemes = map[string]struct{}{
+	"system": {}, "sunrise": {}, "daylight": {}, "noon": {},
+	"golden": {}, "meadow": {}, "dusk": {}, "twilight": {},
+	"aurora": {}, "midnight": {}, "rem": {},
+}
+
+// validThemeModes mirrors the CHECK constraint in migration 0012 for
+// `theme_mode_preference`. "system" follows OS Appearance; "light"/
+// "dark" override it.
+var validThemeModes = map[string]struct{}{
+	"system": {}, "light": {}, "dark": {},
 }
 
 // GetForUser returns the user's preference row, auto-creating one with
@@ -112,19 +133,45 @@ func (s *Service) ShouldNotify(ctx context.Context, userID uuid.UUID, category C
 	return true
 }
 
-// UpdateForUser patches whichever booleans are non-nil in p. The row is
+// UpdateForUser patches whichever fields are non-nil in p. The row is
 // created with defaults first if it doesn't yet exist — so a user's
-// first-ever PATCH still succeeds.
+// first-ever PATCH still succeeds. Theme enum values are validated
+// here so a bad value returns a 400 with a useful message rather than
+// a generic 500 from the DB CHECK constraint.
 func (s *Service) UpdateForUser(ctx context.Context, p UpdateParams) (domain.NotificationPreference, error) {
+	var fieldErrs []apierror.FieldError
+	if p.ThemeScheme != nil {
+		if _, ok := validThemeSchemes[*p.ThemeScheme]; !ok {
+			fieldErrs = append(fieldErrs, apierror.FieldError{
+				Field:   "theme_scheme",
+				Code:    "INVALID_VALUE",
+				Message: "must be one of: system, sunrise, daylight, noon, golden, meadow, dusk, twilight, aurora, midnight, rem",
+			})
+		}
+	}
+	if p.ThemeModePreference != nil {
+		if _, ok := validThemeModes[*p.ThemeModePreference]; !ok {
+			fieldErrs = append(fieldErrs, apierror.FieldError{
+				Field:   "theme_mode_preference",
+				Code:    "INVALID_VALUE",
+				Message: "must be one of: system, light, dark",
+			})
+		}
+	}
+	if len(fieldErrs) > 0 {
+		return domain.NotificationPreference{}, apierror.Validation(fieldErrs)
+	}
 	if _, err := s.prefs.GetOrCreate(ctx, p.UserID); err != nil {
 		return domain.NotificationPreference{}, apierror.Internal("ensure notification preferences").WithCause(err)
 	}
 	pref, err := s.prefs.Patch(ctx, repo.PatchParams{
-		UserID:         p.UserID,
-		DirectMessages: p.DirectMessages,
-		GroupMessages:  p.GroupMessages,
-		FriendRequests: p.FriendRequests,
-		Calls:          p.Calls,
+		UserID:              p.UserID,
+		DirectMessages:      p.DirectMessages,
+		GroupMessages:       p.GroupMessages,
+		FriendRequests:      p.FriendRequests,
+		Calls:               p.Calls,
+		ThemeScheme:         p.ThemeScheme,
+		ThemeModePreference: p.ThemeModePreference,
 	})
 	if err != nil {
 		// ErrNotFound after GetOrCreate would mean the row was deleted

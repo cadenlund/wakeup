@@ -32,21 +32,31 @@ type AvatarUploadResponse struct {
 }
 
 // NotificationPreferencesResponse is the body of GET /v1/users/me/notifications
-// and the success body of PATCH /v1/users/me/notifications.
+// and the success body of PATCH /v1/users/me/notifications. Despite the
+// "notifications" name the row also stores the §4.5 theme pick, so the
+// response includes those columns too — one round-trip on app start
+// gives the client everything it needs to paint and gate notifications.
 type NotificationPreferencesResponse struct {
-	DirectMessages bool `json:"direct_messages" example:"true"`
-	GroupMessages  bool `json:"group_messages"  example:"true"`
-	FriendRequests bool `json:"friend_requests" example:"true"`
-	Calls          bool `json:"calls"           example:"true"`
+	DirectMessages      bool   `json:"direct_messages"       example:"true"`
+	GroupMessages       bool   `json:"group_messages"        example:"true"`
+	FriendRequests      bool   `json:"friend_requests"       example:"true"`
+	Calls               bool   `json:"calls"                 example:"true"`
+	ThemeScheme         string `json:"theme_scheme"          example:"system" enums:"system,sunrise,daylight,noon,golden,meadow,dusk,twilight,aurora,midnight,rem"`
+	ThemeModePreference string `json:"theme_mode_preference" example:"system" enums:"system,light,dark"`
 }
 
 // UpdateNotificationPreferencesRequest is the body for
 // PATCH /v1/users/me/notifications. Each pointer uses nil-means-unchanged.
+// `theme_scheme` and `theme_mode_preference` accept the same enum
+// values as the response — service validates and returns 400 with a
+// FieldError on bad values before the DB CHECK constraint fires.
 type UpdateNotificationPreferencesRequest struct {
-	DirectMessages *bool `json:"direct_messages,omitempty" example:"false"`
-	GroupMessages  *bool `json:"group_messages,omitempty"  example:"true"`
-	FriendRequests *bool `json:"friend_requests,omitempty" example:"true"`
-	Calls          *bool `json:"calls,omitempty"           example:"false"`
+	DirectMessages      *bool   `json:"direct_messages,omitempty"       example:"false"`
+	GroupMessages       *bool   `json:"group_messages,omitempty"        example:"true"`
+	FriendRequests      *bool   `json:"friend_requests,omitempty"       example:"true"`
+	Calls               *bool   `json:"calls,omitempty"                 example:"false"`
+	ThemeScheme         *string `json:"theme_scheme,omitempty"          example:"midnight" enums:"system,sunrise,daylight,noon,golden,meadow,dusk,twilight,aurora,midnight,rem"`
+	ThemeModePreference *string `json:"theme_mode_preference,omitempty" example:"dark"     enums:"system,light,dark"`
 }
 
 // toUserResponse renders the public view of a domain.User. Soft-deleted
@@ -82,9 +92,11 @@ func toUserListResponse(users []domain.User, next *string, hasMore bool) UserLis
 // toNotificationPreferencesResponse renders the §6.2 GET/PATCH body.
 func toNotificationPreferencesResponse(p domain.NotificationPreference) NotificationPreferencesResponse {
 	return NotificationPreferencesResponse{
-		DirectMessages: p.DirectMessages,
-		GroupMessages:  p.GroupMessages,
-		FriendRequests: p.FriendRequests,
-		Calls:          p.Calls,
+		DirectMessages:      p.DirectMessages,
+		GroupMessages:       p.GroupMessages,
+		FriendRequests:      p.FriendRequests,
+		Calls:               p.Calls,
+		ThemeScheme:         p.ThemeScheme,
+		ThemeModePreference: p.ThemeModePreference,
 	}
 }

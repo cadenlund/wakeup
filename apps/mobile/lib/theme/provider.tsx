@@ -1,20 +1,29 @@
-// ThemeProvider: keeps the Zustand store in sync with the OS dark/light
-// signal and renders a wrapping View whose `data-theme` attribute drives
-// the per-scheme @theme overrides in global.css.
+// ThemeProvider: drives the active sleep-cycle scheme + light/dark
+// mode by injecting CSS variables into the React tree via NativeWind's
+// `vars()` helper.
 //
-// The provider mounts once at the root (app/_layout.tsx) and is the
-// only place that reads the OS Appearance — every consumer reads the
-// resolved scheme via useThemeStore so React re-renders only when the
-// effective scheme actually changes.
-import * as React from "react";
-import { useEffect } from "react";
-import { Appearance, type ColorSchemeName } from "react-native";
+// Why `vars()` instead of pure CSS selectors: NW v4's compiler reads
+// global.css's `[data-theme="..."]:root` blocks for WEB, but the
+// native bundle doesn't pick up rules that only define CSS variables
+// (no other style props). On native we therefore inject the active
+// palette directly. global.css is the web source of truth (browser
+// CSS engine handles the cascade); lib/theme/palettes.ts is the
+// native source of truth, kept in sync via the schemes.css→palettes
+// build step.
+//
+// Mounts once at the root (app/_layout.tsx). Reads OS Appearance only
+// here so consumers re-render only when the effective scheme or mode
+// actually changes.
+import * as React from 'react';
+import { useEffect, useMemo } from 'react';
+import { Appearance, View, type ColorSchemeName } from 'react-native';
+import { vars } from 'nativewind';
 
-import { View } from "@/lib/tw";
-import { useThemeStore } from "@/lib/theme/store";
+import { PALETTES, paletteToVars } from '@/lib/theme/palettes';
+import { useThemeStore } from '@/lib/theme/store';
 
-function appearanceToMode(scheme: ColorSchemeName): "light" | "dark" {
-  return scheme === "dark" ? "dark" : "light";
+function appearanceToMode(scheme: ColorSchemeName): 'light' | 'dark' {
+  return scheme === 'dark' ? 'dark' : 'light';
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -41,16 +50,30 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [setOsMode]);
 
-  // Both attributes drive the global.css selectors:
-  //   - [data-theme="<scheme>"] picks the color personality
-  //   - [data-mode="light"|"dark"] picks the light/dark variant
-  // Combined: [data-theme="midnight"][data-mode="dark"] { … } etc.
-  // The same data-mode attribute also drives Tailwind's `dark:`
-  // variant via the `@variant dark (…)` declaration in global.css —
-  // so RNR's `dark:bg-destructive/60` etc. fires off the user's
-  // chosen scheme, not the OS Appearance signal alone.
+  // Resolve the active palette and shape it as `vars()` for native CSS
+  // variable injection. Memoised on (effective, mode) so identity is
+  // stable between unrelated re-renders — VariableContext consumers
+  // skip work when nothing changed.
+  const themeStyle = useMemo(
+    () => vars(paletteToVars(PALETTES[effective][mode])),
+    [effective, mode]
+  );
+
+  // `dataSet` is the React Native Web way to emit `data-*` HTML
+  // attributes on the rendered DOM element; on web the
+  // `[data-theme="..."]` selectors in global.css match against this
+  // and the browser's CSS engine handles the cascade. On native the
+  // `style={themeStyle}` injection above is the load-bearing path.
+  // `dataSet` is typed only on RN Web's View — RN's index.d.ts omits
+  // it. Cast through unknown so the prop is accepted on both.
+  const dataAttrs = {
+    dataSet: { theme: effective },
+  } as Record<string, unknown>;
+
+  const className = mode === 'dark' ? 'dark flex-1 bg-background' : 'flex-1 bg-background';
+
   return (
-    <View data-theme={effective} data-mode={mode} className="flex-1 bg-background">
+    <View {...dataAttrs} style={themeStyle} className={className}>
       {children}
     </View>
   );

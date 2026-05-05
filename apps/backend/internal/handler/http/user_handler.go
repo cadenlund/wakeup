@@ -311,18 +311,18 @@ func (h *UserHandler) GetNotifications(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, toNotificationPreferencesResponse(pref))
 }
 
-// UpdateNotifications patches whichever category booleans are set in the body.
+// UpdateNotifications patches whichever category booleans + theme fields are set in the body.
 //
-// @Summary      Update current user's notification preferences
-// @Description  Patches any subset of `direct_messages`, `group_messages`, `friend_requests`, `calls`. Omitted fields are unchanged.
+// @Summary      Update current user's notification + theme preferences
+// @Description  Patches any subset of `direct_messages`, `group_messages`, `friend_requests`, `calls`, `theme_scheme`, `theme_mode_preference`. Omitted fields are unchanged. Theme enum values are validated; invalid values return 400 with a `theme_scheme` / `theme_mode_preference` field error.
 // @Tags         users
 // @Accept       json
 // @Produce      json
 // @Security     CookieAuth
-// @Param        request  body     UpdateNotificationPreferencesRequest  true  "Toggles patch"
-// @Success      200      {object} NotificationPreferencesResponse       "Updated toggles"
+// @Param        request  body     UpdateNotificationPreferencesRequest  true  "Preferences patch"
+// @Success      200      {object} NotificationPreferencesResponse       "Updated preferences"
 // @Header       200      {string} X-Request-ID                          "Echoed request id"
-// @Failure      400      {object} ErrorResponse                         "Malformed JSON / empty body"
+// @Failure      400      {object} ErrorResponse                         "Malformed JSON / empty body / invalid theme enum"
 // @Failure      401      {object} ErrorResponse                         "Not authenticated"
 // @Failure      413      {object} ErrorResponse                         "Request body too large"
 // @Failure      422      {object} ErrorResponse                         "Validation failed"
@@ -341,11 +341,13 @@ func (h *UserHandler) UpdateNotifications(w http.ResponseWriter, r *http.Request
 		return
 	}
 	pref, err := h.prefs.UpdateForUser(r.Context(), notifprefsvc.UpdateParams{
-		UserID:         uid,
-		DirectMessages: req.DirectMessages,
-		GroupMessages:  req.GroupMessages,
-		FriendRequests: req.FriendRequests,
-		Calls:          req.Calls,
+		UserID:              uid,
+		DirectMessages:      req.DirectMessages,
+		GroupMessages:       req.GroupMessages,
+		FriendRequests:      req.FriendRequests,
+		Calls:               req.Calls,
+		ThemeScheme:         req.ThemeScheme,
+		ThemeModePreference: req.ThemeModePreference,
 	})
 	if err != nil {
 		WriteError(w, r, err)

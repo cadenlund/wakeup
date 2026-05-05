@@ -1,13 +1,14 @@
-appId: app.wakeup.client
+appId: com.anonymous.mobile
 ---
-# Phase 1.4 gallery — verifies the NativeWind v5 + 15-token x 10
-# schemes x 2 modes pipeline lands styled UI on the simulator.
+# Phase 1.4 gallery — verifies the NativeWind v4 + 15-token × 10
+# schemes × 2 modes pipeline lands styled UI on the simulator.
 # Deleted when Phase 5.1 ships the real conversations list.
 - launchApp:
     clearState: true
 - assertVisible: "Theme tokens"
 - assertVisible: "Buttons"
 - assertVisible: "Badges"
-- assertVisible: "Card title"
-- assertVisible: "Auth block"
+- scrollUntilVisible:
+    element:
+      text: "Inputs & switches"
 - takeScreenshot: gallery
