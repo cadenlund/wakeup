@@ -5,9 +5,10 @@
 //   - mutations (POST/PATCH/PUT) carry an `Idempotency-Key` header.
 //     Callers pass the key in via `init.idempotencyKey` so retries
 //     can reuse the same key (per §4.7).
-//   - non-2xx responses surface as `APIError` with the parsed
-//     problem-details body. The error toaster (`onError` in the
-//     React Query config) reads `.title` / `.detail`.
+//   - non-2xx responses surface as `APIError` with the parsed error
+//     envelope. Backend wire shape is `{ error: { code, message,
+//     fields, retry_after_seconds } }` (handler/http/respond.go's
+//     `ErrorResponse`); the error toaster reads `.code` / `.message`.
 //
 // We deliberately do NOT auto-retry inside this layer — that's
 // React Query's job (`retry` + `retryDelay` config in §4.10). A
@@ -16,20 +17,45 @@
 import { API_BASE_URL } from '@/lib/env';
 import { newIdempotencyKey } from '@/lib/api/idempotency';
 
-export type ProblemDetails = {
-  type?: string;
-  title?: string;
-  status?: number;
-  detail?: string;
-  instance?: string;
-  errors?: { field: string; message: string }[];
+// Mirrors apps/backend/internal/handler/http/respond.go's
+// ErrorBody / ErrorField / ErrorResponse — kept in sync via
+// `just gen-client` (the generated lib/api/model contains the
+// canonical Swagger-derived types; this mirror exists so the
+// fetcher can extract message / code without importing every
+// generated model file).
+export type APIErrorField = {
+  field: string;
+  code: string;
+  message: string;
 };
+
+export type APIErrorBody = {
+  code: string;
+  message: string;
+  fields?: APIErrorField[];
+  retry_after_seconds?: number;
+};
+
+export type APIErrorResponse = {
+  error: APIErrorBody;
+};
+
+function isAPIErrorResponse(value: unknown): value is APIErrorResponse {
+  if (!value || typeof value !== 'object') return false;
+  const err = (value as { error?: unknown }).error;
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    typeof (err as APIErrorBody).code === 'string' &&
+    typeof (err as APIErrorBody).message === 'string'
+  );
+}
 
 export class APIError extends Error {
   status: number;
-  body: ProblemDetails | null;
+  body: APIErrorBody | null;
 
-  constructor(status: number, body: ProblemDetails | null, message: string) {
+  constructor(status: number, body: APIErrorBody | null, message: string) {
     super(message);
     this.name = 'APIError';
     this.status = status;
@@ -77,9 +103,9 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInitExt =
   const body: unknown = isJson && bodyText ? JSON.parse(bodyText) : bodyText;
 
   if (!res.ok) {
-    const problem = isJson && body && typeof body === 'object' ? (body as ProblemDetails) : null;
-    const message = problem?.title ?? problem?.detail ?? `HTTP ${res.status}`;
-    throw new APIError(res.status, problem, message);
+    const errorBody = isJson && isAPIErrorResponse(body) ? body.error : null;
+    const message = errorBody?.message ?? `HTTP ${res.status}`;
+    throw new APIError(res.status, errorBody, message);
   }
 
   return body as T;

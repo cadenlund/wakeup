@@ -42,17 +42,20 @@ function backoff(attempt: number): number {
 // Mutation errors always toast (per spec §4.6). 401s are noisy at
 // boot — the auth flow re-renders to the login screen as soon as
 // `useGetMe()` resolves 401, so we suppress the toast for those.
+//
+// The backend's error envelope is `{ error: { code, message } }`;
+// `error.body` is the inner `error` object (already unwrapped by
+// `apiFetch`). `code` is e.g. RESOURCE_NOT_FOUND, VALIDATION_FAILED;
+// `message` is the human-readable string we surface as the toast
+// detail line.
 function toastError(error: unknown) {
   if (error instanceof APIError && error.status === 401) return;
-  const title =
-    error instanceof APIError && error.body?.title ? error.body.title : 'Request failed';
-  const detail =
-    error instanceof APIError && error.body?.detail
-      ? error.body.detail
-      : error instanceof Error
-        ? error.message
-        : undefined;
-  toast.error(title, detail);
+  if (error instanceof APIError && error.body) {
+    toast.error(error.body.code || 'Request failed', error.body.message);
+    return;
+  }
+  const detail = error instanceof Error ? error.message : undefined;
+  toast.error('Request failed', detail);
 }
 
 export const queryClient = new QueryClient({
