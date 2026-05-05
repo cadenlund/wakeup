@@ -71,8 +71,7 @@ jobs:
       RESET_PASSWORD_APP_URL_BASE: "wakeup://reset?token="
       RESET_PASSWORD_WEB_URL_BASE: "http://localhost:8081/reset?token="
       RESEND_API_KEY: ci-stub
-      MAILER_FROM: "no-reply@wakeup.test"
-      MAILER_FROM_NAME: "Wakeup CI"
+      RESEND_FROM_EMAIL: "no-reply@wakeup.test"
 
     steps:
       - uses: actions/checkout@v4
