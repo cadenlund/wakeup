@@ -67,6 +67,13 @@ jobs:
       S3_FORCE_PATH_STYLE: "true"
       LOG_LEVEL: info
       SESSION_SECRET: ci-only-not-secret-32bytes-long-padding
+      # LiveKit isn't a noop-in-test target — the constructor requires
+      # a non-blank URL/key/secret. Phase 3 never makes a call, so
+      # placeholder values that satisfy the constructor are enough;
+      # there's no live LiveKit container in this workflow.
+      LIVEKIT_URL: "http://livekit.invalid"
+      LIVEKIT_API_KEY: ci-stub
+      LIVEKIT_API_SECRET: ci-stub-secret-padding-32bytes-long
 
     steps:
       - uses: actions/checkout@v4
