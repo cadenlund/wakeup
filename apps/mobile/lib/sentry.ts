@@ -52,7 +52,9 @@ const runtimeVersion =
     ? Constants.expoConfig.runtimeVersion
     : 'unset';
 
-if (dsn) {
+export const sentryEnabled = !!dsn;
+
+if (sentryEnabled) {
   Sentry.init({
     dsn,
     environment,

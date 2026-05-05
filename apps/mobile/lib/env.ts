@@ -10,8 +10,15 @@
 // EAS profile fails loudly instead of silently pointing at localhost.
 // (CR on PR #115.)
 
-const FALLBACK_API_BASE_URL = 'http://localhost:8080';
-const FALLBACK_WS_BASE_URL = 'ws://localhost:8080';
+// Android emulator can't reach the host's `localhost` — its own
+// network namespace points `localhost` at itself. The host loopback
+// is reachable at the magic alias 10.0.2.2. iOS Simulator + web
+// share the host's network and use `localhost` as expected.
+import { Platform } from 'react-native';
+
+const HOST_LOOPBACK = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+const FALLBACK_API_BASE_URL = `http://${HOST_LOOPBACK}:8080`;
+const FALLBACK_WS_BASE_URL = `ws://${HOST_LOOPBACK}:8080`;
 
 const VALID_ENVS = ['development', 'preview', 'production'] as const;
 type Env = (typeof VALID_ENVS)[number];
