@@ -5329,7 +5329,68 @@ export interface paths {
                 };
             };
         };
-        delete?: never;
+        /**
+         * Remove current user's avatar
+         * @description Sets `avatar_url = NULL` on the authenticated user and best-effort deletes the underlying S3 object. Idempotent — calling twice on a user without an avatar returns 200 with no avatar_url.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description User with avatar_url cleared */
+                200: {
+                    headers: {
+                        /** @description Echoed request id */
+                        "X-Request-ID"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.AvatarUploadResponse"];
+                    };
+                };
+                /** @description Not authenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description User not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description Internal error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -5484,6 +5545,83 @@ export interface paths {
                 };
             };
         };
+        trace?: never;
+    };
+    "/v1/users/me/onboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark onboarding complete
+         * @description Sets `onboarded_at = now()` on the authenticated user (idempotent — second call preserves the original timestamp). Returns the updated /v1/auth/me view so the client can update its cache.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Authenticated user with onboarded_at populated */
+                200: {
+                    headers: {
+                        /** @description Echoed request id */
+                        "X-Request-ID"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.MeResponse"];
+                    };
+                };
+                /** @description Not authenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description User not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description Internal error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/users/{id}": {
@@ -6068,6 +6206,14 @@ export interface components {
             /** @example 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c */
             id?: string;
             impersonated_by?: components["schemas"]["internal_handler_http.ImpersonatorInfo"];
+            /**
+             * @description OnboardedAt is null until the user finishes the post-login
+             *     onboarding carousel. The mobile AuthGate (WAKEUPEXPO §3.0)
+             *     routes to (onboarding) while this is null so a fresh sign-in
+             *     on a new device doesn't re-onboard a user who already finished.
+             * @example 2026-05-05T08:42:11Z
+             */
+            onboarded_at?: string;
             /** @example user */
             role?: string;
             /** @example 🛌 */

@@ -37,8 +37,9 @@ type Config struct {
 	S3Bucket         string `koanf:"s3_bucket"`
 	S3ForcePathStyle bool   `koanf:"s3_force_path_style"` // true for MinIO
 
-	ResendAPIKey    string `koanf:"resend_api_key"`
-	ResendFromEmail string `koanf:"resend_from_email"`
+	ResendAPIKey         string `koanf:"resend_api_key"`
+	ResendFromEmail      string `koanf:"resend_from_email"`
+	ResetPasswordURLBase string `koanf:"reset_password_url_base"`
 
 	LiveKitURL       string `koanf:"livekit_url"`
 	LiveKitAPIKey    string `koanf:"livekit_api_key"`

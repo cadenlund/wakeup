@@ -4204,6 +4204,59 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Sets ` + "`" + `avatar_url = NULL` + "`" + ` on the authenticated user and best-effort deletes the underlying S3 object. Idempotent — calling twice on a user without an avatar returns 200 with no avatar_url.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Remove current user's avatar",
+                "responses": {
+                    "200": {
+                        "description": "User with avatar_url cleared",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.AvatarUploadResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/v1/users/me/notifications": {
@@ -4315,6 +4368,61 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "Validation failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/users/me/onboard": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Sets ` + "`" + `onboarded_at = now()` + "`" + ` on the authenticated user (idempotent — second call preserves the original timestamp). Returns the updated /v1/auth/me view so the client can update its cache.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Mark onboarding complete",
+                "responses": {
+                    "200": {
+                        "description": "Authenticated user with onboarded_at populated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.MeResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authenticated",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_http.ErrorResponse"
                         }
@@ -5234,6 +5342,11 @@ const docTemplate = `{
                 },
                 "impersonated_by": {
                     "$ref": "#/definitions/internal_handler_http.ImpersonatorInfo"
+                },
+                "onboarded_at": {
+                    "description": "OnboardedAt is null until the user finishes the post-login\nonboarding carousel. The mobile AuthGate (WAKEUPEXPO §3.0)\nroutes to (onboarding) while this is null so a fresh sign-in\non a new device doesn't re-onboard a user who already finished.",
+                    "type": "string",
+                    "example": "2026-05-05T08:42:11Z"
                 },
                 "role": {
                     "type": "string",

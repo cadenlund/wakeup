@@ -19,6 +19,8 @@
 import * as Sentry from '@sentry/react-native';
 import Constants from 'expo-constants';
 
+import { ENV, SENTRY_DSN } from '@/lib/env';
+
 export const navigationIntegration = Sentry.reactNavigationIntegration({
   enableTimeToInitialDisplay: true,
 });
@@ -42,9 +44,7 @@ function scrubPII<T>(value: T): T {
   return value;
 }
 
-const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
-const environment = process.env.EXPO_PUBLIC_ENV ?? 'development';
-const isDev = environment === 'development';
+const isDev = ENV === 'development';
 
 const appVersion = Constants.expoConfig?.version ?? '0.0.0';
 const runtimeVersion =
@@ -52,12 +52,12 @@ const runtimeVersion =
     ? Constants.expoConfig.runtimeVersion
     : 'unset';
 
-export const sentryEnabled = !!dsn;
+export const sentryEnabled = !!SENTRY_DSN;
 
 if (sentryEnabled) {
   Sentry.init({
-    dsn,
-    environment,
+    dsn: SENTRY_DSN,
+    environment: ENV,
     release: `${appVersion}+${runtimeVersion}`,
     tracesSampleRate: isDev ? 1.0 : 0.1,
     integrations: [navigationIntegration],

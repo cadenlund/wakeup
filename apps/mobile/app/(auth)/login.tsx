@@ -29,10 +29,21 @@ export default function LoginScreen() {
 
   const login = usePostV1AuthLogin({
     mutation: {
-      onSuccess: async () => {
+      onSuccess: async (response) => {
         haptics.success();
+        // Login envelope is `{ user: MeResponse }`; we don't push
+        // it directly (the orval response shape is the wrapped
+        // `{data, status, headers}` envelope at the type layer, but
+        // apiFetch returns the unwrapped body). Instead we surface
+        // the embedded user object into the me-query cache so
+        // AuthGate observes `onboarded_at` synchronously and skips
+        // the onboarding carousel for already-onboarded accounts.
+        const body = response as unknown as { user?: { id?: string; onboarded_at?: string } };
+        if (body?.user?.id) {
+          qc.setQueryData(getGetV1AuthMeQueryKey(), body.user);
+        }
         await qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        router.replace('/');
+        router.replace('/(tabs)');
       },
     },
   });

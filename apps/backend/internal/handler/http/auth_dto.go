@@ -29,15 +29,20 @@ type UserResponse struct {
 // with ImpersonatedBy populated; that field is unused until milestone
 // 12.x but defined now so the wire shape is locked from day one.
 type MeResponse struct {
-	ID             uuid.UUID         `json:"id"              example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
-	Username       string            `json:"username"        example:"caden"`
-	DisplayName    string            `json:"display_name"    example:"Caden Lund"`
-	Email          string            `json:"email"           example:"caden@example.com"`
-	AvatarURL      *string           `json:"avatar_url"      example:"https://wakeup.app/avatars/caden.png"`
-	Bio            *string           `json:"bio"             example:"Building things at night."`
-	StatusEmoji    *string           `json:"status_emoji"    example:"🛌"`
-	ColorScheme    string            `json:"color_scheme"    example:"system"`
-	Role           string            `json:"role"            example:"user"`
+	ID          uuid.UUID `json:"id"              example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
+	Username    string    `json:"username"        example:"caden"`
+	DisplayName string    `json:"display_name"    example:"Caden Lund"`
+	Email       string    `json:"email"           example:"caden@example.com"`
+	AvatarURL   *string   `json:"avatar_url"      example:"https://wakeup.app/avatars/caden.png"`
+	Bio         *string   `json:"bio"             example:"Building things at night."`
+	StatusEmoji *string   `json:"status_emoji"    example:"🛌"`
+	ColorScheme string    `json:"color_scheme"    example:"system"`
+	Role        string    `json:"role"            example:"user"`
+	// OnboardedAt is null until the user finishes the post-login
+	// onboarding carousel. The mobile AuthGate (WAKEUPEXPO §3.0)
+	// routes to (onboarding) while this is null so a fresh sign-in
+	// on a new device doesn't re-onboard a user who already finished.
+	OnboardedAt    *time.Time        `json:"onboarded_at"    example:"2026-05-05T08:42:11Z"`
 	CreatedAt      time.Time         `json:"created_at"      example:"2026-05-02T09:31:21.810Z"`
 	ImpersonatedBy *ImpersonatorInfo `json:"impersonated_by,omitempty"`
 }
@@ -65,7 +70,9 @@ func toMeResponse(u domain.User, impersonator *domain.User) MeResponse {
 		Email: u.Email, AvatarURL: u.AvatarURL,
 		Bio: u.Bio, StatusEmoji: u.StatusEmoji,
 		ColorScheme: u.ColorScheme,
-		Role:        u.Role, CreatedAt: u.CreatedAt,
+		Role:        u.Role,
+		OnboardedAt: u.OnboardedAt,
+		CreatedAt:   u.CreatedAt,
 	}
 	if impersonator != nil && impersonator.ID != u.ID {
 		resp.ImpersonatedBy = &ImpersonatorInfo{

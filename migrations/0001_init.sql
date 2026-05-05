@@ -26,6 +26,14 @@ CREATE TABLE users (
     status_emoji    text CHECK (char_length(status_emoji) <= 8),
     color_scheme    text NOT NULL DEFAULT 'system' CHECK (color_scheme IN ('light','dark','system')),
     role            text NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
+    -- Per-account onboarding-completed timestamp. NULL = first
+    -- post-login experience hasn't run yet; the mobile carousel
+    -- (WAKEUPEXPO §3.0) reads this off /v1/auth/me and routes the
+    -- user into (onboarding) until they finish + the
+    -- POST /v1/users/me/onboarding/complete endpoint stamps a
+    -- value here. Server-side flag (vs AsyncStorage) so signing
+    -- in on a new device doesn't re-onboard the same user.
+    onboarded_at    timestamptz,
     -- Stored-generated SHA-256 of the lowercased email. Used by
     -- POST /v1/contacts/match (WAKEUP.md §6.2): the client hashes its
     -- address book and asks "which of these belong to existing accounts"

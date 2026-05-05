@@ -490,10 +490,17 @@ func buildMailer(cfg *config.Config) (mailer.Mailer, error) {
 			return nil, fmt.Errorf("mailer: RESEND_API_KEY is required in env=%s", cfg.Env)
 		}
 	}
+	resetURL := cfg.ResetPasswordURLBase
+	if resetURL == "" {
+		// Production default. Local dev should set
+		// RESET_PASSWORD_URL_BASE in .env (e.g. wakeup://reset?token=)
+		// so the email link deep-links into the dev client.
+		resetURL = "https://wakeup.app/auth/reset?token="
+	}
 	return mailer.New(mailer.Config{
 		APIKey:       cfg.ResendAPIKey,
 		FromEmail:    cfg.ResendFromEmail,
-		ResetURLBase: "https://wakeup.app/auth/reset?token=",
+		ResetURLBase: resetURL,
 	})
 }
 

@@ -10,7 +10,18 @@
       "output": "static",
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-router", "@sentry/react-native", "expo-font"],
+    "plugins": [
+      "expo-router",
+      "@sentry/react-native",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Wakeup uses your photo library so you can pick a profile picture.",
+          "cameraPermission": "Wakeup uses your camera so you can take a profile picture."
+        }
+      ]
+    ],
     "experiments": {
       "typedRoutes": true,
       "tsconfigPaths": true

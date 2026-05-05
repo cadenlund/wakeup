@@ -64,8 +64,10 @@ func (h *UserHandler) Mount(r chi.Router) {
 		r.Patch("/me", h.UpdateMe)
 		r.Delete("/me", h.DeleteMe)
 		r.Post("/me/avatar", h.UploadAvatar)
+		r.Delete("/me/avatar", h.DeleteAvatar)
 		r.Get("/me/notifications", h.GetNotifications)
 		r.Patch("/me/notifications", h.UpdateNotifications)
+		r.Post("/me/onboard", h.CompleteOnboarding)
 		r.Get("/{id}", h.GetByID)
 	})
 }
@@ -197,6 +199,43 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, toMeResponse(updated, nil))
 }
 
+// CompleteOnboarding stamps the per-account onboarding-completed
+// timestamp on the authenticated user. Idempotent — a second call
+// preserves the existing value via COALESCE in the repo. Backs the
+// mobile post-login carousel (WAKEUPEXPO §3.0): the AuthGate routes
+// to (onboarding) while `me.onboarded_at` is null and stops routing
+// once the carousel calls this endpoint.
+//
+// @Summary      Mark onboarding complete
+// @Description  Sets `onboarded_at = now()` on the authenticated user (idempotent — second call preserves the original timestamp). Returns the updated /v1/auth/me view so the client can update its cache.
+// @Tags         users
+// @Produce      json
+// @Security     CookieAuth
+// @Success      200  {object}  MeResponse     "Authenticated user with onboarded_at populated"
+// @Header       200  {string}  X-Request-ID   "Echoed request id"
+// @Failure      401  {object}  ErrorResponse  "Not authenticated"
+// @Failure      404  {object}  ErrorResponse  "User not found"
+// @Failure      429  {object}  ErrorResponse  "Rate limited"
+// @Failure      500  {object}  ErrorResponse  "Internal error"
+// @Router       /v1/users/me/onboard [post]
+func (h *UserHandler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	if err := h.users.MarkOnboarded(r.Context(), uid); err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	u, err := h.users.GetByID(r.Context(), uid)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, toMeResponse(u, nil))
+}
+
 // DeleteMe soft-deletes the authenticated user. Per §4.6 their content
 // stays; the row's deleted_at gets set and they become invisible.
 //
@@ -277,6 +316,37 @@ func (h *UserHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = file.Close() }()
 
 	updated, err := h.users.UploadAvatar(r.Context(), uid, file, header.Size)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, AvatarUploadResponse{User: toMeResponse(updated, nil)})
+}
+
+// DeleteAvatar clears the authenticated user's avatar_url and best-
+// effort removes the underlying S3 object. Mirror of UploadAvatar so
+// the mobile/web client doesn't have to overload PATCH semantics with
+// "treat empty avatar_url string as a delete".
+//
+// @Summary      Remove current user's avatar
+// @Description  Sets `avatar_url = NULL` on the authenticated user and best-effort deletes the underlying S3 object. Idempotent — calling twice on a user without an avatar returns 200 with no avatar_url.
+// @Tags         users
+// @Produce      json
+// @Security     CookieAuth
+// @Success      200  {object} AvatarUploadResponse  "User with avatar_url cleared"
+// @Header       200  {string} X-Request-ID          "Echoed request id"
+// @Failure      401  {object} ErrorResponse         "Not authenticated"
+// @Failure      404  {object} ErrorResponse         "User not found"
+// @Failure      429  {object} ErrorResponse         "Rate limited"
+// @Failure      500  {object} ErrorResponse         "Internal error"
+// @Router       /v1/users/me/avatar [delete]
+func (h *UserHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	updated, err := h.users.ClearAvatar(r.Context(), uid)
 	if err != nil {
 		WriteError(w, r, err)
 		return

@@ -25,14 +25,13 @@ import { create } from 'zustand';
 
 import {
   DEFAULT_SCHEME,
-  STORAGE_KEY,
   resolveScheme,
   type Mode,
   type Scheme,
   type SchemeOrSystem,
 } from '@/lib/theme/schemes';
+import { STORAGE_KEYS } from '@/lib/storage-keys';
 
-const MODE_PREF_STORAGE_KEY = 'theme:mode_preference';
 const DEFAULT_MODE_PREFERENCE: ModePreference = 'system';
 
 export type ModePreference = 'light' | 'dark' | 'system';
@@ -90,7 +89,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       effective: resolveScheme(scheme, s.mode),
     }));
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, scheme);
+      await AsyncStorage.setItem(STORAGE_KEYS.themeScheme, scheme);
     } catch (err) {
       // Persistence failure is non-fatal — the picker keeps the new
       // scheme for the rest of this session; next launch falls back
@@ -109,7 +108,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       };
     });
     try {
-      await AsyncStorage.setItem(MODE_PREF_STORAGE_KEY, pref);
+      await AsyncStorage.setItem(STORAGE_KEYS.themeModePreference, pref);
     } catch (err) {
       console.warn('theme: failed to persist mode preference', err);
     }
@@ -130,8 +129,8 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
     if (get().hydrated) return;
     try {
       const [storedScheme, storedMode] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEY),
-        AsyncStorage.getItem(MODE_PREF_STORAGE_KEY),
+        AsyncStorage.getItem(STORAGE_KEYS.themeScheme),
+        AsyncStorage.getItem(STORAGE_KEYS.themeModePreference),
       ]);
       set((s) => {
         const selected = isSchemeOrSystem(storedScheme) ? storedScheme : s.selected;

@@ -47,3 +47,10 @@ export const WS_BASE_URL = requireBaseUrl(
   process.env.EXPO_PUBLIC_WS_BASE_URL,
   FALLBACK_WS_BASE_URL
 );
+
+// Sentry DSN is optional — when empty, lib/sentry.ts skips
+// init + Sentry.wrap so dev (no DSN) doesn't trigger
+// "App Start Span could not be finished" warnings. Production
+// builds should always have it set; we don't enforce here so
+// CI / preview can still build without a DSN if needed.
+export const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN ?? '';

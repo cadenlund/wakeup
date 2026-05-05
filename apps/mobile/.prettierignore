@@ -6,3 +6,6 @@
 lib/api/schema.ts
 lib/api/hooks
 lib/api/model
+
+# Vendored from sonner — formatted as the upstream package ships it.
+sonner.css
