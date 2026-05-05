@@ -10,11 +10,13 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { AuthScreenLayout } from '@/components/auth-screen-layout';
 import { Button } from '@/components/ui/button';
+import { FieldError } from '@/components/ui/field-error';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Text } from '@/components/ui/text';
 import { getGetV1AuthMeQueryKey, usePostV1AuthLogin } from '@/lib/api/hooks/auth/auth';
+import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
 import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
@@ -34,6 +36,8 @@ export default function LoginScreen() {
       },
     },
   });
+  const fieldErrors = useFieldErrors(login.error);
+  const topError = useTopLevelError(login.error);
 
   const submit = () => {
     if (!identifier.trim() || !password) return;
@@ -75,6 +79,7 @@ export default function LoginScreen() {
             <Label nativeID="identifier-label">Username or email</Label>
             <Input
               testID="login-identifier"
+              accessibilityLabel="Username or email"
               aria-labelledby="identifier-label"
               value={identifier}
               onChangeText={setIdentifier}
@@ -85,19 +90,25 @@ export default function LoginScreen() {
               returnKeyType="next"
               editable={!login.isPending}
             />
+            <FieldError message={fieldErrors.identifier} />
           </View>
 
           <View className="gap-2">
             <View className="flex-row items-center justify-between">
               <Label nativeID="password-label">Password</Label>
               <Link href="/forgot" asChild>
-                <Text testID="login-forgot" className="text-sm font-medium text-primary">
+                <Text
+                  testID="login-forgot"
+                  accessibilityRole="link"
+                  accessibilityLabel="Forgot password"
+                  className="text-sm font-medium text-primary">
                   Forgot?
                 </Text>
               </Link>
             </View>
             <PasswordInput
               testID="login-password"
+              accessibilityLabel="Password"
               aria-labelledby="password-label"
               value={password}
               onChangeText={setPassword}
@@ -106,23 +117,37 @@ export default function LoginScreen() {
               onSubmitEditing={submit}
               editable={!login.isPending}
             />
+            <FieldError message={fieldErrors.password} />
           </View>
         </View>
 
-        <View className="gap-4">
+        <View className="gap-3">
           <Button
             size="lg"
             testID="login-submit"
+            accessibilityRole="button"
+            accessibilityLabel="Sign in"
             onPress={submit}
             disabled={login.isPending || !identifier.trim() || !password}>
             <Text>{login.isPending ? 'Signing in…' : 'Sign in'}</Text>
           </Button>
 
-          <View className="flex-row items-center justify-center gap-1.5">
+          {topError ? (
+            <Text testID="login-top-error" className="text-center text-sm text-destructive">
+              {topError}
+            </Text>
+          ) : null}
+
+          <View className="flex-row items-center justify-center gap-1.5 pt-1">
             <Text variant="muted" className="text-sm">
               No account?
             </Text>
-            <Pressable testID="login-go-register" onPress={goToRegister} className="py-1">
+            <Pressable
+              testID="login-go-register"
+              accessibilityRole="button"
+              accessibilityLabel="Create account"
+              onPress={goToRegister}
+              className="py-1">
               <Text className="text-sm font-semibold text-primary">Create one</Text>
             </Pressable>
           </View>

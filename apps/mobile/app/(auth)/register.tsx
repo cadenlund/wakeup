@@ -10,11 +10,13 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { AuthScreenLayout } from '@/components/auth-screen-layout';
 import { Button } from '@/components/ui/button';
+import { FieldError } from '@/components/ui/field-error';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Text } from '@/components/ui/text';
 import { getGetV1AuthMeQueryKey, usePostV1AuthRegister } from '@/lib/api/hooks/auth/auth';
+import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
 import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
@@ -36,6 +38,8 @@ export default function RegisterScreen() {
       },
     },
   });
+  const fieldErrors = useFieldErrors(register.error);
+  const topError = useTopLevelError(register.error);
 
   const valid =
     displayName.trim().length > 0 &&
@@ -87,6 +91,7 @@ export default function RegisterScreen() {
             <Label nativeID="display-name-label">Display name</Label>
             <Input
               testID="register-display-name"
+              accessibilityLabel="Display name"
               aria-labelledby="display-name-label"
               value={displayName}
               onChangeText={setDisplayName}
@@ -94,12 +99,14 @@ export default function RegisterScreen() {
               returnKeyType="next"
               editable={!register.isPending}
             />
+            <FieldError message={fieldErrors.display_name} />
           </View>
 
           <View className="gap-2">
             <Label nativeID="username-label">Username</Label>
             <Input
               testID="register-username"
+              accessibilityLabel="Username"
               aria-labelledby="username-label"
               value={username}
               onChangeText={setUsername}
@@ -109,15 +116,20 @@ export default function RegisterScreen() {
               returnKeyType="next"
               editable={!register.isPending}
             />
-            <Text variant="muted" className="text-xs">
-              3–32 characters. Letters, numbers, underscores.
-            </Text>
+            {fieldErrors.username ? (
+              <FieldError message={fieldErrors.username} />
+            ) : (
+              <Text variant="muted" className="text-xs">
+                3–32 characters. Letters, numbers, underscores.
+              </Text>
+            )}
           </View>
 
           <View className="gap-2">
             <Label nativeID="email-label">Email</Label>
             <Input
               testID="register-email"
+              accessibilityLabel="Email"
               aria-labelledby="email-label"
               value={email}
               onChangeText={setEmail}
@@ -128,12 +140,14 @@ export default function RegisterScreen() {
               returnKeyType="next"
               editable={!register.isPending}
             />
+            <FieldError message={fieldErrors.email} />
           </View>
 
           <View className="gap-2">
             <Label nativeID="password-label">Password</Label>
             <PasswordInput
               testID="register-password"
+              accessibilityLabel="Password"
               aria-labelledby="password-label"
               value={password}
               onChangeText={setPassword}
@@ -142,26 +156,43 @@ export default function RegisterScreen() {
               onSubmitEditing={submit}
               editable={!register.isPending}
             />
-            <Text variant="muted" className="text-xs">
-              At least 8 characters.
-            </Text>
+            {fieldErrors.password ? (
+              <FieldError message={fieldErrors.password} />
+            ) : (
+              <Text variant="muted" className="text-xs">
+                At least 8 characters.
+              </Text>
+            )}
           </View>
         </View>
 
-        <View className="gap-4">
+        <View className="gap-3">
           <Button
             size="lg"
             testID="register-submit"
+            accessibilityRole="button"
+            accessibilityLabel="Create account"
             onPress={submit}
             disabled={register.isPending || !valid}>
             <Text>{register.isPending ? 'Creating account…' : 'Create account'}</Text>
           </Button>
 
-          <View className="flex-row items-center justify-center gap-1.5">
+          {topError ? (
+            <Text testID="register-top-error" className="text-center text-sm text-destructive">
+              {topError}
+            </Text>
+          ) : null}
+
+          <View className="flex-row items-center justify-center gap-1.5 pt-1">
             <Text variant="muted" className="text-sm">
               Already have an account?
             </Text>
-            <Pressable testID="register-go-login" onPress={goToLogin} className="py-1">
+            <Pressable
+              testID="register-go-login"
+              accessibilityRole="button"
+              accessibilityLabel="Sign in"
+              onPress={goToLogin}
+              className="py-1">
               <Text className="text-sm font-semibold text-primary">Sign in</Text>
             </Pressable>
           </View>

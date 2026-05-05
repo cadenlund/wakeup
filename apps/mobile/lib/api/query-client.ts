@@ -39,23 +39,64 @@ function backoff(attempt: number): number {
   return Math.min(RETRY_DELAY_BASE_MS * 2 ** attempt, RETRY_DELAY_CAP_MS);
 }
 
-// Mutation errors always toast (per spec §4.6). 401s are noisy at
-// boot — the auth flow re-renders to the login screen as soon as
-// `useGetMe()` resolves 401, so we suppress the toast for those.
+// Prettify a SNAKE_CASE error code into a "Sentence case" title so
+// the toast reads "Validation failed" / "Rate limited" / "Resource
+// not found" instead of yelling the raw enum at the user.
+function prettifyCode(code: string | undefined): string {
+  if (!code) return 'Request failed';
+  return code
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+// Shared toast formatter. `error.body` is the inner `error` object
+// (already unwrapped by apiFetch); `message` is the human-readable
+// string the backend sent back.
 //
-// The backend's error envelope is `{ error: { code, message } }`;
-// `error.body` is the inner `error` object (already unwrapped by
-// `apiFetch`). `code` is e.g. RESOURCE_NOT_FOUND, VALIDATION_FAILED;
-// `message` is the human-readable string we surface as the toast
-// detail line.
-function toastError(error: unknown) {
-  if (error instanceof APIError && error.status === 401) return;
+// For 429s the backend includes `retry_after_seconds`. We prepend a
+// human-readable "Try again in Xs / Xm" hint to the description so
+// the user sees an actionable wait time instead of a generic
+// "you've been rate limited" line.
+function formatRetryAfter(seconds: number): string {
+  if (seconds < 60) return `Try again in ${seconds}s`;
+  const minutes = Math.ceil(seconds / 60);
+  return `Try again in ${minutes}m`;
+}
+
+function describeAPIError(body: NonNullable<APIError['body']>): string | undefined {
+  if (body.code === 'RATE_LIMITED' && body.retry_after_seconds && body.retry_after_seconds > 0) {
+    const retry = formatRetryAfter(body.retry_after_seconds);
+    return body.message ? `${retry}. ${body.message}` : retry;
+  }
+  return body.message;
+}
+
+function toastErrorBody(error: unknown) {
   if (error instanceof APIError && error.body) {
-    toast.error(error.body.code || 'Request failed', error.body.message);
+    toast.error(prettifyCode(error.body.code), describeAPIError(error.body));
     return;
   }
   const detail = error instanceof Error ? error.message : undefined;
   toast.error('Request failed', detail);
+}
+
+// Query errors: silence the auth.me cold-start 401 because the
+// AuthGate is already redirecting the user to login; a toast on top
+// would just clutter that transition. Everything else toasts.
+function toastQueryError(error: unknown) {
+  if (error instanceof APIError && error.status === 401) return;
+  toastErrorBody(error);
+}
+
+// Mutation errors: always toast — including 401s like a bad-creds
+// login attempt. Validation failures still toast (showing the
+// prettified code + message) AND the form's `useFieldErrors` hook
+// renders the per-field red text below each input. Both surfaces
+// are useful: the toast is the global "something didn't work"
+// signal, the inline text says exactly what to fix.
+function toastMutationError(error: unknown) {
+  toastErrorBody(error);
 }
 
 export const queryClient = new QueryClient({
@@ -66,12 +107,12 @@ export const queryClient = new QueryClient({
       // more noise than signal. Only toast if there's nothing on
       // screen yet.
       if (query.state.data === undefined) {
-        toastError(err);
+        toastQueryError(err);
       }
     },
   }),
   mutationCache: new MutationCache({
-    onError: toastError,
+    onError: toastMutationError,
   }),
   defaultOptions: {
     queries: {

@@ -1499,9 +1499,9 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 - [ ] **3.0** `(onboarding)/index.tsx` three-screen carousel (welcome / friends value-prop / notifications permission). `<OnboardingCarousel>` + AsyncStorage `onboarding:complete`. Maestro flow `onboarding.yaml`. The third screen must call `Notifications.requestPermissionsAsync()` before letting the user advance.
   - Commit: `feat(mobile): add first-launch onboarding carousel`
-- [x] **3.1** `(auth)/_layout.tsx` stack, no tab bar. `(auth)/login.tsx` form using RNR Input + Button. `useLogin` mutation. Maestro flow `login.yaml`.
+- [x] **3.1** `(auth)/_layout.tsx` stack, no tab bar. `(auth)/login.tsx` form using RNR Input + Button. `useLogin` mutation. Maestro flow `auth-login.yaml`.
   - Commit: `feat(mobile): add login screen`
-- [x] **3.2** `(auth)/register.tsx` form. Maestro flow `register.yaml`.
+- [x] **3.2** `(auth)/register.tsx` form. Maestro flow `auth-register.yaml`.
   - Commit: `feat(mobile): add register screen`
 - [ ] **3.3** `(auth)/forgot.tsx` + `(auth)/reset.tsx`. Universal-link config in `app.json` for the password-reset deep link.
   - Commit: `feat(mobile): add password reset flow with deep link`

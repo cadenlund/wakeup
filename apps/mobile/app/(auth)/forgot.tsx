@@ -44,6 +44,8 @@ export default function ForgotScreen() {
         </View>
 
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to sign in"
           testID="forgot-back"
           onPress={goBack}
           className="flex-row items-center gap-2 self-start py-2">

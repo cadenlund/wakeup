@@ -13,6 +13,10 @@ type Props = Omit<React.ComponentProps<typeof Input>, 'secureTextEntry'>;
 function PasswordInput({ className, ...props }: Props) {
   const [visible, setVisible] = React.useState(false);
   const iconColor = useThemeColor('muted-foreground');
+  // Mirror the input's editable state on the toggle so a pending
+  // submission (editable={false}) doesn't let the user reveal the
+  // entry mid-flight. (CR on PR #116.)
+  const toggleDisabled = props.editable === false;
 
   return (
     <View className="relative">
@@ -20,6 +24,8 @@ function PasswordInput({ className, ...props }: Props) {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={visible ? 'Hide password' : 'Show password'}
+        accessibilityState={{ disabled: toggleDisabled }}
+        disabled={toggleDisabled}
         onPress={() => setVisible((v) => !v)}
         className="absolute bottom-0 right-0 top-0 items-center justify-center px-3">
         {visible ? <EyeOff size={20} color={iconColor} /> : <Eye size={20} color={iconColor} />}

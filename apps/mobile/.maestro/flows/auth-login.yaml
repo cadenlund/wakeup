@@ -1,24 +1,18 @@
 appId: com.anonymous.mobile
 ---
 # Phase 3.1 — login screen renders correctly and the form is wired.
-# Doesn't actually submit because no seeded test user exists yet
-# (lands with backend test fixtures in a later phase).
+# Doesn't actually submit because no seeded test user exists; the
+# real end-to-end flow lands at milestone 3.5 in the Phase-3 suite.
 - launchApp:
     clearState: true
-- assertVisible: 'Welcome back'
-- assertVisible: 'Sign in to keep up with your friends.'
+- assertVisible: 'Sign in'
+- assertVisible: 'Welcome back. We saved your spot.'
 - assertVisible: 'Username or email'
 - assertVisible: 'Password'
-# Submit button is disabled with empty fields.
-- tapOn:
-    id: 'login-identifier'
+- tapOn: 'Username or email'
 - inputText: 'someone@example.com'
-- tapOn:
-    id: 'login-password'
+- tapOn: 'Password'
 - inputText: 'placeholder'
-- assertVisible: 'Sign in'
 - takeScreenshot: auth-login
-# Cross-link to register works.
-- tapOn:
-    id: 'login-go-register'
+- tapOn: 'Create account'
 - assertVisible: 'Create account'

@@ -5,6 +5,7 @@ appId: com.anonymous.mobile
 # the login screen, not the gallery / tab bar.
 - launchApp:
     clearState: true
-- assertVisible: 'Welcome back'
+- assertVisible: 'Sign in'
+- assertVisible: 'Welcome back. We saved your spot.'
 - assertNotVisible: 'Theme tokens'
 - takeScreenshot: auth-redirect
