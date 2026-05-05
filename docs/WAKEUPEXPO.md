@@ -324,7 +324,7 @@ Plus a `system` pseudo-scheme that reads `Appearance.getColorScheme()` and picks
 
 **Token vocabulary (15 tokens, shadcn-aligned + the project's `success`):**
 
-```
+```text
 background, foreground
 card, card-foreground
 popover, popover-foreground
