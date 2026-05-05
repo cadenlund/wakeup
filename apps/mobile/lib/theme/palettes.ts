@@ -13,7 +13,7 @@
 
 import type { Mode, Scheme } from '@/lib/theme/schemes';
 
-type Palette = Record<string, string>;
+export type Palette = Record<string, string>;
 
 export const PALETTES: Record<Scheme, Record<Mode, Palette>> = {
   sunrise: {

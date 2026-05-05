@@ -1,0 +1,18 @@
+appId: com.anonymous.mobile
+---
+# Phase 3.1 — login screen renders correctly and the form is wired.
+# Doesn't actually submit because no seeded test user exists; the
+# real end-to-end flow lands at milestone 3.5 in the Phase-3 suite.
+- launchApp:
+    clearState: true
+- assertVisible: 'Sign in'
+- assertVisible: 'Welcome back. We saved your spot.'
+- assertVisible: 'Username or email'
+- assertVisible: 'Password'
+- tapOn: 'Username or email'
+- inputText: 'someone@example.com'
+- tapOn: 'Password'
+- inputText: 'placeholder'
+- takeScreenshot: auth-login
+- tapOn: 'Create account'
+- assertVisible: 'Create account'

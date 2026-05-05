@@ -17,7 +17,7 @@ These rules are non-negotiable. If a step requires a question, ask the human ope
 5. **Backend spec wins on conflicts.** When `WAKEUP.md` and this doc disagree, the backend spec is canonical — report the inconsistency and ask before diverging client behaviour.
 6. **API truth lives in `apps/mobile/lib/api/schema.ts`.** Generated from the backend's OpenAPI via `just gen-client`. Never hand-edit. When the backend changes, regenerate first, then write client code against the new types.
 7. **No hand-rolled HTTP fetches against `/v1/*`.** Every API call routes through the Orval-generated hook (or a thin wrapper around it). Bypassing the wrapper bypasses idempotency, auth interception, and toast handling.
-8. **Tests-first per layer.** Component snapshot/render → Maestro flow → manual review with the operator. Never ship a screen without a Maestro flow that drives it end-to-end.
+8. **Maestro per phase, not per screen.** Each numbered Phase in §16 ends with one milestone (`X.M`) that adds a Maestro suite covering the *core happy-path flow* of that phase end-to-end. Per-screen Maestro flows during the phase are optional dev-loop helpers, not a gate. The end-of-phase suite is the gate. **Test users are created inside the Maestro flow itself** (register → use); we do not maintain seeded fixtures in the backend.
 8a. **The QR-on-phone review is mandatory at the end of every screen-bearing milestone.** Run `just mobile-tunnel`, post the QR, wait for the operator to scan it on their phone and explicitly approve. "Maestro screenshots looked fine" is not a substitute. See §12.5.
 8b. **Use the `expo:*` skills.** The Claude Code session has the Expo plugin installed. Before writing code on any milestone in §16, check the §15.1 cheat-sheet for a relevant skill and invoke it via the `Skill` tool. The skills hold current Expo SDK guidance — your training data does not.
 9. **No new dependencies without justification.** Stack is locked in §3. If you genuinely need something not listed, stop and ask.
@@ -993,29 +993,37 @@ The widget process is separate from the app process — it can't reuse the app's
 
 ### 12.1 Hard rules
 
-- Every screen in §5.1 has a Maestro flow at `.maestro/<route-name>.yaml`.
-- Every screen has the operator review the rendered UI **on a real phone via the Expo Go QR code** before the milestone is checked off (see §12.5 below). Maestro MCP screenshots are the implementer-facing sanity check; the operator's phone scan is the gate.
+- **Each Phase in §16 ends with a Maestro milestone** that adds a YAML flow set covering the phase's core happy-path end-to-end. The flow set lives at `.maestro/flows/phase-N-*.yaml` and is the only Maestro work that gates phase completion. Per-screen Maestro during the phase is an optional dev tool, not a gate.
+- **Test users are minted inside the Maestro flow.** Auth-bearing flows always start with `register` (random username via `${output.username}` template) and reuse that account for the rest of the suite. No backend seeding, no `flows/_shared/login.yaml` stub against fixed creds. (The previous rule has been retired.)
+- Every screen has the operator review the rendered UI on a real phone (QR-scanned dev client) before the screen-bearing milestone is checked off (see §12.5).
 - Every Zustand store has a unit test covering its reducer logic.
 - Every component in `components/` with non-trivial state (composer's draft + typing indicator, draggable PiP, biometric gate) has a render test.
-- API hooks themselves (Orval-generated) are NOT unit-tested — that's testing the generator. Test the integration via Maestro flows.
+- API hooks themselves (Orval-generated) are NOT unit-tested — that's testing the generator. Test the integration via the end-of-phase Maestro suite.
 
 ### 12.2 Maestro discipline
 
-Each `.maestro/<flow>.yaml` file follows the same shape:
+Each end-of-phase Maestro suite follows the same shape:
 
 ```yaml
 appId: app.wakeup.client
 ---
 - launchApp:
     clearState: true
-- runFlow: ./flows/login.yaml      # shared sub-flow
+# Phase-N suite always starts by minting a fresh test account so the
+# flow is reproducible against any backend (local, staging, ephemeral
+# CI). No fixed credentials, no backend seeding.
+- runFlow: ./flows/_shared/register-fresh.yaml
 - tapOn: "Conversations"
 - assertVisible: "No conversations yet"
-# … per-screen assertions …
-- takeScreenshot: <screen-name>
+# … per-screen assertions for the phase's core flow …
+- takeScreenshot: phase-N
 ```
 
-`flows/` holds shared sub-flows: `login.yaml`, `register.yaml`, `seed-friend.yaml`. The Maestro MCP runs these and surfaces screenshots back to the operator for the per-milestone review loop.
+Shared sub-flows live under `.maestro/flows/_shared/`:
+- `register-fresh.yaml` — generates a unique username + email, calls register, leaves the user signed in.
+- Other helpers (open-conversation, send-friend-request, etc.) get added as the phase suites need them.
+
+The Maestro MCP runs these locally and surfaces screenshots; the same flow set is what runs in CI (Android emulator, Linux runner) at the end of each phase.
 
 ### 12.3 What we DON'T test
 
@@ -1491,14 +1499,16 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 - [ ] **3.0** `(onboarding)/index.tsx` three-screen carousel (welcome / friends value-prop / notifications permission). `<OnboardingCarousel>` + AsyncStorage `onboarding:complete`. Maestro flow `onboarding.yaml`. The third screen must call `Notifications.requestPermissionsAsync()` before letting the user advance.
   - Commit: `feat(mobile): add first-launch onboarding carousel`
-- [ ] **3.1** `(auth)/_layout.tsx` stack, no tab bar. `(auth)/login.tsx` form using RNR Input + Button. `useLogin` mutation. Maestro flow `login.yaml`.
+- [x] **3.1** `(auth)/_layout.tsx` stack, no tab bar. `(auth)/login.tsx` form using RNR Input + Button. `useLogin` mutation. Maestro flow `auth-login.yaml`.
   - Commit: `feat(mobile): add login screen`
-- [ ] **3.2** `(auth)/register.tsx` form. Maestro flow `register.yaml`.
+- [x] **3.2** `(auth)/register.tsx` form. Maestro flow `auth-register.yaml`.
   - Commit: `feat(mobile): add register screen`
 - [ ] **3.3** `(auth)/forgot.tsx` + `(auth)/reset.tsx`. Universal-link config in `app.json` for the password-reset deep link.
   - Commit: `feat(mobile): add password reset flow with deep link`
-- [ ] **3.4** `useGetMe()` integrated into root: returns 401 → redirect to `(auth)/login`. Maestro flow `auth-redirect.yaml`.
+- [x] **3.4** `useGetMe()` integrated into root: returns 401 → redirect to `(auth)/login`. Maestro flow `auth-redirect.yaml`.
   - Commit: `feat(mobile): wire auth-state redirect`
+- [ ] **3.5** **Phase-3 Maestro suite** (per §12.1). One YAML at `.maestro/flows/phase-3-auth.yaml` driving register → home → logout → login (with fresh creds minted inline). Wired into the mobile CI workflow against an Android emulator on Linux.
+  - Commit: `test(mobile): add phase-3 auth maestro suite`
 
 ### Phase 4 — Tabs + Friends
 

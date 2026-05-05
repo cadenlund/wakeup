@@ -1,3 +1,8 @@
+/* sonner toast styles — web-only consumer; the @import is harmless
+   on native (NW v4 ignores rules it can't model). Lands before the
+   Tailwind directives so our utilities can override sonner defaults. */
+@import 'sonner/dist/styles.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

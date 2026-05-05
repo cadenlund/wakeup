@@ -1,0 +1,27 @@
+appId: com.anonymous.mobile
+---
+# Phase 3.2 — register screen renders correctly and the form is
+# wired. Real registration end-to-end lands with the Phase-3 suite
+# at milestone 3.5.
+- launchApp:
+    clearState: true
+# AuthGate redirects unauth users to login on cold launch — navigate
+# to register via the cross-link.
+- assertVisible: 'Sign in'
+- tapOn: 'Create account'
+- assertVisible: 'Create account'
+- assertVisible: 'Display name'
+- assertVisible: 'Username'
+- assertVisible: 'Email'
+- assertVisible: 'Password'
+- tapOn: 'Display name'
+- inputText: 'Test User'
+- tapOn: 'Username'
+- inputText: 'testuser'
+- tapOn: 'Email'
+- inputText: 'test@example.com'
+- tapOn: 'Password'
+- inputText: 'placeholder1'
+- takeScreenshot: auth-register
+- tapOn: 'Sign in'
+- assertVisible: 'Sign in'

@@ -29,6 +29,7 @@ import { Switch } from '@/components/ui/switch';
 import { Text } from '@/components/ui/text';
 import { SCHEMES, type SchemeOrSystem } from '@/lib/theme/schemes';
 import { useThemeStore, type ModePreference } from '@/lib/theme/store';
+import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { haptics } from '@/lib/haptics';
 import { toast } from '@/lib/toast';
 
@@ -40,6 +41,7 @@ export default function GalleryScreen() {
   const mode = useThemeStore((s) => s.mode);
   const modePreference = useThemeStore((s) => s.modePreference);
   const setModePreference = useThemeStore((s) => s.setModePreference);
+  const mutedFgColor = useThemeColor('muted-foreground');
 
   const schemes: SchemeOrSystem[] = ['system', ...SCHEMES.map((s) => s.id)];
   const [switchOn, setSwitchOn] = React.useState(false);
@@ -246,7 +248,7 @@ export default function GalleryScreen() {
         <Text variant="h2">Empty state</Text>
         <View className="overflow-hidden rounded-xl border border-border bg-card">
           <EmptyState
-            icon={<Inbox size={40} color="hsl(var(--muted-foreground))" />}
+            icon={<Inbox size={40} color={mutedFgColor} />}
             title="No conversations yet"
             subtitle="Start a chat with a friend to see it here."
             cta={{

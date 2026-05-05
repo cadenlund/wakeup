@@ -1,0 +1,11 @@
+appId: com.anonymous.mobile
+---
+# Phase 3.4 — AuthGate redirects unauth user away from (tabs) on
+# cold launch. With cleared state the app should land directly on
+# the login screen, not the gallery / tab bar.
+- launchApp:
+    clearState: true
+- assertVisible: 'Sign in'
+- assertVisible: 'Welcome back. We saved your spot.'
+- assertNotVisible: 'Theme tokens'
+- takeScreenshot: auth-redirect
