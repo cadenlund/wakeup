@@ -42,6 +42,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type getV1ConversationsResponse200 = {
@@ -119,16 +121,16 @@ export const getGetV1ConversationsQueryKey = (params?: GetV1ConversationsParams,
     }
 
 
-export const getGetV1ConversationsQueryOptions = <TData = Awaited<ReturnType<typeof getV1Conversations>>, TError = InternalHandlerHttpErrorResponse>(params?: GetV1ConversationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Conversations>>, TError, TData>>, }
+export const getGetV1ConversationsQueryOptions = <TData = Awaited<ReturnType<typeof getV1Conversations>>, TError = InternalHandlerHttpErrorResponse>(params?: GetV1ConversationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Conversations>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1ConversationsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Conversations>>> = ({ signal }) => getV1Conversations(params, { signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Conversations>>> = ({ signal }) => getV1Conversations(params, { signal, ...requestOptions });
 
 
 
@@ -148,7 +150,7 @@ export function useGetV1Conversations<TData = Awaited<ReturnType<typeof getV1Con
           TError,
           Awaited<ReturnType<typeof getV1Conversations>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Conversations<TData = Awaited<ReturnType<typeof getV1Conversations>>, TError = InternalHandlerHttpErrorResponse>(
@@ -158,11 +160,11 @@ export function useGetV1Conversations<TData = Awaited<ReturnType<typeof getV1Con
           TError,
           Awaited<ReturnType<typeof getV1Conversations>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Conversations<TData = Awaited<ReturnType<typeof getV1Conversations>>, TError = InternalHandlerHttpErrorResponse>(
- params?: GetV1ConversationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Conversations>>, TError, TData>>, }
+ params?: GetV1ConversationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Conversations>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -170,7 +172,7 @@ export function useGetV1Conversations<TData = Awaited<ReturnType<typeof getV1Con
  */
 
 export function useGetV1Conversations<TData = Awaited<ReturnType<typeof getV1Conversations>>, TError = InternalHandlerHttpErrorResponse>(
- params?: GetV1ConversationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Conversations>>, TError, TData>>, }
+ params?: GetV1ConversationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Conversations>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -268,15 +270,15 @@ export const postV1Conversations = async (internalHandlerHttpCreateConversationR
 
 
 export const getPostV1ConversationsMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Conversations>>, TError,{data: InternalHandlerHttpCreateConversationRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Conversations>>, TError,{data: InternalHandlerHttpCreateConversationRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1Conversations>>, TError,{data: InternalHandlerHttpCreateConversationRequest}, TContext> => {
 
 const mutationKey = ['postV1Conversations'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -284,7 +286,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1Conversations>>, {data: InternalHandlerHttpCreateConversationRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1Conversations(data,)
+          return  postV1Conversations(data,requestOptions)
         }
 
 
@@ -302,7 +304,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Create a conversation
  */
 export const usePostV1Conversations = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Conversations>>, TError,{data: InternalHandlerHttpCreateConversationRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Conversations>>, TError,{data: InternalHandlerHttpCreateConversationRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1Conversations>>,
         TError,
@@ -384,16 +386,16 @@ export const getGetV1ConversationsIdQueryKey = (id: string,) => {
     }
 
 
-export const getGetV1ConversationsIdQueryOptions = <TData = Awaited<ReturnType<typeof getV1ConversationsId>>, TError = InternalHandlerHttpErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsId>>, TError, TData>>, }
+export const getGetV1ConversationsIdQueryOptions = <TData = Awaited<ReturnType<typeof getV1ConversationsId>>, TError = InternalHandlerHttpErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1ConversationsIdQueryKey(id);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1ConversationsId>>> = ({ signal }) => getV1ConversationsId(id, { signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1ConversationsId>>> = ({ signal }) => getV1ConversationsId(id, { signal, ...requestOptions });
 
 
 
@@ -413,7 +415,7 @@ export function useGetV1ConversationsId<TData = Awaited<ReturnType<typeof getV1C
           TError,
           Awaited<ReturnType<typeof getV1ConversationsId>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1ConversationsId<TData = Awaited<ReturnType<typeof getV1ConversationsId>>, TError = InternalHandlerHttpErrorResponse>(
@@ -423,11 +425,11 @@ export function useGetV1ConversationsId<TData = Awaited<ReturnType<typeof getV1C
           TError,
           Awaited<ReturnType<typeof getV1ConversationsId>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1ConversationsId<TData = Awaited<ReturnType<typeof getV1ConversationsId>>, TError = InternalHandlerHttpErrorResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsId>>, TError, TData>>, }
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -435,7 +437,7 @@ export function useGetV1ConversationsId<TData = Awaited<ReturnType<typeof getV1C
  */
 
 export function useGetV1ConversationsId<TData = Awaited<ReturnType<typeof getV1ConversationsId>>, TError = InternalHandlerHttpErrorResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsId>>, TError, TData>>, }
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -517,15 +519,15 @@ export const deleteV1ConversationsId = async (id: string, options?: RequestInit)
 
 
 export const getDeleteV1ConversationsIdMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsId>>, TError,{id: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsId>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsId>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['deleteV1ConversationsId'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -533,7 +535,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteV1ConversationsId>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
-          return  deleteV1ConversationsId(id,)
+          return  deleteV1ConversationsId(id,requestOptions)
         }
 
 
@@ -551,7 +553,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Leave a conversation
  */
 export const useDeleteV1ConversationsId = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsId>>, TError,{id: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsId>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteV1ConversationsId>>,
         TError,
@@ -643,15 +645,15 @@ export const patchV1ConversationsId = async (id: string,
 
 
 export const getPatchV1ConversationsIdMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsId>>, TError,{id: string;data: InternalHandlerHttpUpdateConversationRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsId>>, TError,{id: string;data: InternalHandlerHttpUpdateConversationRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsId>>, TError,{id: string;data: InternalHandlerHttpUpdateConversationRequest}, TContext> => {
 
 const mutationKey = ['patchV1ConversationsId'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -659,7 +661,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof patchV1ConversationsId>>, {id: string;data: InternalHandlerHttpUpdateConversationRequest}> = (props) => {
           const {id,data} = props ?? {};
 
-          return  patchV1ConversationsId(id,data,)
+          return  patchV1ConversationsId(id,data,requestOptions)
         }
 
 
@@ -677,7 +679,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Update conversation (group only)
  */
 export const usePatchV1ConversationsId = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsId>>, TError,{id: string;data: InternalHandlerHttpUpdateConversationRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsId>>, TError,{id: string;data: InternalHandlerHttpUpdateConversationRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof patchV1ConversationsId>>,
         TError,
@@ -774,15 +776,15 @@ export const postV1ConversationsIdMembers = async (id: string,
 
 
 export const getPostV1ConversationsIdMembersMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdMembers>>, TError,{id: string;data: InternalHandlerHttpAddMembersRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdMembers>>, TError,{id: string;data: InternalHandlerHttpAddMembersRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdMembers>>, TError,{id: string;data: InternalHandlerHttpAddMembersRequest}, TContext> => {
 
 const mutationKey = ['postV1ConversationsIdMembers'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -790,7 +792,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1ConversationsIdMembers>>, {id: string;data: InternalHandlerHttpAddMembersRequest}> = (props) => {
           const {id,data} = props ?? {};
 
-          return  postV1ConversationsIdMembers(id,data,)
+          return  postV1ConversationsIdMembers(id,data,requestOptions)
         }
 
 
@@ -808,7 +810,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Add members to a group
  */
 export const usePostV1ConversationsIdMembers = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdMembers>>, TError,{id: string;data: InternalHandlerHttpAddMembersRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdMembers>>, TError,{id: string;data: InternalHandlerHttpAddMembersRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1ConversationsIdMembers>>,
         TError,
@@ -890,15 +892,15 @@ export const deleteV1ConversationsIdMembersUserId = async (id: string,
 
 
 export const getDeleteV1ConversationsIdMembersUserIdMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsIdMembersUserId>>, TError,{id: string;userId: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsIdMembersUserId>>, TError,{id: string;userId: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsIdMembersUserId>>, TError,{id: string;userId: string}, TContext> => {
 
 const mutationKey = ['deleteV1ConversationsIdMembersUserId'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -906,7 +908,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteV1ConversationsIdMembersUserId>>, {id: string;userId: string}> = (props) => {
           const {id,userId} = props ?? {};
 
-          return  deleteV1ConversationsIdMembersUserId(id,userId,)
+          return  deleteV1ConversationsIdMembersUserId(id,userId,requestOptions)
         }
 
 
@@ -924,7 +926,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Remove a member
  */
 export const useDeleteV1ConversationsIdMembersUserId = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsIdMembersUserId>>, TError,{id: string;userId: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1ConversationsIdMembersUserId>>, TError,{id: string;userId: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteV1ConversationsIdMembersUserId>>,
         TError,
@@ -1011,15 +1013,15 @@ export const patchV1ConversationsIdMute = async (id: string,
 
 
 export const getPatchV1ConversationsIdMuteMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdMute>>, TError,{id: string;data: InternalHandlerHttpSetMuteRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdMute>>, TError,{id: string;data: InternalHandlerHttpSetMuteRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdMute>>, TError,{id: string;data: InternalHandlerHttpSetMuteRequest}, TContext> => {
 
 const mutationKey = ['patchV1ConversationsIdMute'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1027,7 +1029,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof patchV1ConversationsIdMute>>, {id: string;data: InternalHandlerHttpSetMuteRequest}> = (props) => {
           const {id,data} = props ?? {};
 
-          return  patchV1ConversationsIdMute(id,data,)
+          return  patchV1ConversationsIdMute(id,data,requestOptions)
         }
 
 
@@ -1045,7 +1047,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Mute / unmute a conversation
  */
 export const usePatchV1ConversationsIdMute = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdMute>>, TError,{id: string;data: InternalHandlerHttpSetMuteRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdMute>>, TError,{id: string;data: InternalHandlerHttpSetMuteRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof patchV1ConversationsIdMute>>,
         TError,
@@ -1132,15 +1134,15 @@ export const patchV1ConversationsIdPin = async (id: string,
 
 
 export const getPatchV1ConversationsIdPinMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdPin>>, TError,{id: string;data: InternalHandlerHttpSetPinRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdPin>>, TError,{id: string;data: InternalHandlerHttpSetPinRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdPin>>, TError,{id: string;data: InternalHandlerHttpSetPinRequest}, TContext> => {
 
 const mutationKey = ['patchV1ConversationsIdPin'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1148,7 +1150,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof patchV1ConversationsIdPin>>, {id: string;data: InternalHandlerHttpSetPinRequest}> = (props) => {
           const {id,data} = props ?? {};
 
-          return  patchV1ConversationsIdPin(id,data,)
+          return  patchV1ConversationsIdPin(id,data,requestOptions)
         }
 
 
@@ -1166,7 +1168,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Pin / unpin a conversation
  */
 export const usePatchV1ConversationsIdPin = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdPin>>, TError,{id: string;data: InternalHandlerHttpSetPinRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1ConversationsIdPin>>, TError,{id: string;data: InternalHandlerHttpSetPinRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof patchV1ConversationsIdPin>>,
         TError,
@@ -1253,15 +1255,15 @@ export const postV1ConversationsIdRead = async (id: string,
 
 
 export const getPostV1ConversationsIdReadMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRead>>, TError,{id: string;data: InternalHandlerHttpMarkReadRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRead>>, TError,{id: string;data: InternalHandlerHttpMarkReadRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRead>>, TError,{id: string;data: InternalHandlerHttpMarkReadRequest}, TContext> => {
 
 const mutationKey = ['postV1ConversationsIdRead'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1269,7 +1271,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1ConversationsIdRead>>, {id: string;data: InternalHandlerHttpMarkReadRequest}> = (props) => {
           const {id,data} = props ?? {};
 
-          return  postV1ConversationsIdRead(id,data,)
+          return  postV1ConversationsIdRead(id,data,requestOptions)
         }
 
 
@@ -1287,7 +1289,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Mark conversation as read
  */
 export const usePostV1ConversationsIdRead = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRead>>, TError,{id: string;data: InternalHandlerHttpMarkReadRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRead>>, TError,{id: string;data: InternalHandlerHttpMarkReadRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1ConversationsIdRead>>,
         TError,

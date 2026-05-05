@@ -38,6 +38,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type getV1AdminAuditResponse200 = {
@@ -120,16 +122,16 @@ export const getGetV1AdminAuditQueryKey = (params?: GetV1AdminAuditParams,) => {
     }
 
 
-export const getGetV1AdminAuditQueryOptions = <TData = Awaited<ReturnType<typeof getV1AdminAudit>>, TError = InternalHandlerHttpErrorResponse>(params?: GetV1AdminAuditParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminAudit>>, TError, TData>>, }
+export const getGetV1AdminAuditQueryOptions = <TData = Awaited<ReturnType<typeof getV1AdminAudit>>, TError = InternalHandlerHttpErrorResponse>(params?: GetV1AdminAuditParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminAudit>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1AdminAuditQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AdminAudit>>> = ({ signal }) => getV1AdminAudit(params, { signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AdminAudit>>> = ({ signal }) => getV1AdminAudit(params, { signal, ...requestOptions });
 
 
 
@@ -149,7 +151,7 @@ export function useGetV1AdminAudit<TData = Awaited<ReturnType<typeof getV1AdminA
           TError,
           Awaited<ReturnType<typeof getV1AdminAudit>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AdminAudit<TData = Awaited<ReturnType<typeof getV1AdminAudit>>, TError = InternalHandlerHttpErrorResponse>(
@@ -159,11 +161,11 @@ export function useGetV1AdminAudit<TData = Awaited<ReturnType<typeof getV1AdminA
           TError,
           Awaited<ReturnType<typeof getV1AdminAudit>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AdminAudit<TData = Awaited<ReturnType<typeof getV1AdminAudit>>, TError = InternalHandlerHttpErrorResponse>(
- params?: GetV1AdminAuditParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminAudit>>, TError, TData>>, }
+ params?: GetV1AdminAuditParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminAudit>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -171,7 +173,7 @@ export function useGetV1AdminAudit<TData = Awaited<ReturnType<typeof getV1AdminA
  */
 
 export function useGetV1AdminAudit<TData = Awaited<ReturnType<typeof getV1AdminAudit>>, TError = InternalHandlerHttpErrorResponse>(
- params?: GetV1AdminAuditParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminAudit>>, TError, TData>>, }
+ params?: GetV1AdminAuditParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminAudit>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -248,15 +250,15 @@ export const postV1AdminImpersonateEnd = async ( options?: RequestInit): Promise
 
 
 export const getPostV1AdminImpersonateEndMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AdminImpersonateEnd>>, TError,void, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AdminImpersonateEnd>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1AdminImpersonateEnd>>, TError,void, TContext> => {
 
 const mutationKey = ['postV1AdminImpersonateEnd'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -264,7 +266,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AdminImpersonateEnd>>, void> = () => {
 
 
-          return  postV1AdminImpersonateEnd()
+          return  postV1AdminImpersonateEnd(requestOptions)
         }
 
 
@@ -282,7 +284,7 @@ const {mutation: mutationOptions} = options ?
  * @summary End impersonation (admin)
  */
 export const usePostV1AdminImpersonateEnd = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AdminImpersonateEnd>>, TError,void, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AdminImpersonateEnd>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1AdminImpersonateEnd>>,
         TError,
@@ -371,16 +373,16 @@ export const getGetV1AdminUsersQueryKey = (params?: GetV1AdminUsersParams,) => {
     }
 
 
-export const getGetV1AdminUsersQueryOptions = <TData = Awaited<ReturnType<typeof getV1AdminUsers>>, TError = InternalHandlerHttpErrorResponse>(params?: GetV1AdminUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsers>>, TError, TData>>, }
+export const getGetV1AdminUsersQueryOptions = <TData = Awaited<ReturnType<typeof getV1AdminUsers>>, TError = InternalHandlerHttpErrorResponse>(params?: GetV1AdminUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsers>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1AdminUsersQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AdminUsers>>> = ({ signal }) => getV1AdminUsers(params, { signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AdminUsers>>> = ({ signal }) => getV1AdminUsers(params, { signal, ...requestOptions });
 
 
 
@@ -400,7 +402,7 @@ export function useGetV1AdminUsers<TData = Awaited<ReturnType<typeof getV1AdminU
           TError,
           Awaited<ReturnType<typeof getV1AdminUsers>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AdminUsers<TData = Awaited<ReturnType<typeof getV1AdminUsers>>, TError = InternalHandlerHttpErrorResponse>(
@@ -410,11 +412,11 @@ export function useGetV1AdminUsers<TData = Awaited<ReturnType<typeof getV1AdminU
           TError,
           Awaited<ReturnType<typeof getV1AdminUsers>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AdminUsers<TData = Awaited<ReturnType<typeof getV1AdminUsers>>, TError = InternalHandlerHttpErrorResponse>(
- params?: GetV1AdminUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsers>>, TError, TData>>, }
+ params?: GetV1AdminUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsers>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -422,7 +424,7 @@ export function useGetV1AdminUsers<TData = Awaited<ReturnType<typeof getV1AdminU
  */
 
 export function useGetV1AdminUsers<TData = Awaited<ReturnType<typeof getV1AdminUsers>>, TError = InternalHandlerHttpErrorResponse>(
- params?: GetV1AdminUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsers>>, TError, TData>>, }
+ params?: GetV1AdminUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsers>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -516,16 +518,16 @@ export const getGetV1AdminUsersIdQueryKey = (id: string,) => {
     }
 
 
-export const getGetV1AdminUsersIdQueryOptions = <TData = Awaited<ReturnType<typeof getV1AdminUsersId>>, TError = InternalHandlerHttpErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsersId>>, TError, TData>>, }
+export const getGetV1AdminUsersIdQueryOptions = <TData = Awaited<ReturnType<typeof getV1AdminUsersId>>, TError = InternalHandlerHttpErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsersId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1AdminUsersIdQueryKey(id);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AdminUsersId>>> = ({ signal }) => getV1AdminUsersId(id, { signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AdminUsersId>>> = ({ signal }) => getV1AdminUsersId(id, { signal, ...requestOptions });
 
 
 
@@ -545,7 +547,7 @@ export function useGetV1AdminUsersId<TData = Awaited<ReturnType<typeof getV1Admi
           TError,
           Awaited<ReturnType<typeof getV1AdminUsersId>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AdminUsersId<TData = Awaited<ReturnType<typeof getV1AdminUsersId>>, TError = InternalHandlerHttpErrorResponse>(
@@ -555,11 +557,11 @@ export function useGetV1AdminUsersId<TData = Awaited<ReturnType<typeof getV1Admi
           TError,
           Awaited<ReturnType<typeof getV1AdminUsersId>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AdminUsersId<TData = Awaited<ReturnType<typeof getV1AdminUsersId>>, TError = InternalHandlerHttpErrorResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsersId>>, TError, TData>>, }
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsersId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -567,7 +569,7 @@ export function useGetV1AdminUsersId<TData = Awaited<ReturnType<typeof getV1Admi
  */
 
 export function useGetV1AdminUsersId<TData = Awaited<ReturnType<typeof getV1AdminUsersId>>, TError = InternalHandlerHttpErrorResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsersId>>, TError, TData>>, }
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AdminUsersId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -666,15 +668,15 @@ export const patchV1AdminUsersId = async (id: string,
 
 
 export const getPatchV1AdminUsersIdMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1AdminUsersId>>, TError,{id: string;data: InternalHandlerHttpUpdateAdminUserRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1AdminUsersId>>, TError,{id: string;data: InternalHandlerHttpUpdateAdminUserRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof patchV1AdminUsersId>>, TError,{id: string;data: InternalHandlerHttpUpdateAdminUserRequest}, TContext> => {
 
 const mutationKey = ['patchV1AdminUsersId'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -682,7 +684,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof patchV1AdminUsersId>>, {id: string;data: InternalHandlerHttpUpdateAdminUserRequest}> = (props) => {
           const {id,data} = props ?? {};
 
-          return  patchV1AdminUsersId(id,data,)
+          return  patchV1AdminUsersId(id,data,requestOptions)
         }
 
 
@@ -700,7 +702,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Update user (admin)
  */
 export const usePatchV1AdminUsersId = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1AdminUsersId>>, TError,{id: string;data: InternalHandlerHttpUpdateAdminUserRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1AdminUsersId>>, TError,{id: string;data: InternalHandlerHttpUpdateAdminUserRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof patchV1AdminUsersId>>,
         TError,
@@ -785,15 +787,15 @@ export const postV1AdminUsersIdImpersonate = async (id: string, options?: Reques
 
 
 export const getPostV1AdminUsersIdImpersonateMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AdminUsersIdImpersonate>>, TError,{id: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AdminUsersIdImpersonate>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1AdminUsersIdImpersonate>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['postV1AdminUsersIdImpersonate'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -801,7 +803,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AdminUsersIdImpersonate>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
-          return  postV1AdminUsersIdImpersonate(id,)
+          return  postV1AdminUsersIdImpersonate(id,requestOptions)
         }
 
 
@@ -819,7 +821,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Start impersonating a user (admin)
  */
 export const usePostV1AdminUsersIdImpersonate = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AdminUsersIdImpersonate>>, TError,{id: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AdminUsersIdImpersonate>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1AdminUsersIdImpersonate>>,
         TError,

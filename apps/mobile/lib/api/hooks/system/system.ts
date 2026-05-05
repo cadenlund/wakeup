@@ -32,6 +32,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type getWellKnownAppleAppSiteAssociationResponse200 = {
@@ -87,16 +89,16 @@ export const getGetWellKnownAppleAppSiteAssociationQueryKey = () => {
     }
 
 
-export const getGetWellKnownAppleAppSiteAssociationQueryOptions = <TData = Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError, TData>>, }
+export const getGetWellKnownAppleAppSiteAssociationQueryOptions = <TData = Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetWellKnownAppleAppSiteAssociationQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>> = ({ signal }) => getWellKnownAppleAppSiteAssociation({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>> = ({ signal }) => getWellKnownAppleAppSiteAssociation({ signal, ...requestOptions });
 
 
 
@@ -116,7 +118,7 @@ export function useGetWellKnownAppleAppSiteAssociation<TData = Awaited<ReturnTyp
           TError,
           Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetWellKnownAppleAppSiteAssociation<TData = Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError = InternalHandlerHttpErrorResponse>(
@@ -126,11 +128,11 @@ export function useGetWellKnownAppleAppSiteAssociation<TData = Awaited<ReturnTyp
           TError,
           Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetWellKnownAppleAppSiteAssociation<TData = Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -138,7 +140,7 @@ export function useGetWellKnownAppleAppSiteAssociation<TData = Awaited<ReturnTyp
  */
 
 export function useGetWellKnownAppleAppSiteAssociation<TData = Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAppleAppSiteAssociation>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -207,16 +209,16 @@ export const getGetWellKnownAssetlinksJsonQueryKey = () => {
     }
 
 
-export const getGetWellKnownAssetlinksJsonQueryOptions = <TData = Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError, TData>>, }
+export const getGetWellKnownAssetlinksJsonQueryOptions = <TData = Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetWellKnownAssetlinksJsonQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>> = ({ signal }) => getWellKnownAssetlinksJson({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>> = ({ signal }) => getWellKnownAssetlinksJson({ signal, ...requestOptions });
 
 
 
@@ -236,7 +238,7 @@ export function useGetWellKnownAssetlinksJson<TData = Awaited<ReturnType<typeof 
           TError,
           Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetWellKnownAssetlinksJson<TData = Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError = InternalHandlerHttpErrorResponse>(
@@ -246,11 +248,11 @@ export function useGetWellKnownAssetlinksJson<TData = Awaited<ReturnType<typeof 
           TError,
           Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetWellKnownAssetlinksJson<TData = Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -258,7 +260,7 @@ export function useGetWellKnownAssetlinksJson<TData = Awaited<ReturnType<typeof 
  */
 
 export function useGetWellKnownAssetlinksJson<TData = Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getWellKnownAssetlinksJson>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -320,16 +322,16 @@ export const getGetV1HealthzQueryKey = () => {
     }
 
 
-export const getGetV1HealthzQueryOptions = <TData = Awaited<ReturnType<typeof getV1Healthz>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Healthz>>, TError, TData>>, }
+export const getGetV1HealthzQueryOptions = <TData = Awaited<ReturnType<typeof getV1Healthz>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Healthz>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1HealthzQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Healthz>>> = ({ signal }) => getV1Healthz({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Healthz>>> = ({ signal }) => getV1Healthz({ signal, ...requestOptions });
 
 
 
@@ -349,7 +351,7 @@ export function useGetV1Healthz<TData = Awaited<ReturnType<typeof getV1Healthz>>
           TError,
           Awaited<ReturnType<typeof getV1Healthz>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Healthz<TData = Awaited<ReturnType<typeof getV1Healthz>>, TError = unknown>(
@@ -359,11 +361,11 @@ export function useGetV1Healthz<TData = Awaited<ReturnType<typeof getV1Healthz>>
           TError,
           Awaited<ReturnType<typeof getV1Healthz>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Healthz<TData = Awaited<ReturnType<typeof getV1Healthz>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Healthz>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Healthz>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -371,7 +373,7 @@ export function useGetV1Healthz<TData = Awaited<ReturnType<typeof getV1Healthz>>
  */
 
 export function useGetV1Healthz<TData = Awaited<ReturnType<typeof getV1Healthz>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Healthz>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Healthz>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -433,16 +435,16 @@ export const getGetV1OpenapiJsonQueryKey = () => {
     }
 
 
-export const getGetV1OpenapiJsonQueryOptions = <TData = Awaited<ReturnType<typeof getV1OpenapiJson>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1OpenapiJson>>, TError, TData>>, }
+export const getGetV1OpenapiJsonQueryOptions = <TData = Awaited<ReturnType<typeof getV1OpenapiJson>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1OpenapiJson>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1OpenapiJsonQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1OpenapiJson>>> = ({ signal }) => getV1OpenapiJson({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1OpenapiJson>>> = ({ signal }) => getV1OpenapiJson({ signal, ...requestOptions });
 
 
 
@@ -462,7 +464,7 @@ export function useGetV1OpenapiJson<TData = Awaited<ReturnType<typeof getV1Opena
           TError,
           Awaited<ReturnType<typeof getV1OpenapiJson>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1OpenapiJson<TData = Awaited<ReturnType<typeof getV1OpenapiJson>>, TError = unknown>(
@@ -472,11 +474,11 @@ export function useGetV1OpenapiJson<TData = Awaited<ReturnType<typeof getV1Opena
           TError,
           Awaited<ReturnType<typeof getV1OpenapiJson>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1OpenapiJson<TData = Awaited<ReturnType<typeof getV1OpenapiJson>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1OpenapiJson>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1OpenapiJson>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -484,7 +486,7 @@ export function useGetV1OpenapiJson<TData = Awaited<ReturnType<typeof getV1Opena
  */
 
 export function useGetV1OpenapiJson<TData = Awaited<ReturnType<typeof getV1OpenapiJson>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1OpenapiJson>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1OpenapiJson>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -553,16 +555,16 @@ export const getGetV1ReadyzQueryKey = () => {
     }
 
 
-export const getGetV1ReadyzQueryOptions = <TData = Awaited<ReturnType<typeof getV1Readyz>>, TError = GithubComCadenlundWakeupAppsBackendInternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Readyz>>, TError, TData>>, }
+export const getGetV1ReadyzQueryOptions = <TData = Awaited<ReturnType<typeof getV1Readyz>>, TError = GithubComCadenlundWakeupAppsBackendInternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Readyz>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1ReadyzQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Readyz>>> = ({ signal }) => getV1Readyz({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Readyz>>> = ({ signal }) => getV1Readyz({ signal, ...requestOptions });
 
 
 
@@ -582,7 +584,7 @@ export function useGetV1Readyz<TData = Awaited<ReturnType<typeof getV1Readyz>>, 
           TError,
           Awaited<ReturnType<typeof getV1Readyz>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Readyz<TData = Awaited<ReturnType<typeof getV1Readyz>>, TError = GithubComCadenlundWakeupAppsBackendInternalHandlerHttpErrorResponse>(
@@ -592,11 +594,11 @@ export function useGetV1Readyz<TData = Awaited<ReturnType<typeof getV1Readyz>>, 
           TError,
           Awaited<ReturnType<typeof getV1Readyz>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Readyz<TData = Awaited<ReturnType<typeof getV1Readyz>>, TError = GithubComCadenlundWakeupAppsBackendInternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Readyz>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Readyz>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -604,7 +606,7 @@ export function useGetV1Readyz<TData = Awaited<ReturnType<typeof getV1Readyz>>, 
  */
 
 export function useGetV1Readyz<TData = Awaited<ReturnType<typeof getV1Readyz>>, TError = GithubComCadenlundWakeupAppsBackendInternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Readyz>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Readyz>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

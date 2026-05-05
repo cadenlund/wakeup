@@ -48,7 +48,12 @@ export async function apiFetch<T = unknown>(path: string, init: RequestInitExt =
   const method = (init.method ?? 'GET').toUpperCase();
 
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('Content-Type')) {
+  // FormData bodies (avatar / attachment uploads) need fetch to set
+  // the multipart boundary itself — pre-setting Content-Type strips
+  // the boundary and the upload fails on the server side. (CR on
+  // PR #115.)
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
+  if (init.body && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   if (MUTATING_METHODS.has(method) && !headers.has('Idempotency-Key')) {

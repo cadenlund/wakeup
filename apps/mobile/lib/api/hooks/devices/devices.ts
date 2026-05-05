@@ -36,6 +36,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type getV1DevicesResponse200 = {
@@ -101,16 +103,16 @@ export const getGetV1DevicesQueryKey = () => {
     }
 
 
-export const getGetV1DevicesQueryOptions = <TData = Awaited<ReturnType<typeof getV1Devices>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Devices>>, TError, TData>>, }
+export const getGetV1DevicesQueryOptions = <TData = Awaited<ReturnType<typeof getV1Devices>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Devices>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1DevicesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Devices>>> = ({ signal }) => getV1Devices({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Devices>>> = ({ signal }) => getV1Devices({ signal, ...requestOptions });
 
 
 
@@ -130,7 +132,7 @@ export function useGetV1Devices<TData = Awaited<ReturnType<typeof getV1Devices>>
           TError,
           Awaited<ReturnType<typeof getV1Devices>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Devices<TData = Awaited<ReturnType<typeof getV1Devices>>, TError = InternalHandlerHttpErrorResponse>(
@@ -140,11 +142,11 @@ export function useGetV1Devices<TData = Awaited<ReturnType<typeof getV1Devices>>
           TError,
           Awaited<ReturnType<typeof getV1Devices>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Devices<TData = Awaited<ReturnType<typeof getV1Devices>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Devices>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Devices>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -152,7 +154,7 @@ export function useGetV1Devices<TData = Awaited<ReturnType<typeof getV1Devices>>
  */
 
 export function useGetV1Devices<TData = Awaited<ReturnType<typeof getV1Devices>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Devices>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Devices>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -240,15 +242,15 @@ export const postV1Devices = async (internalHandlerHttpRegisterDeviceRequest: In
 
 
 export const getPostV1DevicesMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Devices>>, TError,{data: InternalHandlerHttpRegisterDeviceRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Devices>>, TError,{data: InternalHandlerHttpRegisterDeviceRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1Devices>>, TError,{data: InternalHandlerHttpRegisterDeviceRequest}, TContext> => {
 
 const mutationKey = ['postV1Devices'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -256,7 +258,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1Devices>>, {data: InternalHandlerHttpRegisterDeviceRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1Devices(data,)
+          return  postV1Devices(data,requestOptions)
         }
 
 
@@ -274,7 +276,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Register a device's Expo push token
  */
 export const usePostV1Devices = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Devices>>, TError,{data: InternalHandlerHttpRegisterDeviceRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Devices>>, TError,{data: InternalHandlerHttpRegisterDeviceRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1Devices>>,
         TError,
@@ -360,15 +362,15 @@ export const postV1DevicesVoip = async (internalHandlerHttpRegisterVoIPTokenRequ
 
 
 export const getPostV1DevicesVoipMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1DevicesVoip>>, TError,{data: InternalHandlerHttpRegisterVoIPTokenRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1DevicesVoip>>, TError,{data: InternalHandlerHttpRegisterVoIPTokenRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1DevicesVoip>>, TError,{data: InternalHandlerHttpRegisterVoIPTokenRequest}, TContext> => {
 
 const mutationKey = ['postV1DevicesVoip'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -376,7 +378,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1DevicesVoip>>, {data: InternalHandlerHttpRegisterVoIPTokenRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1DevicesVoip(data,)
+          return  postV1DevicesVoip(data,requestOptions)
         }
 
 
@@ -394,7 +396,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Register an iOS PushKit (VoIP) token
  */
 export const usePostV1DevicesVoip = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1DevicesVoip>>, TError,{data: InternalHandlerHttpRegisterVoIPTokenRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1DevicesVoip>>, TError,{data: InternalHandlerHttpRegisterVoIPTokenRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1DevicesVoip>>,
         TError,
@@ -469,15 +471,15 @@ export const deleteV1DevicesId = async (id: string, options?: RequestInit): Prom
 
 
 export const getDeleteV1DevicesIdMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1DevicesId>>, TError,{id: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1DevicesId>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteV1DevicesId>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['deleteV1DevicesId'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -485,7 +487,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteV1DevicesId>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
-          return  deleteV1DevicesId(id,)
+          return  deleteV1DevicesId(id,requestOptions)
         }
 
 
@@ -503,7 +505,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Delete a device token
  */
 export const useDeleteV1DevicesId = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1DevicesId>>, TError,{id: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1DevicesId>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteV1DevicesId>>,
         TError,

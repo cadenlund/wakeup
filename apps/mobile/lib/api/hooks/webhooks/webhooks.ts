@@ -22,6 +22,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type postWebhooksLivekitResponse200 = {
@@ -75,15 +77,15 @@ export const postWebhooksLivekit = async ( options?: RequestInit): Promise<postW
 
 
 export const getPostWebhooksLivekitMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postWebhooksLivekit>>, TError,void, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postWebhooksLivekit>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postWebhooksLivekit>>, TError,void, TContext> => {
 
 const mutationKey = ['postWebhooksLivekit'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -91,7 +93,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postWebhooksLivekit>>, void> = () => {
 
 
-          return  postWebhooksLivekit()
+          return  postWebhooksLivekit(requestOptions)
         }
 
 
@@ -109,7 +111,7 @@ const {mutation: mutationOptions} = options ?
  * @summary LiveKit webhook receiver
  */
 export const usePostWebhooksLivekit = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postWebhooksLivekit>>, TError,void, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postWebhooksLivekit>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postWebhooksLivekit>>,
         TError,

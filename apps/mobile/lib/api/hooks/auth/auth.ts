@@ -38,6 +38,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type postV1AuthLoginResponse200 = {
@@ -112,15 +114,15 @@ export const postV1AuthLogin = async (internalHandlerHttpLoginRequest: InternalH
 
 
 export const getPostV1AuthLoginMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogin>>, TError,{data: InternalHandlerHttpLoginRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogin>>, TError,{data: InternalHandlerHttpLoginRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogin>>, TError,{data: InternalHandlerHttpLoginRequest}, TContext> => {
 
 const mutationKey = ['postV1AuthLogin'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -128,7 +130,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AuthLogin>>, {data: InternalHandlerHttpLoginRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1AuthLogin(data,)
+          return  postV1AuthLogin(data,requestOptions)
         }
 
 
@@ -146,7 +148,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Log in
  */
 export const usePostV1AuthLogin = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogin>>, TError,{data: InternalHandlerHttpLoginRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogin>>, TError,{data: InternalHandlerHttpLoginRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1AuthLogin>>,
         TError,
@@ -206,15 +208,15 @@ export const postV1AuthLogout = async ( options?: RequestInit): Promise<postV1Au
 
 
 export const getPostV1AuthLogoutMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogout>>, TError,void, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogout>>, TError,void, TContext> => {
 
 const mutationKey = ['postV1AuthLogout'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -222,7 +224,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AuthLogout>>, void> = () => {
 
 
-          return  postV1AuthLogout()
+          return  postV1AuthLogout(requestOptions)
         }
 
 
@@ -240,7 +242,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Log out current session
  */
 export const usePostV1AuthLogout = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogout>>, TError,void, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1AuthLogout>>,
         TError,
@@ -305,15 +307,15 @@ export const postV1AuthLogoutAll = async ( options?: RequestInit): Promise<postV
 
 
 export const getPostV1AuthLogoutAllMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogoutAll>>, TError,void, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogoutAll>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogoutAll>>, TError,void, TContext> => {
 
 const mutationKey = ['postV1AuthLogoutAll'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -321,7 +323,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AuthLogoutAll>>, void> = () => {
 
 
-          return  postV1AuthLogoutAll()
+          return  postV1AuthLogoutAll(requestOptions)
         }
 
 
@@ -339,7 +341,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Log out every active session for this user
  */
 export const usePostV1AuthLogoutAll = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogoutAll>>, TError,void, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthLogoutAll>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1AuthLogoutAll>>,
         TError,
@@ -411,16 +413,16 @@ export const getGetV1AuthMeQueryKey = () => {
     }
 
 
-export const getGetV1AuthMeQueryOptions = <TData = Awaited<ReturnType<typeof getV1AuthMe>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AuthMe>>, TError, TData>>, }
+export const getGetV1AuthMeQueryOptions = <TData = Awaited<ReturnType<typeof getV1AuthMe>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AuthMe>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1AuthMeQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AuthMe>>> = ({ signal }) => getV1AuthMe({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AuthMe>>> = ({ signal }) => getV1AuthMe({ signal, ...requestOptions });
 
 
 
@@ -440,7 +442,7 @@ export function useGetV1AuthMe<TData = Awaited<ReturnType<typeof getV1AuthMe>>, 
           TError,
           Awaited<ReturnType<typeof getV1AuthMe>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AuthMe<TData = Awaited<ReturnType<typeof getV1AuthMe>>, TError = InternalHandlerHttpErrorResponse>(
@@ -450,11 +452,11 @@ export function useGetV1AuthMe<TData = Awaited<ReturnType<typeof getV1AuthMe>>, 
           TError,
           Awaited<ReturnType<typeof getV1AuthMe>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AuthMe<TData = Awaited<ReturnType<typeof getV1AuthMe>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AuthMe>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AuthMe>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -462,7 +464,7 @@ export function useGetV1AuthMe<TData = Awaited<ReturnType<typeof getV1AuthMe>>, 
  */
 
 export function useGetV1AuthMe<TData = Awaited<ReturnType<typeof getV1AuthMe>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AuthMe>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AuthMe>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -550,15 +552,15 @@ export const postV1AuthPasswordResetConfirm = async (internalHandlerHttpPassword
 
 
 export const getPostV1AuthPasswordResetConfirmMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetConfirm>>, TError,{data: InternalHandlerHttpPasswordResetConfirmRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetConfirm>>, TError,{data: InternalHandlerHttpPasswordResetConfirmRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetConfirm>>, TError,{data: InternalHandlerHttpPasswordResetConfirmRequest}, TContext> => {
 
 const mutationKey = ['postV1AuthPasswordResetConfirm'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -566,7 +568,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AuthPasswordResetConfirm>>, {data: InternalHandlerHttpPasswordResetConfirmRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1AuthPasswordResetConfirm(data,)
+          return  postV1AuthPasswordResetConfirm(data,requestOptions)
         }
 
 
@@ -584,7 +586,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Confirm a password reset
  */
 export const usePostV1AuthPasswordResetConfirm = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetConfirm>>, TError,{data: InternalHandlerHttpPasswordResetConfirmRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetConfirm>>, TError,{data: InternalHandlerHttpPasswordResetConfirmRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1AuthPasswordResetConfirm>>,
         TError,
@@ -660,15 +662,15 @@ export const postV1AuthPasswordResetRequest = async (internalHandlerHttpPassword
 
 
 export const getPostV1AuthPasswordResetRequestMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetRequest>>, TError,{data: InternalHandlerHttpPasswordResetRequestRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetRequest>>, TError,{data: InternalHandlerHttpPasswordResetRequestRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetRequest>>, TError,{data: InternalHandlerHttpPasswordResetRequestRequest}, TContext> => {
 
 const mutationKey = ['postV1AuthPasswordResetRequest'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -676,7 +678,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AuthPasswordResetRequest>>, {data: InternalHandlerHttpPasswordResetRequestRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1AuthPasswordResetRequest(data,)
+          return  postV1AuthPasswordResetRequest(data,requestOptions)
         }
 
 
@@ -694,7 +696,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Request a password reset
  */
 export const usePostV1AuthPasswordResetRequest = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetRequest>>, TError,{data: InternalHandlerHttpPasswordResetRequestRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetRequest>>, TError,{data: InternalHandlerHttpPasswordResetRequestRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1AuthPasswordResetRequest>>,
         TError,
@@ -775,15 +777,15 @@ export const postV1AuthRegister = async (internalHandlerHttpRegisterRequest: Int
 
 
 export const getPostV1AuthRegisterMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthRegister>>, TError,{data: InternalHandlerHttpRegisterRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthRegister>>, TError,{data: InternalHandlerHttpRegisterRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1AuthRegister>>, TError,{data: InternalHandlerHttpRegisterRequest}, TContext> => {
 
 const mutationKey = ['postV1AuthRegister'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -791,7 +793,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AuthRegister>>, {data: InternalHandlerHttpRegisterRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1AuthRegister(data,)
+          return  postV1AuthRegister(data,requestOptions)
         }
 
 
@@ -809,7 +811,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Register a new user
  */
 export const usePostV1AuthRegister = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthRegister>>, TError,{data: InternalHandlerHttpRegisterRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthRegister>>, TError,{data: InternalHandlerHttpRegisterRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1AuthRegister>>,
         TError,

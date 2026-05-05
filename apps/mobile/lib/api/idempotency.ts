@@ -15,10 +15,12 @@ export function newIdempotencyKey(): string {
 }
 
 // `freshKey` is a caller-controlled token — bumping it forces a new
-// idempotency key. Default 0 means "stable for the component's
-// lifetime"; callers that want a fresh key per submit pass an
-// incrementing counter.
-export function useIdempotencyKey(freshKey: number = 0): string {
+// idempotency key. The argument is required (no default) because a
+// shared default would silently dedupe distinct submissions when
+// callers forget to bump it. Pass a stable value (e.g. 0) to keep
+// retries idempotent within one mutation invocation; bump it per
+// submit to force a new dedupe window. (CR on PR #115.)
+export function useIdempotencyKey(freshKey: number): string {
   return React.useMemo(() => {
     // `freshKey` reference signals to the linter that it's an
     // intentional dependency — bumping it regenerates the key.

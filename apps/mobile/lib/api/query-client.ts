@@ -10,10 +10,12 @@
 //     React-Query mutation context preserves variables, and our
 //     fetcher only generates a new key when none is passed in).
 //
-// Persistence: AsyncStorage-backed `persistQueryClient` so queued
-// mutations + warm query cache survive a relaunch. Cache versions
-// (`query-cache:v1`, `mutation-cache:v1`) bump deliberately on
-// schema-breaking changes.
+// Persistence: AsyncStorage-backed `persistQueryClient` survives a
+// relaunch. Sensitive payloads (chat messages, friends list, profile
+// details) DO NOT get persisted — only the explicit allowlist in
+// `PERSIST_ALLOWED_PATHS` does. Sensitive data lives in expo-secure-
+// store per the project storage policy. (CR on PR #115.) Cache
+// version (`query-cache:v1`) bumps deliberately on schema changes.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
@@ -78,8 +80,14 @@ export const queryClient = new QueryClient({
     },
     mutations: {
       networkMode: 'offlineFirst',
-      retry: shouldRetry,
-      retryDelay: backoff,
+      // No automatic retries on mutations. The Orval-generated
+      // `mutationFn`s don't capture a stable idempotency key across
+      // retries — every retry would call `newIdempotencyKey()`
+      // again, breaking backend dedupe. (CR on PR #115.) Screens
+      // that need retry semantics will adopt a wrapper hook that
+      // holds the key in a ref; lands alongside the first mutation-
+      // bearing screen in Phase 3.
+      retry: 0,
       gcTime: ONE_DAY_MS,
     },
   },
@@ -89,3 +97,18 @@ export const queryPersister = createAsyncStoragePersister({
   storage: AsyncStorage,
   key: 'query-cache:v1',
 });
+
+// Allowlist of query-key prefixes that may be persisted to
+// AsyncStorage. Anything not on this list is dehydrated-and-dropped
+// at persist time. Add new entries deliberately, only for endpoints
+// whose response is non-sensitive and stable enough to be useful at
+// relaunch time. (CR on PR #115.)
+const PERSIST_ALLOWED_PATHS: ReadonlySet<string> = new Set([
+  '/v1/healthz', // ForceUpgradeGate's min_client_version check.
+]);
+
+export function shouldPersistQuery(queryKey: readonly unknown[]): boolean {
+  if (queryKey.length === 0) return false;
+  const root = String(queryKey[0]);
+  return PERSIST_ALLOWED_PATHS.has(root);
+}

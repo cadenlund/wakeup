@@ -33,6 +33,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type postV1AttachmentsResponse201 = {
@@ -109,15 +111,15 @@ formData.append(`file`, postV1AttachmentsBody.file);
 
 
 export const getPostV1AttachmentsMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Attachments>>, TError,{data: PostV1AttachmentsBody}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Attachments>>, TError,{data: PostV1AttachmentsBody}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1Attachments>>, TError,{data: PostV1AttachmentsBody}, TContext> => {
 
 const mutationKey = ['postV1Attachments'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -125,7 +127,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1Attachments>>, {data: PostV1AttachmentsBody}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1Attachments(data,)
+          return  postV1Attachments(data,requestOptions)
         }
 
 
@@ -143,7 +145,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Upload an attachment
  */
 export const usePostV1Attachments = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Attachments>>, TError,{data: PostV1AttachmentsBody}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1Attachments>>, TError,{data: PostV1AttachmentsBody}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1Attachments>>,
         TError,
@@ -225,16 +227,16 @@ export const getGetV1AttachmentsIdQueryKey = (id: string,) => {
     }
 
 
-export const getGetV1AttachmentsIdQueryOptions = <TData = Awaited<ReturnType<typeof getV1AttachmentsId>>, TError = InternalHandlerHttpErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AttachmentsId>>, TError, TData>>, }
+export const getGetV1AttachmentsIdQueryOptions = <TData = Awaited<ReturnType<typeof getV1AttachmentsId>>, TError = InternalHandlerHttpErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AttachmentsId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1AttachmentsIdQueryKey(id);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AttachmentsId>>> = ({ signal }) => getV1AttachmentsId(id, { signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1AttachmentsId>>> = ({ signal }) => getV1AttachmentsId(id, { signal, ...requestOptions });
 
 
 
@@ -254,7 +256,7 @@ export function useGetV1AttachmentsId<TData = Awaited<ReturnType<typeof getV1Att
           TError,
           Awaited<ReturnType<typeof getV1AttachmentsId>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AttachmentsId<TData = Awaited<ReturnType<typeof getV1AttachmentsId>>, TError = InternalHandlerHttpErrorResponse>(
@@ -264,11 +266,11 @@ export function useGetV1AttachmentsId<TData = Awaited<ReturnType<typeof getV1Att
           TError,
           Awaited<ReturnType<typeof getV1AttachmentsId>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1AttachmentsId<TData = Awaited<ReturnType<typeof getV1AttachmentsId>>, TError = InternalHandlerHttpErrorResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AttachmentsId>>, TError, TData>>, }
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AttachmentsId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -276,7 +278,7 @@ export function useGetV1AttachmentsId<TData = Awaited<ReturnType<typeof getV1Att
  */
 
 export function useGetV1AttachmentsId<TData = Awaited<ReturnType<typeof getV1AttachmentsId>>, TError = InternalHandlerHttpErrorResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AttachmentsId>>, TError, TData>>, }
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1AttachmentsId>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

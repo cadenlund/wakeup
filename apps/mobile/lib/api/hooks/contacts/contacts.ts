@@ -24,6 +24,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type postV1ContactsMatchResponse200 = {
@@ -98,15 +100,15 @@ export const postV1ContactsMatch = async (internalHandlerHttpContactsMatchReques
 
 
 export const getPostV1ContactsMatchMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ContactsMatch>>, TError,{data: InternalHandlerHttpContactsMatchRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ContactsMatch>>, TError,{data: InternalHandlerHttpContactsMatchRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1ContactsMatch>>, TError,{data: InternalHandlerHttpContactsMatchRequest}, TContext> => {
 
 const mutationKey = ['postV1ContactsMatch'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -114,7 +116,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1ContactsMatch>>, {data: InternalHandlerHttpContactsMatchRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1ContactsMatch(data,)
+          return  postV1ContactsMatch(data,requestOptions)
         }
 
 
@@ -132,7 +134,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Match contacts by email hash
  */
 export const usePostV1ContactsMatch = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ContactsMatch>>, TError,{data: InternalHandlerHttpContactsMatchRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ContactsMatch>>, TError,{data: InternalHandlerHttpContactsMatchRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1ContactsMatch>>,
         TError,

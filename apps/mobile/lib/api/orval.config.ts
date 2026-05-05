@@ -22,6 +22,16 @@ export default defineConfig({
   wakeup: {
     input: {
       target: openapiPath,
+      // /v1/ws is a WebSocket-upgrade endpoint — fetch can't handle
+      // a 101 response, so an Orval-generated `useGetV1Ws` would
+      // never work. WebSocket dispatch lives in lib/ws/ via the
+      // global WebSocket constructor; this filter keeps the realtime
+      // tag out of the generated React-Query surface entirely.
+      // (CR on PR #115.)
+      filters: {
+        mode: 'exclude',
+        tags: [/realtime/i],
+      },
     },
     output: {
       target: path.resolve(__dirname, './hooks/index.ts'),

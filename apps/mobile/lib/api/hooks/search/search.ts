@@ -29,6 +29,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type getV1SearchResponse200 = {
@@ -106,16 +108,16 @@ export const getGetV1SearchQueryKey = (params?: GetV1SearchParams,) => {
     }
 
 
-export const getGetV1SearchQueryOptions = <TData = Awaited<ReturnType<typeof getV1Search>>, TError = InternalHandlerHttpErrorResponse>(params: GetV1SearchParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Search>>, TError, TData>>, }
+export const getGetV1SearchQueryOptions = <TData = Awaited<ReturnType<typeof getV1Search>>, TError = InternalHandlerHttpErrorResponse>(params: GetV1SearchParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Search>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1SearchQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Search>>> = ({ signal }) => getV1Search(params, { signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1Search>>> = ({ signal }) => getV1Search(params, { signal, ...requestOptions });
 
 
 
@@ -135,7 +137,7 @@ export function useGetV1Search<TData = Awaited<ReturnType<typeof getV1Search>>, 
           TError,
           Awaited<ReturnType<typeof getV1Search>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Search<TData = Awaited<ReturnType<typeof getV1Search>>, TError = InternalHandlerHttpErrorResponse>(
@@ -145,11 +147,11 @@ export function useGetV1Search<TData = Awaited<ReturnType<typeof getV1Search>>, 
           TError,
           Awaited<ReturnType<typeof getV1Search>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1Search<TData = Awaited<ReturnType<typeof getV1Search>>, TError = InternalHandlerHttpErrorResponse>(
- params: GetV1SearchParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Search>>, TError, TData>>, }
+ params: GetV1SearchParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Search>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -157,7 +159,7 @@ export function useGetV1Search<TData = Awaited<ReturnType<typeof getV1Search>>, 
  */
 
 export function useGetV1Search<TData = Awaited<ReturnType<typeof getV1Search>>, TError = InternalHandlerHttpErrorResponse>(
- params: GetV1SearchParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Search>>, TError, TData>>, }
+ params: GetV1SearchParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Search>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

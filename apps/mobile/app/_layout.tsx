@@ -13,7 +13,7 @@ import { ForceUpgradeGate } from '@/components/force-upgrade-gate';
 import { NetworkBanner } from '@/components/network-banner';
 import { ToastRoot } from '@/components/toast-root';
 import { RootErrorBoundary } from '@/components/ui/root-error-boundary';
-import { queryClient, queryPersister } from '@/lib/api/query-client';
+import { queryClient, queryPersister, shouldPersistQuery } from '@/lib/api/query-client';
 import { ThemeProvider } from '@/lib/theme/provider';
 
 export const unstable_settings = {
@@ -33,7 +33,16 @@ function RootLayout() {
   return (
     <PersistQueryClientProvider
       client={queryClient}
-      persistOptions={{ persister: queryPersister, maxAge: 24 * 60 * 60 * 1000 }}>
+      persistOptions={{
+        persister: queryPersister,
+        maxAge: 24 * 60 * 60 * 1000,
+        // Only allowlisted, non-sensitive queries get dehydrated to
+        // AsyncStorage. Chat / friends / profile data stays in
+        // memory and refetches on launch. (CR on PR #115.)
+        dehydrateOptions: {
+          shouldDehydrateQuery: (query) => shouldPersistQuery(query.queryKey),
+        },
+      }}>
       <SafeAreaProvider>
         <ThemeProvider>
           <NetworkBanner />

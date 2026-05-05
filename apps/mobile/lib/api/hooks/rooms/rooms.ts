@@ -34,6 +34,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type getV1ConversationsIdRoomResponse200 = {
@@ -109,16 +111,16 @@ export const getGetV1ConversationsIdRoomQueryKey = (id: string,) => {
     }
 
 
-export const getGetV1ConversationsIdRoomQueryOptions = <TData = Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError = InternalHandlerHttpErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError, TData>>, }
+export const getGetV1ConversationsIdRoomQueryOptions = <TData = Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError = InternalHandlerHttpErrorResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1ConversationsIdRoomQueryKey(id);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1ConversationsIdRoom>>> = ({ signal }) => getV1ConversationsIdRoom(id, { signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1ConversationsIdRoom>>> = ({ signal }) => getV1ConversationsIdRoom(id, { signal, ...requestOptions });
 
 
 
@@ -138,7 +140,7 @@ export function useGetV1ConversationsIdRoom<TData = Awaited<ReturnType<typeof ge
           TError,
           Awaited<ReturnType<typeof getV1ConversationsIdRoom>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1ConversationsIdRoom<TData = Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError = InternalHandlerHttpErrorResponse>(
@@ -148,11 +150,11 @@ export function useGetV1ConversationsIdRoom<TData = Awaited<ReturnType<typeof ge
           TError,
           Awaited<ReturnType<typeof getV1ConversationsIdRoom>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1ConversationsIdRoom<TData = Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError = InternalHandlerHttpErrorResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError, TData>>, }
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -160,7 +162,7 @@ export function useGetV1ConversationsIdRoom<TData = Awaited<ReturnType<typeof ge
  */
 
 export function useGetV1ConversationsIdRoom<TData = Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError = InternalHandlerHttpErrorResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError, TData>>, }
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1ConversationsIdRoom>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -254,15 +256,15 @@ export const postV1ConversationsIdRoomJoin = async (id: string,
 
 
 export const getPostV1ConversationsIdRoomJoinMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomJoin>>, TError,{id: string;data?: InternalHandlerHttpJoinRoomRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomJoin>>, TError,{id: string;data?: InternalHandlerHttpJoinRoomRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomJoin>>, TError,{id: string;data?: InternalHandlerHttpJoinRoomRequest}, TContext> => {
 
 const mutationKey = ['postV1ConversationsIdRoomJoin'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -270,7 +272,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1ConversationsIdRoomJoin>>, {id: string;data?: InternalHandlerHttpJoinRoomRequest}> = (props) => {
           const {id,data} = props ?? {};
 
-          return  postV1ConversationsIdRoomJoin(id,data,)
+          return  postV1ConversationsIdRoomJoin(id,data,requestOptions)
         }
 
 
@@ -288,7 +290,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Join a conversation's room
  */
 export const usePostV1ConversationsIdRoomJoin = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomJoin>>, TError,{id: string;data?: InternalHandlerHttpJoinRoomRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomJoin>>, TError,{id: string;data?: InternalHandlerHttpJoinRoomRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1ConversationsIdRoomJoin>>,
         TError,
@@ -363,15 +365,15 @@ export const postV1ConversationsIdRoomLeave = async (id: string, options?: Reque
 
 
 export const getPostV1ConversationsIdRoomLeaveMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomLeave>>, TError,{id: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomLeave>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomLeave>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['postV1ConversationsIdRoomLeave'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -379,7 +381,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1ConversationsIdRoomLeave>>, {id: string}> = (props) => {
           const {id} = props ?? {};
 
-          return  postV1ConversationsIdRoomLeave(id,)
+          return  postV1ConversationsIdRoomLeave(id,requestOptions)
         }
 
 
@@ -397,7 +399,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Leave a conversation's room
  */
 export const usePostV1ConversationsIdRoomLeave = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomLeave>>, TError,{id: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1ConversationsIdRoomLeave>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1ConversationsIdRoomLeave>>,
         TError,

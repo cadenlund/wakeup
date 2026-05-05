@@ -34,6 +34,8 @@ import type {
 import { orvalMutator } from '../../orval-mutator';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 export type getV1PresenceFriendsResponse200 = {
@@ -99,16 +101,16 @@ export const getGetV1PresenceFriendsQueryKey = () => {
     }
 
 
-export const getGetV1PresenceFriendsQueryOptions = <TData = Awaited<ReturnType<typeof getV1PresenceFriends>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1PresenceFriends>>, TError, TData>>, }
+export const getGetV1PresenceFriendsQueryOptions = <TData = Awaited<ReturnType<typeof getV1PresenceFriends>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1PresenceFriends>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1PresenceFriendsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1PresenceFriends>>> = ({ signal }) => getV1PresenceFriends({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1PresenceFriends>>> = ({ signal }) => getV1PresenceFriends({ signal, ...requestOptions });
 
 
 
@@ -128,7 +130,7 @@ export function useGetV1PresenceFriends<TData = Awaited<ReturnType<typeof getV1P
           TError,
           Awaited<ReturnType<typeof getV1PresenceFriends>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1PresenceFriends<TData = Awaited<ReturnType<typeof getV1PresenceFriends>>, TError = InternalHandlerHttpErrorResponse>(
@@ -138,11 +140,11 @@ export function useGetV1PresenceFriends<TData = Awaited<ReturnType<typeof getV1P
           TError,
           Awaited<ReturnType<typeof getV1PresenceFriends>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1PresenceFriends<TData = Awaited<ReturnType<typeof getV1PresenceFriends>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1PresenceFriends>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1PresenceFriends>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -150,7 +152,7 @@ export function useGetV1PresenceFriends<TData = Awaited<ReturnType<typeof getV1P
  */
 
 export function useGetV1PresenceFriends<TData = Awaited<ReturnType<typeof getV1PresenceFriends>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1PresenceFriends>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1PresenceFriends>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -238,15 +240,15 @@ export const postV1PresenceStatus = async (internalHandlerHttpSetPresenceStatusR
 
 
 export const getPostV1PresenceStatusMutationOptions = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1PresenceStatus>>, TError,{data: InternalHandlerHttpSetPresenceStatusRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1PresenceStatus>>, TError,{data: InternalHandlerHttpSetPresenceStatusRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1PresenceStatus>>, TError,{data: InternalHandlerHttpSetPresenceStatusRequest}, TContext> => {
 
 const mutationKey = ['postV1PresenceStatus'];
-const {mutation: mutationOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -254,7 +256,7 @@ const {mutation: mutationOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1PresenceStatus>>, {data: InternalHandlerHttpSetPresenceStatusRequest}> = (props) => {
           const {data} = props ?? {};
 
-          return  postV1PresenceStatus(data,)
+          return  postV1PresenceStatus(data,requestOptions)
         }
 
 
@@ -272,7 +274,7 @@ const {mutation: mutationOptions} = options ?
  * @summary Set my presence status
  */
 export const usePostV1PresenceStatus = <TError = InternalHandlerHttpErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1PresenceStatus>>, TError,{data: InternalHandlerHttpSetPresenceStatusRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1PresenceStatus>>, TError,{data: InternalHandlerHttpSetPresenceStatusRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1PresenceStatus>>,
         TError,
@@ -344,16 +346,16 @@ export const getGetV1WidgetFriendsQueryKey = () => {
     }
 
 
-export const getGetV1WidgetFriendsQueryOptions = <TData = Awaited<ReturnType<typeof getV1WidgetFriends>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WidgetFriends>>, TError, TData>>, }
+export const getGetV1WidgetFriendsQueryOptions = <TData = Awaited<ReturnType<typeof getV1WidgetFriends>>, TError = InternalHandlerHttpErrorResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WidgetFriends>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
 ) => {
 
-const {query: queryOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetV1WidgetFriendsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1WidgetFriends>>> = ({ signal }) => getV1WidgetFriends({ signal });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1WidgetFriends>>> = ({ signal }) => getV1WidgetFriends({ signal, ...requestOptions });
 
 
 
@@ -373,7 +375,7 @@ export function useGetV1WidgetFriends<TData = Awaited<ReturnType<typeof getV1Wid
           TError,
           Awaited<ReturnType<typeof getV1WidgetFriends>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1WidgetFriends<TData = Awaited<ReturnType<typeof getV1WidgetFriends>>, TError = InternalHandlerHttpErrorResponse>(
@@ -383,11 +385,11 @@ export function useGetV1WidgetFriends<TData = Awaited<ReturnType<typeof getV1Wid
           TError,
           Awaited<ReturnType<typeof getV1WidgetFriends>>
         > , 'initialData'
-      >, }
+      >, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetV1WidgetFriends<TData = Awaited<ReturnType<typeof getV1WidgetFriends>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WidgetFriends>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WidgetFriends>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -395,7 +397,7 @@ export function useGetV1WidgetFriends<TData = Awaited<ReturnType<typeof getV1Wid
  */
 
 export function useGetV1WidgetFriends<TData = Awaited<ReturnType<typeof getV1WidgetFriends>>, TError = InternalHandlerHttpErrorResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WidgetFriends>>, TError, TData>>, }
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1WidgetFriends>>, TError, TData>>, request?: SecondParameter<typeof orvalMutator>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
