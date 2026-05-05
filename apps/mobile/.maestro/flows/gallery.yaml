@@ -5,10 +5,10 @@ appId: com.anonymous.mobile
 # Deleted when Phase 5.1 ships the real conversations list.
 - launchApp:
     clearState: true
-- assertVisible: "Theme tokens"
-- assertVisible: "Buttons"
-- assertVisible: "Badges"
+- assertVisible: 'Theme tokens'
+- assertVisible: 'Buttons'
+- assertVisible: 'Badges'
 - scrollUntilVisible:
     element:
-      text: "Inputs & switches"
+      text: 'Inputs & switches'
 - takeScreenshot: gallery
