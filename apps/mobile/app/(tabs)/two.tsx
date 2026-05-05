@@ -1,31 +1,18 @@
-import { StyleSheet } from "react-native";
+// Tab Two — placeholder. Phase 5.1 will replace this with the
+// conversations route.
+import { Stack } from 'expo-router';
+import { View } from 'react-native';
 
-import EditScreenInfo from "@/components/EditScreenInfo";
-import { Text, View } from "@/components/Themed";
+import { Text } from '@/components/ui/text';
 
-export default function TabTwoScreen() {
+export default function TabTwo() {
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Tab Two</Text>
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      <EditScreenInfo path="app/(tabs)/two.tsx" />
-    </View>
+    <>
+      <Stack.Screen options={{ title: 'Tab Two' }} />
+      <View className="flex-1 items-center justify-center bg-background">
+        <Text variant="h2">Tab Two</Text>
+        <Text variant="muted">Replaced by conversations in Phase 5.1.</Text>
+      </View>
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  separator: {
-    marginVertical: 30,
-    height: 1,
-    width: "80%",
-  },
-});

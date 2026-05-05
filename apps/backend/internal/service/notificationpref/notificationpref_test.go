@@ -73,7 +73,13 @@ func TestGetForUser_DefaultsAllTrueOnFirstCall(t *testing.T) {
 		t.Errorf("UserID mismatch")
 	}
 	if !got.DirectMessages || !got.GroupMessages || !got.FriendRequests || !got.Calls {
-		t.Errorf("expected all defaults true, got %+v", got)
+		t.Errorf("expected all booleans true, got %+v", got)
+	}
+	if got.ThemeScheme != "system" {
+		t.Errorf("theme_scheme default: want \"system\", got %q", got.ThemeScheme)
+	}
+	if got.ThemeModePreference != "system" {
+		t.Errorf("theme_mode_preference default: want \"system\", got %q", got.ThemeModePreference)
 	}
 }
 
@@ -163,18 +169,92 @@ func TestUpdateForUser_AllFields(t *testing.T) {
 	uid := makeUser(ctx, t, st.pool)
 
 	off := false
+	scheme := "midnight"
+	mode := "dark"
 	got, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
-		UserID:         uid,
-		DirectMessages: &off,
-		GroupMessages:  &off,
-		FriendRequests: &off,
-		Calls:          &off,
+		UserID:              uid,
+		DirectMessages:      &off,
+		GroupMessages:       &off,
+		FriendRequests:      &off,
+		Calls:               &off,
+		ThemeScheme:         &scheme,
+		ThemeModePreference: &mode,
 	})
 	if err != nil {
 		t.Fatalf("UpdateForUser: %v", err)
 	}
 	if got.DirectMessages || got.GroupMessages || got.FriendRequests || got.Calls {
-		t.Errorf("expected all false, got %+v", got)
+		t.Errorf("expected all booleans false, got %+v", got)
+	}
+	if got.ThemeScheme != "midnight" {
+		t.Errorf("theme_scheme = %q, want \"midnight\"", got.ThemeScheme)
+	}
+	if got.ThemeModePreference != "dark" {
+		t.Errorf("theme_mode_preference = %q, want \"dark\"", got.ThemeModePreference)
+	}
+}
+
+// Theme is on its own axis — patching just the theme leaves notification
+// booleans alone (and vice versa). This is the gallery picker's actual
+// usage pattern.
+func TestUpdateForUser_ThemeOnlyPreservesNotifications(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	scheme := "aurora"
+	got, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID:      uid,
+		ThemeScheme: &scheme,
+	})
+	if err != nil {
+		t.Fatalf("UpdateForUser: %v", err)
+	}
+	if got.ThemeScheme != "aurora" {
+		t.Errorf("theme_scheme not patched: %+v", got)
+	}
+	if !got.DirectMessages || !got.GroupMessages || !got.FriendRequests || !got.Calls {
+		t.Errorf("notification booleans changed: %+v", got)
+	}
+}
+
+// Service rejects bad enum values with apierror.Validation BEFORE the
+// row is touched — so a typo doesn't even hit Postgres.
+func TestUpdateForUser_RejectsInvalidThemeScheme(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	bogus := "neon"
+	_, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID:      uid,
+		ThemeScheme: &bogus,
+	})
+	apiErr := asAPIError(t, err)
+	if apiErr.Code != apierror.CodeValidation {
+		t.Errorf("expected CodeValidation, got %q", apiErr.Code)
+	}
+	if len(apiErr.Fields) != 1 || apiErr.Fields[0].Field != "theme_scheme" {
+		t.Errorf("expected single FieldError on theme_scheme, got %+v", apiErr.Fields)
+	}
+}
+
+func TestUpdateForUser_RejectsInvalidThemeMode(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	uid := makeUser(ctx, t, st.pool)
+
+	bogus := "auto"
+	_, err := st.svc.UpdateForUser(ctx, notificationpref.UpdateParams{
+		UserID:              uid,
+		ThemeModePreference: &bogus,
+	})
+	apiErr := asAPIError(t, err)
+	if len(apiErr.Fields) != 1 || apiErr.Fields[0].Field != "theme_mode_preference" {
+		t.Errorf("expected single FieldError on theme_mode_preference, got %+v", apiErr.Fields)
 	}
 }
 

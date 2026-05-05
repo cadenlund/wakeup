@@ -45,7 +45,13 @@ func TestGetOrCreate_DefaultsAllTrueOnFirstCall(t *testing.T) {
 		t.Errorf("UserID mismatch")
 	}
 	if !got.DirectMessages || !got.GroupMessages || !got.FriendRequests || !got.Calls {
-		t.Errorf("expected all defaults true, got %+v", got)
+		t.Errorf("expected all booleans true, got %+v", got)
+	}
+	if got.ThemeScheme != "system" {
+		t.Errorf("theme_scheme default: want \"system\", got %q", got.ThemeScheme)
+	}
+	if got.ThemeModePreference != "system" {
+		t.Errorf("theme_mode_preference default: want \"system\", got %q", got.ThemeModePreference)
 	}
 }
 
@@ -186,18 +192,91 @@ func TestPatch_AllFields(t *testing.T) {
 	}
 
 	off := false
+	scheme := "midnight"
+	mode := "dark"
 	got, err := repo.Patch(ctx, notificationpref.PatchParams{
-		UserID:         uid,
-		DirectMessages: &off,
-		GroupMessages:  &off,
-		FriendRequests: &off,
-		Calls:          &off,
+		UserID:              uid,
+		DirectMessages:      &off,
+		GroupMessages:       &off,
+		FriendRequests:      &off,
+		Calls:               &off,
+		ThemeScheme:         &scheme,
+		ThemeModePreference: &mode,
 	})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
 	if got.DirectMessages || got.GroupMessages || got.FriendRequests || got.Calls {
-		t.Errorf("expected all false, got %+v", got)
+		t.Errorf("expected all booleans false, got %+v", got)
+	}
+	if got.ThemeScheme != "midnight" {
+		t.Errorf("theme_scheme = %q, want \"midnight\"", got.ThemeScheme)
+	}
+	if got.ThemeModePreference != "dark" {
+		t.Errorf("theme_mode_preference = %q, want \"dark\"", got.ThemeModePreference)
+	}
+}
+
+// Theme columns are independent from notification booleans — patching
+// only theme leaves all the notification flags at their defaults, and
+// vice versa. This is the §4.5 picker's actual usage pattern (the
+// mobile theme provider only ever PATCHes theme).
+func TestPatch_ThemeOnlyPreservesNotificationBooleans(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := notificationpref.New(pool)
+	uid := makeUser(ctx, t, pool)
+
+	if _, err := repo.GetOrCreate(ctx, uid); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	scheme := "aurora"
+	mode := "light"
+	got, err := repo.Patch(ctx, notificationpref.PatchParams{
+		UserID:              uid,
+		ThemeScheme:         &scheme,
+		ThemeModePreference: &mode,
+	})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if got.ThemeScheme != "aurora" || got.ThemeModePreference != "light" {
+		t.Errorf("theme not patched: %+v", got)
+	}
+	if !got.DirectMessages || !got.GroupMessages || !got.FriendRequests || !got.Calls {
+		t.Errorf("untouched notification booleans changed: %+v", got)
+	}
+}
+
+// Postgres CHECK constraint enforces the enum at the DB level — even if
+// the service skipped validation, a bad value would still fail here. We
+// test both columns to make sure both CHECKs are wired.
+func TestPatch_RejectsInvalidThemeEnumViaCheckConstraint(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewTestDB(t)
+	repo := notificationpref.New(pool)
+	uid := makeUser(ctx, t, pool)
+
+	if _, err := repo.GetOrCreate(ctx, uid); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	bogus := "neon"
+	if _, err := repo.Patch(ctx, notificationpref.PatchParams{
+		UserID:      uid,
+		ThemeScheme: &bogus,
+	}); err == nil {
+		t.Errorf("expected error patching theme_scheme to %q", bogus)
+	}
+	mode := "auto" // not in CHECK list — only system/light/dark
+	if _, err := repo.Patch(ctx, notificationpref.PatchParams{
+		UserID:              uid,
+		ThemeModePreference: &mode,
+	}); err == nil {
+		t.Errorf("expected error patching theme_mode_preference to %q", mode)
 	}
 }
 

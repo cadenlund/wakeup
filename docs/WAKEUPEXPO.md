@@ -74,7 +74,7 @@ apps/mobile/
 ├── eas.json                      # EAS Build + EAS Update channels
 ├── package.json
 ├── tsconfig.json
-├── tailwind.config.ts            # NativeWind v5 theme tokens (10 schemes, see §4.5)
+├── tailwind.config.js            # NativeWind v4 + shadcn token mapping (10 schemes, see §4.5)
 ├── global.css                    # @tailwind base + @theme overrides per scheme
 ├── babel.config.js
 ├── metro.config.js
@@ -168,16 +168,16 @@ apps/mobile/
 |---|---|---|
 | Runtime | **Expo SDK 51+** | Locked; tracks the version EAS Hosting publishes |
 | Routing | **Expo Router v3** (file-based) | Folder = screen; parallel routes for the call overlay |
-| Styling | **NativeWind v5** | Tailwind classes adapted for RN; the `@tailwind base` directive in `global.css` plus per-scheme `@theme` overrides drives 10 schemes |
+| Styling | **NativeWind v4 (stable)** + **Tailwind v3** | Scaffolded via `npx rn-new --nativewind`. shadcn HSL channel format (`H S% L%`) in `global.css`, wrapped via `hsl(var(--name) / <alpha-value>)` in `tailwind.config.js`. 10-scheme palette has dual source of truth: CSS for web, `lib/theme/palettes.ts` injected via `vars()` for native. NW v5 preview abandoned 2026-05-04 after multiple runtime bugs. |
 | Foundation components | **react-native-reusables** (RNR) | shadcn-style copy-in components — see §3.1 below for the full v1 install list, including their auth blocks |
 | Server state | **TanStack Query v5** | Caching, retries, optimistic updates, cache invalidation hooks |
 | API client codegen | **Orval** + `openapi-typescript` | Orval reads the openapi-typescript schema, emits typed React Query hooks per endpoint |
 | Local state | **Zustand** | Tiny stores for theme, selected conv, draft text, call state, biometric toggle |
 | Persisted state | **`@react-native-async-storage/async-storage`** + **`expo-secure-store`** | AsyncStorage for non-sensitive prefs; SecureStore (Keychain/Keystore) for anything biometric-locked |
-| Chat UI | **`react-native-gifted-chat`** | Bubble + composer; we customise the renderers, not rebuild them |
-| Voice/video SDK | **`@livekit/react-native`** + **`@livekit/react-native-webrtc`** | Hooks (`useTracks`, `useParticipants`, `useRoomContext`); custom UI on top |
-| Audio routing | **`react-native-incall-manager`** | Speakerphone toggle + proximity sensor for ear-piece mode |
-| Native call UI | **`react-native-callkeep`** | iOS CallKit + Android ConnectionService — incoming call rings/displays from the lock screen, audio session integrates with Siri / Bluetooth / car-play. Required for App Store review of any VoIP app |
+| Chat UI | **`react-native-gifted-chat`** *(dev-client only)* | Bubble + composer; we customise the renderers, not rebuild them. Pulls in `react-native-keyboard-controller` which crashes Expo Go on bundle load (`new NativeEventEmitter()` requires a non-null arg) — added back when the Phase 0.6 dev client lands, alongside Phase 6.1 (conversation thread) |
+| Voice/video SDK | **`@livekit/react-native`** + **`@livekit/react-native-webrtc`** *(dev-client only)* | Hooks (`useTracks`, `useParticipants`, `useRoomContext`); custom UI on top. Native libs not in Expo Go's pre-built module set; added back at Phase 9.1 |
+| Audio routing | **`react-native-incall-manager`** *(dev-client only)* | Speakerphone toggle + proximity sensor for ear-piece mode. Same Expo Go incompatibility — added back at Phase 9.x |
+| Native call UI | **`react-native-callkeep`** *(dev-client only)* | iOS CallKit + Android ConnectionService — incoming call rings/displays from the lock screen, audio session integrates with Siri / Bluetooth / car-play. Required for App Store review of any VoIP app. Same Expo Go incompatibility — added back at Phase 9.x |
 | Push notifications | **`expo-notifications`** | Token registration + foreground/background handlers |
 | Local push categories | **`expo-notifications`** action buttons | Accept/Decline buttons on incoming-call notifications |
 | VoIP push (iOS) | **PushKit** via `react-native-callkeep` config | Wakes the app from a fully-killed state for incoming calls. Standard Expo push tokens don't fire when the app is force-quit |
@@ -299,31 +299,79 @@ Single persistent connection to `${API_BASE}/v1/ws`. Lives in `lib/ws/client.ts`
 
 The dispatcher never owns business state — every server fact still lives in TanStack Query. The dispatcher just translates WS events into Query Cache mutations.
 
-### 4.5 Theming (10 sleep-cycle schemes)
+### 4.5 Theming (10 sleep-cycle schemes × light/dark)
 
 Schemes are pure-frontend — none of these names appear in the backend. The backend's `users.color_scheme` column stays as `light | dark | system` and is treated as the OS-mode hint; the actual themed scheme is stored client-side in AsyncStorage under key `theme:scheme`.
 
-Ten schemes, six light + four dark, named after stages of the day-and-sleep arc:
+**Two independent axes:** the user picks a *scheme* (the color personality of the app — sunrise vs midnight vs aurora); the OS picks the *mode* (light vs dark). Every scheme defines a full palette for both modes, so a `midnight` scheme on an iPhone in light mode is *light midnight* (cool blue-tinted whites), and a `sunrise` scheme on an iPhone in dark mode is *dark sunrise* (warm amber-tinted dark surfaces). The original spec carved schemes into "6 light + 4 dark"; the actual implementation is 10 × 2 = 20 token sets, with the user's *scheme* pick orthogonal to the *mode* the OS hands us.
 
-| Scheme | Mode | Lucide icon | Anchor palette |
-|---|---|---|---|
-| `sunrise` | light | `Sunrise` | peach `#FFD7B5` on cream `#FFF8EE`, accent `#FF8C5A` |
-| `daylight` | light | `Sun` | white `#FFFFFF` on `#FAFAFA`, accent `#1E40AF` |
-| `noon` | light | `SunDim` | bleached `#FFFCF0` on `#FFFFFF`, accent `#FBBF24` |
-| `golden` | light | `Sunset` | honey `#F4C430` on cream `#FFFBEA`, accent `#B45309` |
-| `meadow` | light | `Flower` | sage `#86EFAC` on `#F0FDF4`, accent `#15803D` |
-| `dusk` | dark | `CloudSun` | amber `#F59E0B` on slate `#1E293B`, accent `#D97706` |
-| `twilight` | dark | `MoonStar` | indigo `#818CF8` on charcoal `#0F172A`, accent `#4F46E5` |
-| `aurora` | dark | `Sparkles` | teal `#5EEAD4` on deep blue `#082F49`, accent `#22D3EE` |
-| `midnight` | dark | `Moon` | navy `#1E3A8A` on near-black `#020617`, accent `#3B82F6` |
-| `rem` | dark | `BrainCircuit` | violet `#A855F7` on plum `#1E1B4B`, accent `#EC4899` |
+Ten schemes, named after stages of the day-and-sleep arc:
 
-Plus a `system` pseudo-scheme that reads `Appearance.getColorScheme()` and picks `daylight` (light) or `midnight` (dark).
+| Scheme | Lucide icon | Color personality |
+|---|---|---|
+| `sunrise` | `Sunrise` | warm peach + salmon accent |
+| `daylight` | `Sun` | clean blue on white |
+| `noon` | `SunDim` | bleached white + butter accent |
+| `golden` | `Sunset` | honey + amber accent |
+| `meadow` | `Flower` | sage green + deep green accent |
+| `dusk` | `CloudSun` | warm slate + amber accent |
+| `twilight` | `MoonStar` | charcoal + indigo accent |
+| `aurora` | `Sparkles` | deep blue + teal accent |
+| `midnight` | `Moon` | near-black + blue accent |
+| `rem` | `BrainCircuit` (or `BrainCog`) | plum + pink accent |
 
-**Implementation** (`lib/theme/schemes.ts`):
-- One token table per scheme: `{ background, foreground, muted, border, accent, accent-foreground, destructive, ring, success }`. Tailwind v5's `@theme` block in `global.css` declares the variables; per-scheme overrides via `[data-theme="midnight"] @theme { … }` or NativeWind's equivalent.
-- The picker at `app/settings/theme.tsx` renders 11 swatches (10 + system), each a 96×96 card with the lucide icon + scheme name. Tap → `useThemeStore.setScheme(name)`.
-- Scheme persists across launches via AsyncStorage. On first launch, default = `system`.
+Plus a `system` pseudo-scheme that reads `Appearance.getColorScheme()` and picks `daylight` (light) or `midnight` (dark) as a sensible default for users who haven't explored the picker yet.
+
+**Token vocabulary (15 tokens, shadcn-aligned + the project's `success`):**
+
+```text
+background, foreground
+card, card-foreground
+popover, popover-foreground
+primary, primary-foreground
+secondary, secondary-foreground
+muted, muted-foreground
+accent, accent-foreground
+destructive, destructive-foreground
+border, input, ring
+success, success-foreground
+```
+
+Why shadcn-shaped: `react-native-reusables` ships components built against this vocabulary verbatim (`<Button variant="destructive">` reads `bg-destructive text-destructive-foreground`). Renaming RNR's tokens to a smaller set would mean editing every component on every CLI re-add — drift we don't need. The full set lands at Phase 1.2 alongside the 10 schemes.
+
+**`global.css` structure (NativeWind v4 + Tailwind v3, shadcn-style):**
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Default scheme: shadcn-neutral light. The provider always upgrades
+ * this to a real scheme on hydration, but we keep neutral-light as a
+ * sane fallback so the very first frame doesn't flash unstyled. */
+:root {
+  --background: 0 0% 100%;
+  /* HSL channels — wrapped to `hsl(var(--background) / <alpha-value>)`
+   * by tailwind.config.js for shadcn-style alpha modifier support. */
+  /* … 18 more tokens … */
+}
+.dark:root { /* shadcn-neutral dark */ }
+
+/* Per-scheme × per-mode overrides. */
+[data-theme="sunrise"]:root           { /* light */ }
+[data-theme="sunrise"].dark:root      { /* dark */ }
+/* … 18 more blocks … */
+```
+
+**Implementation (`lib/theme/`):**
+- `schemes.ts` registers the 10 schemes with their lucide icons. The `mode: "light" | "dark"` field that classified schemes in the original spec is gone; mode is independent.
+- `store.ts` (Zustand) tracks `selected: SchemeOrSystem`, `osMode: "light" | "dark"`, `effective: Scheme`, `mode: "light" | "dark"`. `effective` resolves `system` to a default scheme; `mode` mirrors OS Appearance and can be user-overridden in a future iteration.
+- `palettes.ts` mirrors the 10 schemes × 2 modes from `global.css` as a TS object for native injection — see "Dual source of truth" note below.
+- `provider.tsx` mounts a wrapping `<View>` with three signals: `dataSet={{ theme: effective }}` for web (`[data-theme]:root` selectors match), `style={vars(palettes[effective][mode])}` for native (NW v4 doesn't compile per-scheme variable-only rules into the native bundle, so we inject directly), and `className="dark"` when in dark mode (drives RNR's `dark:` utilities and the `.dark:root` cascade on web).
+
+**Dual source of truth for the 10-scheme palette** — accepted complexity. NW v4's compiler reads `[data-theme]:root` blocks for **web** (browser CSS engine handles cascade), but the native bundle drops rules that only define CSS variables. So `lib/theme/palettes.ts` mirrors the same values for **native** and the provider injects them via NW's `vars()` helper. A scheme tweak requires editing both files. Trade is annoying but the alternative (build step that codegens TS from CSS) was more complexity than the rate of scheme edits justifies.
+- The picker at `app/settings/theme.tsx` renders 11 swatches (10 + system), each showing both the light- and dark-mode preview side-by-side (96×48 each). Tap → `useThemeStore.setScheme(name)`.
+- Scheme persists across launches via AsyncStorage. On first launch, default = `system` (resolves to `daylight` light or `midnight` dark depending on OS mode).
 
 ### 4.6 Toast conventions
 
@@ -1053,6 +1101,7 @@ Every entry below is a YAML file under `.maestro/flows/` (or one level deeper fo
 | `notifications-toggle.yaml` | settings/notifications → toggle "Friend requests" off → assertVisible the disabled state, refetch confirms persisted. |
 | `devices-list.yaml` | settings/devices → seeded token row visible → tap Revoke → row disappears. |
 | `theme-picker.yaml` | settings/theme → tap a non-default scheme swatch → root view re-paints (assertion: scheme name persists in AsyncStorage on relaunch). |
+| `gallery.yaml` | Phase 1.4 only — tab 2 renders Gallery; scheme picker buttons + Buttons + Badges + Card + Input + Switch + SignInForm visible. Replaced when Phase 5.1 ships the conversations tab (this flow is deleted at that milestone). |
 | `privacy-toggle.yaml` | settings/privacy → biometric lock toggle on → lock-after picker reachable → AsyncStorage flag persisted. |
 | `account-edit.yaml` | settings/account → change display name → save → `(tabs)/profile` shows new name. |
 | `delete-account.yaml` | settings/delete-account → confirm → re-enter password → `(auth)/login` visible (Apple-mandated path). |
@@ -1216,7 +1265,7 @@ Three profiles: `development` (with dev client, points at local backend), `previ
 
 - Install per the `expo-tailwind-setup` skill's docs.
 - `tailwind.config.ts` extends the default palette with our 10 themed token tables.
-- `global.css` imports Tailwind base + per-scheme `@theme` blocks gated by a `[data-theme="…"]` attribute on the root view (NativeWind v5's mechanism).
+- `global.css` declares Tailwind v3 directives + per-scheme `[data-theme="…"]:root` and `[data-theme="…"].dark:root` blocks (web source of truth). `lib/theme/palettes.ts` mirrors the same values as a TS object (native source of truth, injected via NW's `vars()`).
 
 ### 13.5 Justfile additions (root repo)
 
@@ -1314,7 +1363,7 @@ This is the literal first-run sequence for the operator after `WAKEUP.md` Phase 
 
 1. **Initialise the Expo app.** `cd apps/mobile && bunx create-expo-app@latest --template tabs`. Move the generated files to match §2. Commit.
 2. **Install the locked stack** from §3 in one shot. `bun add` the runtime deps; `bun add -D` the dev deps.
-3. **Wire NativeWind v5** per the `expo-tailwind-setup` skill. Add `global.css`, `tailwind.config.ts`. Add the 10-scheme tokens in §4.5. Smoke-test by changing the root view background between two schemes.
+3. **Scaffold via `npx rn-new --nativewind`** — generates known-good `babel.config.js` + `metro.config.js` + `tailwind.config.js` + `nativewind-env.d.ts` for NW v4 + SDK 54. Add the 10-scheme tokens to `global.css` AND `lib/theme/palettes.ts` per §4.5. Smoke-test by changing the root view background between two schemes.
 4. **Install ALL RNR components and auth blocks** per §3.1 in one batch. `npx @react-native-reusables/cli@latest init` then `npx @react-native-reusables/cli@latest add <every-name-in-§3.1>`. Verify a Button + a Sign-In form render with theme tokens.
 5. **Generate API types + hooks.** `just gen-client` writes `lib/api/schema.ts`. Add `lib/api/orval.config.ts`. Run `just mobile-gen-hooks` → `lib/api/hooks/*.ts`. Verify a sample query compiles.
 6. **Wire the auth screens** per §5.1, using RNR's prebuilt forms (`sign-in-form`, `sign-up-form`, `forgot-password-form`, `reset-password-form`). Login + Register first; password reset can wait.
@@ -1337,16 +1386,16 @@ For every checked milestone in §16:
 1. Read the milestone's spec section.
 2. **Check the relevant Expo skill** (see §15.1 below). The Claude Code session has the `expo:*` plugin installed; consult its skills before writing code that overlaps a documented Expo concern (data fetching, native UI, OTA updates, deployment, widgets, etc.). Skill lookup is free; reinventing what the skill documents is not.
 3. Implement.
-4. Add or extend the Maestro flow.
+4. **Write the Maestro flow IN THE SAME COMMIT/PR.** Every screen-bearing milestone in §16 names its `.maestro/flows/<name>.yaml` — that file is part of the milestone's deliverable, not a follow-up. Use the §12.7 catalog as the assertion checklist. CR's `apps/mobile/.maestro/**` path-instructions enforce this.
 5. Run `just mobile-verify` until clean (type-check + lint).
-6. Run the Maestro flow via the Maestro MCP. Capture screenshots.
+6. **Drive the simulator via the Maestro MCP and confirm the bundle loads + the screen renders.** Use `mcp__maestro__list_devices` → `mcp__maestro__inspect_screen` (or `mcp__maestro__take_screenshot`) to verify there's no Metro runtime error before handing the QR to the operator. Capture screenshots into the PR description. **Asking the operator to do the smoke test the MCP could've done first is a process violation — skipping this step has cost real review cycles.**
 7. Run `just mobile-tunnel` and post the QR code in the conversation. **Stop. Wait for the operator to scan + review on their phone.** Don't proceed without explicit "looks good."
 8. Apply corrections from the operator's review.
 9. Commit with the documented message.
 10. Open PR. Resolve CodeRabbit feedback.
 11. Squash-merge.
 
-Two non-negotiables in this loop: (a) the Expo skill consultation in step 2 — every milestone touches at least one — and (b) the QR-scan review in step 7. Skipping either is a process violation.
+Three non-negotiables in this loop: (a) the Expo skill consultation in step 2 — every milestone touches at least one; (b) the Maestro flow + MCP simulator verification in steps 4 and 6 — the implementer's smoke test happens BEFORE the operator's phone review; (c) the QR-scan review in step 7. Skipping any of the three is a process violation.
 
 ### 15.1 Expo skills cheat-sheet
 
@@ -1396,7 +1445,7 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 ### Phase 1 — Theming + foundation
 
-- [ ] **1.1** NativeWind v5 wired per the `expo-tailwind-setup` skill. `global.css`, `tailwind.config.ts` in place.
+- [ ] **1.1** Mobile app scaffolded via `npx rn-new --nativewind` (NW v4 + Tailwind v3); generated configs in place.
   - Commit: `feat(mobile): wire nativewind v5`
 - [ ] **1.2** Add the 10 sleep-cycle schemes from §4.5 to `tailwind.config.ts`. Each scheme has its `@theme` block. Smoke-test by switching the root via a debug keystroke.
   - Commit: `feat(mobile): add ten sleep-cycle color schemes`
@@ -1404,21 +1453,21 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
   - Commit: `feat(mobile): add theme store with async-storage persistence`
 - [ ] **1.4** Install **all** RNR components and auth blocks per §3.1 in one batch (~30 components + 5 auth blocks). The set is intentionally complete because RNR is copy-in, not a runtime dependency. Verify a `<Button>`, `<Card>`, and the `<SignInForm>` block render with theme tokens applied. Operator scans the QR and reviews the gallery.
   - Commit: `feat(mobile): install react-native-reusables foundation`
-- [ ] **1.5** `<EmptyState>` + `<Skeleton>` wrappers in `components/ui/`.
+- [x] **1.5** `<EmptyState>` + `<Skeleton>` wrappers in `components/ui/`.
   - Commit: `feat(mobile): add empty-state and skeleton primitives`
-- [ ] **1.6** Toast wrapper (`lib/toast.ts`) per §4.6. `ToastRoot` mounted at root layout.
+- [x] **1.6** Toast wrapper (`lib/toast.ts`) per §4.6. `ToastRoot` mounted at root layout.
   - Commit: `feat(mobile): wire burnt toast wrapper`
-- [ ] **1.7** Haptics wrapper (`lib/haptics.ts`) per §4.11 with three preset shapes (`tap`, `success`, `warning`). Unit-test via mock.
+- [x] **1.7** Haptics wrapper (`lib/haptics.ts`) per §4.11 with three preset shapes (`tap`, `success`, `warning`). Unit-test via mock.
   - Commit: `feat(mobile): add haptics wrapper`
-- [ ] **1.8** Sentry init in `app/_layout.tsx` per §4.10. DSN read from `EXPO_PUBLIC_SENTRY_DSN`. Test crash button verifies it lands.
+- [x] **1.8** Sentry init in `app/_layout.tsx` per §4.10. DSN read from `EXPO_PUBLIC_SENTRY_DSN`. Test crash button verifies it lands.
   - Commit: `feat(mobile): wire sentry crash and error reporting`
-- [ ] **1.9** `<RootErrorBoundary>` mounted at root. Triggers a fallback render + reports to Sentry. Manual smoke: throw inside a screen, confirm fallback shows.
+- [x] **1.9** `<RootErrorBoundary>` mounted at root. Triggers a fallback render + reports to Sentry. Manual smoke: throw inside a screen, confirm fallback shows.
   - Commit: `feat(mobile): add root error boundary`
-- [ ] **1.10** `lib/network/state.ts` + `<NetworkBanner>` mounted at root. Toggle airplane mode → banner appears within 1s.
+- [x] **1.10** `lib/network/state.ts` + `<NetworkBanner>` mounted at root. Toggle airplane mode → banner appears within 1s.
   - Commit: `feat(mobile): add network state hook and offline banner`
-- [ ] **1.11** Swap RN `<Image>` import → `expo-image` `<Image>` everywhere via codemod. ESLint rule `no-restricted-imports` blocks future RN `<Image>` use.
+- [x] **1.11** Swap RN `<Image>` import → `expo-image` `<Image>` everywhere via codemod. ESLint rule `no-restricted-imports` blocks future RN `<Image>` use.
   - Commit: `feat(mobile): standardise on expo-image`
-- [ ] **1.12** `<FlashList>` adopted as the list primitive — wrap in `components/ui/List.tsx` so the conversation list and message list both pass through. ESLint rule blocks bare `<FlatList>`.
+- [x] **1.12** `<FlashList>` adopted as the list primitive — wrap in `components/ui/List.tsx` so the conversation list and message list both pass through. ESLint rule blocks bare `<FlatList>`.
   - Commit: `feat(mobile): adopt flash-list as default list primitive`
 
 ### Phase 2 — API client

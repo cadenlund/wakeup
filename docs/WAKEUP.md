@@ -1047,22 +1047,38 @@ CREATE INDEX idempotency_keys_expires_idx ON idempotency_keys (expires_at);
 
 ```sql
 -- migrations/0012_notification_preferences.sql
--- Per-user toggles for push notification categories.
--- A row is auto-created with defaults the first time the user is fetched.
--- Push delivery (Phase 11) checks the relevant flag before sending.
+-- Per-user preferences. Originally just push-notification toggles
+-- (hence the table name); now also holds the user's chosen sleep-cycle
+-- color scheme and the light/dark mode override (the WAKEUPEXPO §4.5
+-- token system on the mobile client). A row is auto-created with
+-- schema defaults the first time the user is fetched. Push delivery
+-- (Phase 11) checks the notification flags; the mobile theme provider
+-- checks the theme columns on session start so the user's pick
+-- follows them across devices.
 CREATE TABLE notification_preferences (
-    user_id              uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    direct_messages      boolean NOT NULL DEFAULT true,
-    group_messages       boolean NOT NULL DEFAULT true,
-    friend_requests      boolean NOT NULL DEFAULT true,
-    calls                boolean NOT NULL DEFAULT true,
-    updated_at           timestamptz NOT NULL DEFAULT now()
+    user_id               uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    direct_messages       boolean NOT NULL DEFAULT true,
+    group_messages        boolean NOT NULL DEFAULT true,
+    friend_requests       boolean NOT NULL DEFAULT true,
+    calls                 boolean NOT NULL DEFAULT true,
+    -- Theme picker (mobile §4.5): scheme + mode-override on independent
+    -- axes. `theme_scheme = 'system'` means "let the client resolve a
+    -- default" (typically daylight in light mode, midnight in dark);
+    -- `theme_mode_preference = 'system'` means "follow OS Appearance".
+    theme_scheme          text NOT NULL DEFAULT 'system' CHECK (theme_scheme IN (
+        'system','sunrise','daylight','noon','golden','meadow',
+        'dusk','twilight','aurora','midnight','rem')),
+    theme_mode_preference text NOT NULL DEFAULT 'system' CHECK (theme_mode_preference IN (
+        'system','light','dark')),
+    updated_at            timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TRIGGER notification_preferences_set_updated_at
     BEFORE UPDATE ON notification_preferences
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 ```
+
+The `notification_preferences` table is the catch-all for per-user prefs. Renaming to `user_preferences` is a deferred refactor — for now the name is historical, the row holds both. Both `GET /v1/users/me/notifications` and `PATCH /v1/users/me/notifications` return/accept the full row (notification booleans + theme columns); the mobile client reads/writes theme via the same endpoint, gated by `theme_scheme` / `theme_mode_preference` enum validation in the service before the DB CHECK fires.
 
 **Schema rules:**
 - Every migration is a single `migrations/NNNN_name.sql` file with both `-- +goose Up` and `-- +goose Down` blocks. The Down block must exactly reverse the Up block.

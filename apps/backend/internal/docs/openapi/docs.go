@@ -4260,7 +4260,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Patches any subset of ` + "`" + `direct_messages` + "`" + `, ` + "`" + `group_messages` + "`" + `, ` + "`" + `friend_requests` + "`" + `, ` + "`" + `calls` + "`" + `. Omitted fields are unchanged.",
+                "description": "Patches any subset of ` + "`" + `direct_messages` + "`" + `, ` + "`" + `group_messages` + "`" + `, ` + "`" + `friend_requests` + "`" + `, ` + "`" + `calls` + "`" + `, ` + "`" + `theme_scheme` + "`" + `, ` + "`" + `theme_mode_preference` + "`" + `. Omitted fields are unchanged. Theme enum values are validated; invalid values return 400 with a ` + "`" + `theme_scheme` + "`" + ` / ` + "`" + `theme_mode_preference` + "`" + ` field error.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4270,10 +4270,10 @@ const docTemplate = `{
                 "tags": [
                     "users"
                 ],
-                "summary": "Update current user's notification preferences",
+                "summary": "Update current user's notification + theme preferences",
                 "parameters": [
                     {
-                        "description": "Toggles patch",
+                        "description": "Preferences patch",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -4284,7 +4284,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Updated toggles",
+                        "description": "Updated preferences",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_http.NotificationPreferencesResponse"
                         },
@@ -4296,7 +4296,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Malformed JSON / empty body",
+                        "description": "Malformed JSON / empty body / invalid theme enum",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_http.ErrorResponse"
                         }
@@ -5351,6 +5351,32 @@ const docTemplate = `{
                 "group_messages": {
                     "type": "boolean",
                     "example": true
+                },
+                "theme_mode_preference": {
+                    "type": "string",
+                    "enum": [
+                        "system",
+                        "light",
+                        "dark"
+                    ],
+                    "example": "system"
+                },
+                "theme_scheme": {
+                    "type": "string",
+                    "enum": [
+                        "system",
+                        "sunrise",
+                        "daylight",
+                        "noon",
+                        "golden",
+                        "meadow",
+                        "dusk",
+                        "twilight",
+                        "aurora",
+                        "midnight",
+                        "rem"
+                    ],
+                    "example": "system"
                 }
             }
         },
@@ -5760,6 +5786,32 @@ const docTemplate = `{
                 "group_messages": {
                     "type": "boolean",
                     "example": true
+                },
+                "theme_mode_preference": {
+                    "type": "string",
+                    "enum": [
+                        "system",
+                        "light",
+                        "dark"
+                    ],
+                    "example": "dark"
+                },
+                "theme_scheme": {
+                    "type": "string",
+                    "enum": [
+                        "system",
+                        "sunrise",
+                        "daylight",
+                        "noon",
+                        "golden",
+                        "meadow",
+                        "dusk",
+                        "twilight",
+                        "aurora",
+                        "midnight",
+                        "rem"
+                    ],
+                    "example": "midnight"
                 }
             }
         },

@@ -459,14 +459,21 @@ func TestGetNotifications_Defaults(t *testing.T) {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	var got map[string]bool
+	var got map[string]any
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	for _, k := range []string{"direct_messages", "group_messages", "friend_requests", "calls"} {
-		if !got[k] {
-			t.Errorf("%s default = false, want true", k)
+		b, ok := got[k].(bool)
+		if !ok || !b {
+			t.Errorf("%s default = %v, want true", k, got[k])
 		}
+	}
+	if got["theme_scheme"] != "system" {
+		t.Errorf("theme_scheme default = %v, want \"system\"", got["theme_scheme"])
+	}
+	if got["theme_mode_preference"] != "system" {
+		t.Errorf("theme_mode_preference default = %v, want \"system\"", got["theme_mode_preference"])
 	}
 }
 
@@ -498,14 +505,14 @@ func TestUpdateNotifications_Success(t *testing.T) {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	var got map[string]bool
+	var got map[string]any
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got["calls"] || got["friend_requests"] {
+	if got["calls"].(bool) || got["friend_requests"].(bool) {
 		t.Errorf("expected calls=false friend_requests=false, got %+v", got)
 	}
-	if !got["direct_messages"] || !got["group_messages"] {
+	if !got["direct_messages"].(bool) || !got["group_messages"].(bool) {
 		t.Errorf("untouched fields should remain true, got %+v", got)
 	}
 }
@@ -520,6 +527,67 @@ func TestUpdateNotifications_EmptyBodyAcceptedAsNoOp(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
+}
+
+// PATCH with theme fields persists them and the response echoes the
+// updated values. Notification booleans are untouched.
+func TestUpdateNotifications_ThemeFieldsPersisted(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, _ := h.AuthClient(t)
+
+	resp := patch(t, c, h.Server.URL+"/v1/users/me/notifications", map[string]any{
+		"theme_scheme":          "midnight",
+		"theme_mode_preference": "dark",
+	})
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got["theme_scheme"] != "midnight" {
+		t.Errorf("theme_scheme = %v, want \"midnight\"", got["theme_scheme"])
+	}
+	if got["theme_mode_preference"] != "dark" {
+		t.Errorf("theme_mode_preference = %v, want \"dark\"", got["theme_mode_preference"])
+	}
+	for _, k := range []string{"direct_messages", "group_messages", "friend_requests", "calls"} {
+		if b, ok := got[k].(bool); !ok || !b {
+			t.Errorf("notification %s changed: %v", k, got[k])
+		}
+	}
+}
+
+// Bad enum values short-circuit before hitting Postgres — service-side
+// validation returns 400 with a FieldError so the client gets a clean
+// machine-readable message.
+func TestUpdateNotifications_RejectsInvalidThemeScheme(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, _ := h.AuthClient(t)
+
+	resp := patch(t, c, h.Server.URL+"/v1/users/me/notifications", map[string]any{
+		"theme_scheme": "neon",
+	})
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	assertCode(t, resp, http.StatusUnprocessableEntity, apierror.CodeValidation)
+}
+
+func TestUpdateNotifications_RejectsInvalidThemeMode(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, _ := h.AuthClient(t)
+
+	resp := patch(t, c, h.Server.URL+"/v1/users/me/notifications", map[string]any{
+		"theme_mode_preference": "auto",
+	})
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	assertCode(t, resp, http.StatusUnprocessableEntity, apierror.CodeValidation)
 }
 
 func TestUpdateNotifications_MalformedJSON(t *testing.T) {

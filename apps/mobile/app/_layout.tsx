@@ -1,78 +1,46 @@
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import {
-  DarkTheme,
-  DefaultTheme,
-  ThemeProvider as NavigationThemeProvider,
-} from "@react-navigation/native";
-import { useFonts } from "expo-font";
-import { Stack } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
-import "react-native-reanimated";
+import '../global.css';
+// Side-effect import: `lib/sentry` runs `Sentry.init()` at module load
+// before the React tree mounts. The export is the integration that
+// the navigation container ref hooks into below.
+import { Sentry, navigationIntegration } from '@/lib/sentry';
 
-// Tailwind v4 entry. Importing global.css at the root layout module
-// ensures NativeWind v5's Metro transform sees the file before any
-// component tries to render with className. Per the
-// `expo:expo-tailwind-setup` skill — must be imported once, anywhere
-// in the dependency graph that the bundler picks up first.
-import "../global.css";
+import { Stack, useNavigationContainerRef } from 'expo-router';
+import * as React from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { ThemeProvider } from "@/lib/theme/provider";
-import { useColorScheme } from "@/components/useColorScheme";
-
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from "expo-router";
+import { NetworkBanner } from '@/components/network-banner';
+import { ToastRoot } from '@/components/toast-root';
+import { RootErrorBoundary } from '@/components/ui/root-error-boundary';
+import { ThemeProvider } from '@/lib/theme/provider';
 
 export const unstable_settings = {
   // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: "(tabs)",
+  initialRouteName: '(tabs)',
 };
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+function RootLayout() {
+  const navContainerRef = useNavigationContainerRef();
 
-export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
-    ...FontAwesome.font,
-  });
-
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
-  useEffect(() => {
-    if (error) throw error;
-  }, [error]);
-
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
+  React.useEffect(() => {
+    if (navContainerRef) {
+      navigationIntegration.registerNavigationContainer(navContainerRef);
     }
-  }, [loaded]);
-
-  if (!loaded) {
-    return null;
-  }
-
-  return <RootLayoutNav />;
-}
-
-function RootLayoutNav() {
-  // useColorScheme drives @react-navigation/native's bundled theme
-  // (the navigator's own dark/light surfaces — header bg, default
-  // text, etc.). The Wakeup ThemeProvider is the source of truth for
-  // app content; navigation chrome follows the OS dark/light hint
-  // because the spec leaves the navigator's own surfaces to the OS.
-  const colorScheme = useColorScheme();
+  }, [navContainerRef]);
 
   return (
-    <ThemeProvider>
-      <NavigationThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-        </Stack>
-      </NavigationThemeProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <NetworkBanner />
+        <RootErrorBoundary>
+          <Stack>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+          </Stack>
+        </RootErrorBoundary>
+        <ToastRoot />
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
+
+export default Sentry.wrap(RootLayout);
