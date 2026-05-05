@@ -1,23 +1,51 @@
 set dotenv-load := true
 
-# Local dev
+# Local dev — bring the full stack up (containers wait-for-healthy,
+# bucket bootstrapped) and start the backend in this terminal.
 dev:
     just up
+    just bootstrap
     cd apps/backend && go run ./cmd/server
 
-# Docker stack management
+# Docker stack management. `--wait` blocks until every service's
+# healthcheck passes, so callers can chain `migrate-up` / `bootstrap`
+# without racing postgres on cold start.
 up:
-    docker-compose up -d
+    docker-compose up -d --wait
     @echo "postgres on :5432  redis on :6379  minio on :9000  livekit on :7880"
 
 down:
     docker-compose down
 
-# Wipe everything — drops postgres data, minio buckets, redis state.
-# Useful when migrations have diverged from the data, or for a fresh start.
+# Wipe everything — containers, named volumes, AND the bind-mounted
+# data dirs under .docker-data/. Postgres + minio both bind-mount,
+# which means a bare `compose down -v` left their state on disk and
+# the next `up` reused stale credentials / bucket layout. The
+# .docker-data wipe is what makes "fresh checkout" semantics actual.
+# Sweeps stragglers + the network too in case a previous failed `up`
+# left a half-created postgres container behind without its port
+# mapping (the gremlin that ate an hour on 2026-05-05).
 clean:
-    docker-compose down -v
-    @echo "all containers + volumes removed. Run 'just up && just migrate-up' to rebuild."
+    docker-compose down -v --remove-orphans
+    rm -rf .docker-data/postgres .docker-data/minio
+    @echo "containers + volumes + .docker-data/ wiped. Run 'just dev-reset' to rebuild."
+
+# Idempotent local-stack bootstrap: creates the MinIO `wakeup` bucket
+# the backend's avatar / attachment uploads write into. Safe to re-run
+# (`--ignore-existing` is a no-op when the bucket is already there).
+# Bucket name is hardcoded to match S3_BUCKET in .env — if you change
+# one, change both.
+bootstrap:
+    docker exec wakeup-minio-1 mc alias set local http://localhost:9000 minioadmin minioadmin >/dev/null
+    docker exec wakeup-minio-1 mc mb --ignore-existing local/wakeup
+
+# Full nuke-and-pave: clean + up + migrate + bootstrap. Use after a
+# schema change that doesn't migrate cleanly, after a credential
+# rotation in .env, or just when something is wrong and you want to
+# start over without thinking. Doesn't start the backend — chain
+# `&& just dev` if you want the whole flow.
+dev-reset: clean up migrate-up bootstrap
+    @echo "stack rebuilt clean. 'just dev' to start the backend."
 
 # Tests
 test:

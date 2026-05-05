@@ -1,4 +1,4 @@
-appId: com.anonymous.mobile
+appId: app.wakeup.client
 ---
 # Phase 3.1 — login screen renders correctly and the form is wired.
 # Doesn't actually submit because no seeded test user exists; the

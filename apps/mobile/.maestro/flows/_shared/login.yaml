@@ -1,4 +1,4 @@
-appId: com.anonymous.mobile
+appId: app.wakeup.client
 ---
 # Shared sub-flow used by every authenticated screen-level test.
 # Per WAKEUPEXPO §12.7, sub-flows MUST NOT call `clearState` —

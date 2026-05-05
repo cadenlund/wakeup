@@ -1,4 +1,4 @@
-appId: com.anonymous.mobile
+appId: app.wakeup.client
 ---
 # Phase 3.2 — register screen renders correctly and the form is
 # wired. Real registration end-to-end lands with the Phase-3 suite
