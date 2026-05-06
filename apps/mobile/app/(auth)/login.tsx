@@ -58,22 +58,16 @@ export default function LoginScreen() {
         // in the same tick that primes the cache races the render
         // and the replace silently no-ops.
         //
-        // dismissAll first to clear any (auth) back-stack history
-        // (a /reset → /login chain leaves /reset in the stack on
-        // iOS; without dismissing, the post-login replace bounces
-        // off the stale entry and the user is stranded on /login
-        // even though the cache flipped to authenticated). Wrapped
-        // in try/catch because dismissAll throws when there's
-        // nothing to dismiss.
-        const target = body?.user?.onboarded_at ? '/(tabs)' : '/(onboarding)';
-        setTimeout(() => {
-          try {
-            router.dismissAll();
-          } catch {
-            // No back-stack to dismiss — first-launch login path.
-          }
-          router.replace(target);
-        }, 0);
+        // For onboarded users, target the absolute root '/' instead
+        // of '/(tabs)'. The group-name form occasionally fails to
+        // resolve when the (auth) back-stack has history (e.g. the
+        // /reset → /login chain that the user hits via the email
+        // link); '/' goes through expo-router's root resolver which
+        // picks whichever Stack.Protected group is currently valid,
+        // so it lands on (tabs) without fighting the stale (auth)
+        // history.
+        const target = body?.user?.onboarded_at ? '/' : '/(onboarding)';
+        setTimeout(() => router.replace(target), 0);
       },
     },
   });
