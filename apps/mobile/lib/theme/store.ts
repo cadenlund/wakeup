@@ -23,6 +23,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
+import { Sentry } from '@/lib/sentry';
+
 import {
   DEFAULT_SCHEME,
   resolveScheme,
@@ -93,8 +95,10 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
     } catch (err) {
       // Persistence failure is non-fatal — the picker keeps the new
       // scheme for the rest of this session; next launch falls back
-      // to DEFAULT_SCHEME.
+      // to DEFAULT_SCHEME. Surface to Sentry so a chronic AsyncStorage
+      // outage (corruption / quota) is observable.
       console.warn('theme: failed to persist scheme', err);
+      Sentry.captureException(err, { tags: { surface: 'theme-store' } });
     }
   },
 
@@ -111,6 +115,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       await AsyncStorage.setItem(STORAGE_KEYS.themeModePreference, pref);
     } catch (err) {
       console.warn('theme: failed to persist mode preference', err);
+      Sentry.captureException(err, { tags: { surface: 'theme-store' } });
     }
   },
 
@@ -146,6 +151,7 @@ export const useThemeStore = create<ThemeState>()((set, get) => ({
       });
     } catch (err) {
       console.warn('theme: failed to read theme from storage', err);
+      Sentry.captureException(err, { tags: { surface: 'theme-store' } });
       set({ hydrated: true });
     }
   },

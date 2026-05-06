@@ -50,14 +50,22 @@ export default function RegisterScreen() {
   const fieldErrors = useFieldErrors(register.error);
   const topError = useTopLevelError(register.error);
 
+  // Username: 3-32 chars, letters / digits / underscores only.
+  // Mirrors the helper text below the field and the backend's
+  // §4.6 validator. Without the charset check the helper text was
+  // a lie — invalid usernames went all the way to the server.
+  const usernameRegex = /^[A-Za-z0-9_]{3,32}$/;
   const valid =
     displayName.trim().length > 0 &&
-    username.trim().length >= 3 &&
+    usernameRegex.test(username.trim()) &&
     email.trim().length > 0 &&
     password.length >= 8;
 
   const submit = () => {
-    if (!valid) return;
+    if (!valid) {
+      haptics.warning();
+      return;
+    }
     register.mutate({
       data: {
         display_name: displayName.trim(),
