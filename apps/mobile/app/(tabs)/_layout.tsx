@@ -26,7 +26,14 @@ export default function TabLayout() {
     mutation: {
       onSettled: () => {
         qc.removeQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        router.replace('/login');
+        // Defer the route transition to the next tick so React has
+        // rendered the new Stack.Protected guards (the (tabs) group
+        // unmounts, (auth) re-mounts) before we replace the route.
+        // Routing in the same tick that clears the cache races the
+        // render — the replace lands while (auth)/login isn't yet
+        // a valid target and silently no-ops, leaving the user
+        // stranded on (tabs) until a manual reload.
+        setTimeout(() => router.replace('/(auth)/login'), 0);
       },
     },
   });
