@@ -287,6 +287,14 @@ func (s *Service) Me(ctx context.Context) (domain.User, error) {
 func (s *Service) RequestPasswordReset(ctx context.Context, email string) error {
 	// Always do the random+hash work, even for unknown emails, so the
 	// CPU cost of the call doesn't differ between cases.
+	//
+	// On crypto/rand failure (entropy starvation, kernel issue) we
+	// fast-fail BEFORE the email lookup. That looks like it breaks
+	// timing uniformity — known and unknown emails take different
+	// paths — but the fast-fail applies to ALL requests on the
+	// failing host equally, so an attacker can't tell from the
+	// response time whether their guessed email exists. Anti-
+	// enumeration is preserved; the host is just having an outage.
 	rawToken, err := generateToken(s.tokenEntropy)
 	if err != nil {
 		slog.ErrorContext(ctx, "auth: password-reset token generation failed", slog.Any("err", err))

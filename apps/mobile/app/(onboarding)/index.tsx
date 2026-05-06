@@ -113,11 +113,16 @@ export default function OnboardingScreen() {
   const [statusEmoji, setStatusEmoji] = React.useState(me?.status_emoji ?? '');
   const bioTouched = React.useRef(false);
   const emojiTouched = React.useRef(false);
+  // Mirror server values to local state until the user touches the
+  // field. Coalesce null/undefined to '' so a server-side clear (bio
+  // explicitly null) is reflected locally — without that, the
+  // dirty-check on Continue would compare a stale string against ''
+  // and PATCH '' on top of '' as if it were a new edit.
   React.useEffect(() => {
-    if (!bioTouched.current && me?.bio) setBio(me.bio);
+    if (!bioTouched.current) setBio(me?.bio ?? '');
   }, [me?.bio]);
   React.useEffect(() => {
-    if (!emojiTouched.current && me?.status_emoji) setStatusEmoji(me.status_emoji);
+    if (!emojiTouched.current) setStatusEmoji(me?.status_emoji ?? '');
   }, [me?.status_emoji]);
   const patchMe = usePatchV1UsersMe();
   const profileFieldErrors = useFieldErrors(patchMe.error);
