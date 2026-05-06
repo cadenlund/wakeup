@@ -59,6 +59,7 @@ func (h *AuthHandler) Mount(r chi.Router) {
 		r.Get("/me", h.Me)
 		r.Post("/password-reset/request", h.RequestPasswordReset)
 		r.Post("/password-reset/confirm", h.ConfirmPasswordReset)
+		r.Post("/password-reset/validate", h.ValidatePasswordResetToken)
 	})
 }
 
@@ -299,6 +300,36 @@ func (h *AuthHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Reques
 		Token:       req.Token,
 		NewPassword: req.NewPassword,
 	}); err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteNoContent(w)
+}
+
+// ValidatePasswordResetToken pre-checks a reset token on screen mount
+// so the mobile / web reset surface can redirect back to login if the
+// link is bad / expired before the user types a new password.
+//
+// @Summary      Validate a password-reset token
+// @Description  Returns 204 when the token is valid + unconsumed + unexpired. 401 on any failure path. No DB writes.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        request  body     PasswordResetValidateRequest  true  "Token"
+// @Success      204                "No Content"
+// @Header       204      {string}  X-Request-ID                       "Echoed request id"
+// @Failure      400      {object}  ErrorResponse                     "Malformed JSON / empty body"
+// @Failure      401      {object}  ErrorResponse                     "Invalid or expired reset token"
+// @Failure      429      {object}  ErrorResponse                     "Rate limited"
+// @Failure      500      {object}  ErrorResponse                     "Internal error"
+// @Router       /v1/auth/password-reset/validate [post]
+func (h *AuthHandler) ValidatePasswordResetToken(w http.ResponseWriter, r *http.Request) {
+	var req PasswordResetValidateRequest
+	if err := DecodeJSON(r, h.v, &req); err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	if err := h.svc.ValidatePasswordResetToken(r.Context(), req.Token); err != nil {
 		WriteError(w, r, err)
 		return
 	}

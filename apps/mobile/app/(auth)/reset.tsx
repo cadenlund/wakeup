@@ -17,7 +17,10 @@ import { Label } from '@/components/ui/label';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
-import { usePostV1AuthPasswordResetConfirm } from '@/lib/api/hooks/auth/auth';
+import {
+  usePostV1AuthPasswordResetConfirm,
+  usePostV1AuthPasswordResetValidate,
+} from '@/lib/api/hooks/auth/auth';
 import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
 import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
@@ -32,6 +35,35 @@ export default function ResetScreen() {
   const [password, setPassword] = React.useState('');
   const [confirm, setConfirm] = React.useState('');
   const [mismatchError, setMismatchError] = React.useState<string | undefined>();
+
+  // Preflight: hit the validate endpoint on mount so a bad / used /
+  // expired token bounces the user back to /login before they bother
+  // typing a new password. The endpoint is a pure read and returns
+  // the same generic "Reset link has expired…" message the confirm
+  // path does, so the user sees a clear toast instead of a mid-flow
+  // submission failure.
+  const validate = usePostV1AuthPasswordResetValidate({
+    mutation: {
+      onError: (err) => {
+        haptics.warning();
+        const msg =
+          err instanceof APIError
+            ? (err.body?.message ?? 'Invalid reset link')
+            : 'Invalid reset link';
+        toast.error(msg);
+        router.replace('/login');
+      },
+    },
+  });
+  const validateMutate = validate.mutate;
+  const tokenValid = validate.isSuccess;
+  React.useEffect(() => {
+    if (!token) return;
+    validateMutate({ data: { token } });
+    // Run-once preflight; subsequent token changes can only come from
+    // a fresh deep-link nav which remounts this screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const confirmReset = usePostV1AuthPasswordResetConfirm({
     mutation: {
@@ -171,8 +203,20 @@ export default function ResetScreen() {
             accessibilityRole="button"
             accessibilityLabel="Set new password"
             onPress={submit}
-            disabled={confirmReset.isPending || password.length < 8 || !confirm}>
-            <Text>{confirmReset.isPending ? 'Saving…' : 'Set new password'}</Text>
+            disabled={
+              !tokenValid ||
+              validate.isPending ||
+              confirmReset.isPending ||
+              password.length < 8 ||
+              !confirm
+            }>
+            <Text>
+              {validate.isPending
+                ? 'Checking link…'
+                : confirmReset.isPending
+                  ? 'Saving…'
+                  : 'Set new password'}
+            </Text>
           </Button>
 
           {topError ? (

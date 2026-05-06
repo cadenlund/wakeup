@@ -335,6 +335,36 @@ type ConfirmPasswordResetParams struct {
 	NewPassword string
 }
 
+// ValidatePasswordResetToken returns nil when the token is valid +
+// unconsumed + unexpired. Otherwise returns the same apierror codes
+// ConfirmPasswordReset would return on the matching failure path.
+//
+// Used by the mobile / web reset screens as a preflight on mount so
+// users with a bad/expired link see the error and route back to login
+// before they bother filling in a new password. No DB writes — pure
+// read against the password_resets row.
+//
+// Error-message disclosure mirrors ConfirmPasswordReset: "Reset link
+// has expired" for ErrExpired (already approved as user-facing per
+// passwordreset/repo.go's ErrExpired comment) and "invalid reset
+// token" for everything else (anti-enumeration on token guessing).
+func (s *Service) ValidatePasswordResetToken(ctx context.Context, token string) error {
+	if strings.TrimSpace(token) == "" {
+		return apierror.Unauthorized("invalid reset token")
+	}
+	tokenHash := sha256Bytes(token)
+	if _, err := s.resets.Get(ctx, tokenHash); err != nil {
+		if errors.Is(err, passwordreset.ErrExpired) {
+			return apierror.Unauthorized("Reset link has expired. Request a new one from the sign-in screen.")
+		}
+		if errors.Is(err, passwordreset.ErrNotFound) {
+			return apierror.Unauthorized("invalid reset token")
+		}
+		return apierror.Internal("validate reset").WithCause(err)
+	}
+	return nil
+}
+
 // ConfirmPasswordReset validates the token + sets the new password.
 // Returns apierror.Unauthorized on token miss / expired / used so the
 // failure modes are indistinguishable to a client (timing oracle defense).
