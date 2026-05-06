@@ -9,6 +9,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CheckCircle2, Moon } from 'lucide-react-native';
 import * as React from 'react';
 import { View } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { AuthScreenLayout } from '@/components/auth-screen-layout';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import { PasswordInput } from '@/components/ui/password-input';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import {
+  getGetV1AuthMeQueryKey,
   usePostV1AuthPasswordResetConfirm,
   usePostV1AuthPasswordResetValidate,
 } from '@/lib/api/hooks/auth/auth';
@@ -28,6 +30,7 @@ import { toast } from '@/lib/toast';
 
 export default function ResetScreen() {
   const router = useRouter();
+  const qc = useQueryClient();
   const primaryColor = useThemeColor('primary');
   const params = useLocalSearchParams<{ token?: string }>();
   const token = typeof params.token === 'string' ? params.token : '';
@@ -44,13 +47,11 @@ export default function ResetScreen() {
   // submission failure.
   const validate = usePostV1AuthPasswordResetValidate({
     mutation: {
-      onError: (err) => {
+      // No manual toast — query-client's mutationCache.onError already
+      // surfaces the backend's "Unauthorized: invalid reset token"
+      // message. Just haptic + redirect here.
+      onError: () => {
         haptics.warning();
-        const msg =
-          err instanceof APIError
-            ? (err.body?.message ?? 'Invalid reset link')
-            : 'Invalid reset link';
-        toast.error(msg);
         router.replace('/login');
       },
     },
@@ -67,9 +68,33 @@ export default function ResetScreen() {
 
   const confirmReset = usePostV1AuthPasswordResetConfirm({
     mutation: {
-      onSuccess: () => {
+      onSuccess: async () => {
         haptics.success();
+        // On web we hard-navigate to /login. Reason: the React Query
+        // cache, the protected-stack guards, and the auth-gate
+        // observer all carry stale-from-before-reset state, and the
+        // sequence of (cancel → setQueryData(null) → router.replace
+        // → user signs in → setQueryData(user) → invalidate) hits
+        // enough subtle React Query / Stack.Protected races that the
+        // *next* sign-in's redirect to (tabs) would silently drop.
+        // A full navigation wipes the in-memory state cleanly so the
+        // post-reset sign-in starts from a known-good baseline.
+        //
+        // The success toast is queued via sessionStorage so it
+        // survives the page reload — ToastRoot drains the queue on
+        // mount on the destination /login page.
+        //
+        // Native still uses router.replace + cache clear because
+        // there's no equivalent "full reload" (and the cold-start
+        // race that motivates this on web doesn't apply).
+        if (typeof window !== 'undefined' && window.location) {
+          toast.queueForNextMount('success', 'Password reset', 'Sign in with your new password.');
+          window.location.assign('/login');
+          return;
+        }
         toast.success('Password reset', 'Sign in with your new password.');
+        await qc.cancelQueries({ queryKey: getGetV1AuthMeQueryKey() });
+        qc.setQueryData(getGetV1AuthMeQueryKey(), null);
         router.replace('/login');
       },
       onError: (err) => {
