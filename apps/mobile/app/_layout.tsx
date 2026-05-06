@@ -35,15 +35,27 @@ import { ThemeProvider } from '@/lib/theme/provider';
 // is back-stack scaffolding, not URL routing — apply it in nested
 // `_layout.tsx` files (e.g. (modal)) when those flows need it.
 
-// Token-bearing URLs (password reset, email verify) keep `(auth)`
-// reachable even for logged-in users with stale sessions. We read the
-// flag from `window.location.search` and keep it in state — refreshed
-// whenever the pathname changes so the flag drops once the user has
-// navigated away from the token URL (e.g. router.replace('/login')
-// after a successful reset).
+// Path → query-param map for the token-bearing routes that bypass the
+// authenticated-user redirect. Adding a future verify-email route
+// means adding `'/verify': 'token'` here, not loosening the regex.
+// Scoped this way so a hypothetical `/somewhere?next_token=foo` URL
+// doesn't accidentally trip the bypass.
+const TOKEN_BEARING_ROUTES: Record<string, string> = {
+  '/reset': 'token',
+  '/forgot': 'token',
+};
+
+// Returns true when the current URL is one of the explicitly listed
+// token-bearing routes AND has a non-empty value for that route's
+// token param. The `(auth)` group's guard checks this so a logged-in
+// user with a stale session can still complete a reset email click
+// (they'd otherwise be routed straight to (tabs) and lose the token).
 function readURLToken(): boolean {
   if (typeof window === 'undefined' || !window.location) return false;
-  return /[?&]token=/.test(window.location.search ?? '');
+  const param = TOKEN_BEARING_ROUTES[window.location.pathname];
+  if (!param) return false;
+  const params = new URLSearchParams(window.location.search ?? '');
+  return !!params.get(param);
 }
 
 // `useAuthState` reads from the QueryClient, so this lives below

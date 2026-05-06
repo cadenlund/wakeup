@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -326,10 +327,18 @@ func (s *Service) ClearAvatar(ctx context.Context, userID uuid.UUID) (domain.Use
 		return domain.User{}, apierror.Internal("clear avatar").WithCause(err)
 	}
 	if prevKey != "" {
-		// Best-effort: log via the cause-wrap path doesn't make sense
-		// here because the operation itself succeeded — we just left a
-		// stale object. Swallow the error; the orphan sweeper handles it.
-		_ = s.storage.Delete(ctx, prevKey)
+		// Best-effort: the row update is the source of truth; if the S3
+		// delete fails we leave an orphan object for the sweeper to reap
+		// (§4.6) rather than fail the user-facing call. Surface the
+		// failure via slog so a chronic storage outage is visible —
+		// silently swallowing would mask a real S3 incident.
+		if err := s.storage.Delete(ctx, prevKey); err != nil {
+			slog.WarnContext(ctx, "user: best-effort avatar S3 delete failed",
+				slog.String("user_id", userID.String()),
+				slog.String("key", prevKey),
+				slog.Any("err", err),
+			)
+		}
 	}
 	updated, err := s.users.GetByID(ctx, userID)
 	if err != nil {

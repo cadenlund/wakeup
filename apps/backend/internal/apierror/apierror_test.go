@@ -20,6 +20,7 @@ func TestHTTPStatus_AllCodesMapped(t *testing.T) {
 	wantPerCode := map[apierror.Code]int{
 		apierror.CodeBadRequest:                 400,
 		apierror.CodeUnauthorized:               401,
+		apierror.CodeResetTokenExpired:          401,
 		apierror.CodeForbidden:                  403,
 		apierror.CodeBlockedDuringImpersonation: 403,
 		apierror.CodeNotFound:                   404,
