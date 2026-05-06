@@ -164,15 +164,14 @@ export default function RegisterScreen() {
               // triggers iOS's "Use Strong Password?" suggestion
               // sheet, which covers the form (blocks Maestro flows
               // and visually pre-empts users who'd rather type
-              // their own password). iOS's heuristic ignores
-              // autoComplete="off" once it sees a sign-up form
-              // shape, so we explicitly set textContentType to
-              // a non-password value to opt out. The standard
-              // "Save password?" prompt that fires after a
-              // successful submit is preserved by iOS's cookie
-              // heuristic.
+              // their own password). `textContentType="none"` opts
+              // out without lying to iOS about what the field is —
+              // we previously used "oneTimeCode" but that made iOS
+              // try to autofill SMS verification codes from
+              // Messages and stopped 1Password / iCloud Keychain
+              // from offering to save the password on submit.
               autoComplete="off"
-              textContentType="oneTimeCode"
+              textContentType="none"
               returnKeyType="go"
               onSubmitEditing={submit}
               editable={!register.isPending}

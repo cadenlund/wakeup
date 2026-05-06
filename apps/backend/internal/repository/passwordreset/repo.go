@@ -41,14 +41,25 @@ type Entry struct {
 
 // Queries is the per-aggregate repository.
 type Queries struct {
-	db storage.DBTX
+	db  storage.DBTX
+	now func() time.Time // injected so tests can pin the boundary
 }
 
-// New returns a Queries bound to db.
-func New(db storage.DBTX) *Queries { return &Queries{db: db} }
+// New returns a Queries bound to db. now defaults to time.Now.
+func New(db storage.DBTX) *Queries { return &Queries{db: db, now: time.Now} }
 
-// WithTx returns a Queries instance bound to tx.
-func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }
+// NewWithClock is the test-injection escape hatch. The Get expiry
+// boundary uses the same clock the service uses to write expires_at,
+// so a synthetic now() in tests doesn't drift the read past the write.
+func NewWithClock(db storage.DBTX, now func() time.Time) *Queries {
+	if now == nil {
+		now = time.Now
+	}
+	return &Queries{db: db, now: now}
+}
+
+// WithTx returns a Queries instance bound to tx (clock preserved).
+func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx, now: q.now} }
 
 // SQL constants mirror queries.sql 1:1 (§4.3 discipline).
 
@@ -116,7 +127,7 @@ func (q *Queries) Get(ctx context.Context, tokenHash []byte) (Entry, error) {
 	if e.UsedAt != nil {
 		return Entry{}, ErrNotFound
 	}
-	if !e.ExpiresAt.After(time.Now()) {
+	if !e.ExpiresAt.After(q.now()) {
 		return Entry{}, ErrExpired
 	}
 	return e, nil

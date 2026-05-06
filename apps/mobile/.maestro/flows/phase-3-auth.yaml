@@ -14,6 +14,14 @@
 #   7. Sign back in with the same fresh creds → land on /(tabs)
 #      WITHOUT the onboarding carousel reappearing (server-side
 #      flag persists across logout/login per Phase 3.0).
+#
+# COVERAGE GAP (tracked for §11.5.3): the password-reset deep-link
+# happy path (email → /reset?token=… → submit → /login → sign in) is
+# NOT walked here. auth-reset-password.yaml only asserts the missing-
+# token branch — exercising the real token requires the wakeup://
+# scheme registered against the simulator, which expo run:ios doesn't
+# do reliably across Xcode versions. Once §11.5.3's universal-link
+# wiring lands, expand this suite to walk the full reset.
 appId: app.wakeup.client
 ---
 # Stop any running instance first — `clearState: true` alone
