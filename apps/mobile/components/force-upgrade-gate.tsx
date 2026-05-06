@@ -17,13 +17,19 @@ import { Platform, View } from 'react-native';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 import { useGetV1Healthz } from '@/lib/api/hooks/system/system';
+import { Sentry } from '@/lib/sentry';
 
 const POLL_INTERVAL_MS = 60_000;
 // TODO(release): replace placeholder iOS App ID before any prod build
 // that could trip the gate. The string `id000000000` makes a 404 on
-// the App Store; if the gate ever activates with this value the user
-// has no working forward path.
+// the App Store. While the placeholder is in place we treat the iOS
+// gate as DISABLED so blocked iOS users aren't sent to a dead URL —
+// the gate logic below special-cases iOS + placeholder and returns
+// `children` without rendering the modal. Sentry-capture in that
+// branch surfaces a "we'd have blocked but skipped" warning so we
+// catch shipping past the placeholder by accident.
 const IOS_STORE_URL = 'https://apps.apple.com/app/id000000000';
+const IOS_STORE_URL_IS_PLACEHOLDER = IOS_STORE_URL.includes('id000000000');
 const ANDROID_STORE_URL = 'https://play.google.com/store/apps/details?id=app.wakeup.client';
 
 // Compares dotted-decimal version strings. Returns true when `min`
@@ -59,7 +65,21 @@ export function ForceUpgradeGate({ children }: { children: React.ReactNode }) {
   const me = data as { min_client_version?: string } | undefined;
   const minVersion = me?.min_client_version;
   const currentVersion = Constants.expoConfig?.version;
-  const blocked = isUpgradeRequired(currentVersion, minVersion);
+  const wouldBlock = isUpgradeRequired(currentVersion, minVersion);
+  // iOS gate is disabled while IOS_STORE_URL is the placeholder —
+  // see the constant comment. Surface to Sentry in the would-have-
+  // blocked branch so a missed real-URL wire-up doesn't ship silently.
+  const iosPlaceholderSkip = wouldBlock && Platform.OS === 'ios' && IOS_STORE_URL_IS_PLACEHOLDER;
+  const blocked = wouldBlock && !iosPlaceholderSkip;
+
+  React.useEffect(() => {
+    if (iosPlaceholderSkip) {
+      Sentry.captureMessage(
+        'force-upgrade gate would have blocked iOS but the App Store URL is a placeholder',
+        { level: 'warning', tags: { surface: 'force-upgrade-gate' } }
+      );
+    }
+  }, [iosPlaceholderSkip]);
 
   React.useEffect(() => {
     if (blocked) {
