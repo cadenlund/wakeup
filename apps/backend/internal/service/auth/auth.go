@@ -344,10 +344,12 @@ type ConfirmPasswordResetParams struct {
 // before they bother filling in a new password. No DB writes — pure
 // read against the password_resets row.
 //
-// Error-message disclosure mirrors ConfirmPasswordReset: "Reset link
-// has expired" for ErrExpired (already approved as user-facing per
-// passwordreset/repo.go's ErrExpired comment) and "invalid reset
-// token" for everything else (anti-enumeration on token guessing).
+// Errors mirror ConfirmPasswordReset: CodeResetTokenExpired for the
+// expired branch (already approved as user-facing per
+// passwordreset/repo.go's ErrExpired comment) and CodeUnauthorized
+// "invalid reset token" for everything else (anti-enumeration on
+// token guessing). Mobile clients switch on the code, not the
+// human-readable message.
 func (s *Service) ValidatePasswordResetToken(ctx context.Context, token string) error {
 	if strings.TrimSpace(token) == "" {
 		return apierror.Unauthorized("invalid reset token")
@@ -355,7 +357,7 @@ func (s *Service) ValidatePasswordResetToken(ctx context.Context, token string) 
 	tokenHash := sha256Bytes(token)
 	if _, err := s.resets.Get(ctx, tokenHash); err != nil {
 		if errors.Is(err, passwordreset.ErrExpired) {
-			return apierror.Unauthorized("Reset link has expired. Request a new one from the sign-in screen.")
+			return apierror.ResetTokenExpired("Reset link has expired. Request a new one from the sign-in screen.")
 		}
 		if errors.Is(err, passwordreset.ErrNotFound) {
 			return apierror.Unauthorized("invalid reset token")
@@ -394,11 +396,11 @@ func (s *Service) ConfirmPasswordReset(ctx context.Context, p ConfirmPasswordRes
 	entry, err := resets.Get(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, passwordreset.ErrExpired) {
-			// Distinguished from ErrNotFound so the client can show a
-			// "your link expired, request a new one" message. Disclosing
+			// Distinct apierror code so the client can branch without
+			// matching against the human-readable message. Disclosing
 			// "expired" specifically is harmless — see ErrExpired's
 			// comment in passwordreset/repo.go.
-			return apierror.Unauthorized("Reset link has expired. Request a new one from the sign-in screen.")
+			return apierror.ResetTokenExpired("Reset link has expired. Request a new one from the sign-in screen.")
 		}
 		if errors.Is(err, passwordreset.ErrNotFound) {
 			return apierror.Unauthorized("invalid reset token")

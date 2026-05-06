@@ -8,7 +8,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CheckCircle2, Moon } from 'lucide-react-native';
 import * as React from 'react';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { AuthScreenLayout } from '@/components/auth-screen-layout';
@@ -49,10 +49,17 @@ export default function ResetScreen() {
     mutation: {
       // No manual toast — query-client's mutationCache.onError already
       // surfaces the backend's "Unauthorized: invalid reset token"
-      // message. Just haptic + redirect here.
-      onError: () => {
-        haptics.warning();
-        router.replace('/login');
+      // message. We only redirect on a definitive auth error (401);
+      // network blips and 5xx fall through to React Query's retry so
+      // a transient outage doesn't kick the user off a valid token.
+      onError: (err) => {
+        if (
+          err instanceof APIError &&
+          (err.body?.code === 'UNAUTHORIZED' || err.body?.code === 'RESET_TOKEN_EXPIRED')
+        ) {
+          haptics.warning();
+          router.replace('/login');
+        }
       },
     },
   });
@@ -60,11 +67,11 @@ export default function ResetScreen() {
   const tokenValid = validate.isSuccess;
   React.useEffect(() => {
     if (!token) return;
+    // Mutate reference is stable per TanStack — re-firing on token
+    // change only happens via fresh deep-link mount, which is exactly
+    // when we want the preflight to re-run.
     validateMutate({ data: { token } });
-    // Run-once preflight; subsequent token changes can only come from
-    // a fresh deep-link nav which remounts this screen.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, validateMutate]);
 
   const confirmReset = usePostV1AuthPasswordResetConfirm({
     mutation: {
@@ -87,7 +94,7 @@ export default function ResetScreen() {
         // Native still uses router.replace + cache clear because
         // there's no equivalent "full reload" (and the cold-start
         // race that motivates this on web doesn't apply).
-        if (typeof window !== 'undefined' && window.location) {
+        if (Platform.OS === 'web') {
           toast.queueForNextMount('success', 'Password reset', 'Sign in with your new password.');
           window.location.assign('/login');
           return;
@@ -102,10 +109,11 @@ export default function ResetScreen() {
         // Route the user back to /login. The global mutation toast
         // (lib/api/query-client.ts) shows the backend's "Reset link
         // has expired…" message; we add a haptic + reroute on top.
-        // Other 4xx (bad token, used) and network errors fall through
-        // to the inline `topError` text below.
-        const msg = err instanceof APIError ? (err.body?.message ?? '') : '';
-        if (/expired/i.test(msg)) {
+        // Branches off the stable error code so the UX doesn't break
+        // the next time someone tweaks the message copy. Other 4xx
+        // (bad token, used) and network errors fall through to the
+        // inline `topError` text below.
+        if (err instanceof APIError && err.body?.code === 'RESET_TOKEN_EXPIRED') {
           haptics.warning();
           router.replace('/login');
         }

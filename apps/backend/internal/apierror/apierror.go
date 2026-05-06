@@ -30,6 +30,7 @@ type Code string
 const (
 	CodeBadRequest                 Code = "BAD_REQUEST"
 	CodeUnauthorized               Code = "UNAUTHORIZED"
+	CodeResetTokenExpired          Code = "RESET_TOKEN_EXPIRED"
 	CodeForbidden                  Code = "FORBIDDEN"
 	CodeBlockedDuringImpersonation Code = "BLOCKED_DURING_IMPERSONATION"
 	CodeNotFound                   Code = "RESOURCE_NOT_FOUND"
@@ -47,6 +48,7 @@ const (
 var httpStatus = map[Code]int{
 	CodeBadRequest:                 http.StatusBadRequest,
 	CodeUnauthorized:               http.StatusUnauthorized,
+	CodeResetTokenExpired:          http.StatusUnauthorized,
 	CodeForbidden:                  http.StatusForbidden,
 	CodeBlockedDuringImpersonation: http.StatusForbidden,
 	CodeNotFound:                   http.StatusNotFound,
@@ -63,6 +65,7 @@ var httpStatus = map[Code]int{
 var allCodes = []Code{
 	CodeBadRequest,
 	CodeUnauthorized,
+	CodeResetTokenExpired,
 	CodeForbidden,
 	CodeBlockedDuringImpersonation,
 	CodeNotFound,
@@ -168,6 +171,19 @@ func Unauthorized(msg string) *Error {
 		msg = "unauthorized"
 	}
 	return &Error{Code: CodeUnauthorized, Message: msg}
+}
+
+// ResetTokenExpired is the password-reset specific 401: distinguished
+// from CodeUnauthorized so the mobile client can surface a "your link
+// expired, request a new one" UX without string-matching the message.
+// Disclosing "expired" specifically is harmless — an attacker holding
+// an expired token already had it (e.g. email leak) and learns nothing
+// new from the distinction. See passwordreset/repo.go ErrExpired.
+func ResetTokenExpired(msg string) *Error {
+	if msg == "" {
+		msg = "reset link has expired"
+	}
+	return &Error{Code: CodeResetTokenExpired, Message: msg}
 }
 
 // Forbidden returns a CodeForbidden error.
