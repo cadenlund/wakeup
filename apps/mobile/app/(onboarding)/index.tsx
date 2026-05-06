@@ -47,8 +47,9 @@ import { Label } from '@/components/ui/label';
 import { Text } from '@/components/ui/text';
 import { getGetV1AuthMeQueryKey, useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { usePatchV1UsersMe, usePostV1UsersMeOnboard } from '@/lib/api/hooks/users/users';
-import { useFieldErrors } from '@/lib/api/use-field-errors';
+import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
 import { haptics } from '@/lib/haptics';
+import { Sentry } from '@/lib/sentry';
 import { useThemeStore, type ModePreference } from '@/lib/theme/store';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
@@ -126,6 +127,7 @@ export default function OnboardingScreen() {
   }, [me?.status_emoji]);
   const patchMe = usePatchV1UsersMe();
   const profileFieldErrors = useFieldErrors(patchMe.error);
+  const profileTopError = useTopLevelError(patchMe.error);
 
   // Reduced-motion: turn off the horizontal scroll animation when the
   // OS setting is on. (CR + §10.5 accessibility baseline.)
@@ -184,14 +186,41 @@ export default function OnboardingScreen() {
   // save when the user swipes off it. CR rightly flagged that the
   // explicit Continue button was the only persistence path — a
   // horizontal swipe past the profile would silently drop edits.
+  //
+  // On swipe-off save FAILURE we scroll the user back to the
+  // profile slide so they see the inline error from `topError`
+  // (already wired below the Continue button) and can retry. The
+  // mutationCache toast also fires for the global notification, but
+  // the user has already moved past the slide by then — the
+  // scroll-back is what makes the failure recoverable instead of a
+  // silent data loss. Also Sentry-capture so chronic failures
+  // (server outage, malformed payload) are observable.
   const PROFILE_SLIDE = 3;
   const persistProfileEditsIfDirty = React.useCallback(() => {
     const trimmedBio = bio.trim();
     const trimmedEmoji = statusEmoji.trim();
     const dirty = trimmedBio !== (me?.bio ?? '') || trimmedEmoji !== (me?.status_emoji ?? '');
     if (!dirty || patchMe.isPending) return;
-    patchMe.mutate({ data: { bio: trimmedBio, status_emoji: trimmedEmoji } });
-  }, [bio, statusEmoji, me?.bio, me?.status_emoji, patchMe]);
+    patchMe.mutate(
+      { data: { bio: trimmedBio, status_emoji: trimmedEmoji } },
+      {
+        onError: (err) => {
+          Sentry.captureException(err, {
+            tags: { surface: 'onboarding-swipe-off-save' },
+          });
+          haptics.warning();
+          // Snap back so the user can correct + retry. Without this
+          // they keep swiping forward through the carousel with no
+          // signal that the profile didn't persist.
+          setPage(PROFILE_SLIDE);
+          scrollRef.current?.scrollTo({
+            x: PROFILE_SLIDE * width,
+            animated: !reduceMotion,
+          });
+        },
+      }
+    );
+  }, [bio, statusEmoji, me?.bio, me?.status_emoji, patchMe, width, reduceMotion]);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset.x;
@@ -399,6 +428,13 @@ export default function OnboardingScreen() {
                 onPress={saveProfileAndAdvance}>
                 <Text>{patchMe.isPending ? 'Saving…' : 'Continue'}</Text>
               </Button>
+              {profileTopError ? (
+                <Text
+                  testID="onboarding-profile-top-error"
+                  className="pt-2 text-center text-sm text-destructive">
+                  {profileTopError}
+                </Text>
+              ) : null}
             </Footer>
           </SlideFrame>
         </View>
