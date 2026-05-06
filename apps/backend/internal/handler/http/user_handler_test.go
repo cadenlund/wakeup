@@ -442,6 +442,77 @@ func TestUploadAvatar_Unauthenticated(t *testing.T) {
 	assertCode(t, resp, http.StatusUnauthorized, apierror.CodeUnauthorized)
 }
 
+// --- DELETE /v1/users/me/avatar ------------------------------------------
+
+func TestDeleteAvatar_AfterUpload(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, _ := h.AuthClient(t)
+
+	upResp := uploadFile(t, c, h.Server.URL+"/v1/users/me/avatar", "avatar.png", minimalPNG)
+	t.Cleanup(func() { _ = upResp.Body.Close() })
+	if upResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(upResp.Body)
+		t.Fatalf("upload status=%d body=%s", upResp.StatusCode, body)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, h.Server.URL+"/v1/users/me/avatar", nil)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("delete status=%d body=%s", resp.StatusCode, body)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	user, ok := got["user"].(map[string]any)
+	if !ok {
+		t.Fatalf("user field missing: %+v", got)
+	}
+	if avatar, present := user["avatar_url"]; present && avatar != nil {
+		t.Errorf("avatar_url should be cleared, got %v", avatar)
+	}
+}
+
+// Calling DELETE on a user with no avatar must be a clean 200 — the
+// endpoint is documented as idempotent so the mobile picker can fire
+// it without first checking the current state.
+func TestDeleteAvatar_NoExistingAvatar_Idempotent(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, _ := h.AuthClient(t)
+
+	req, _ := http.NewRequest(http.MethodDelete, h.Server.URL+"/v1/users/me/avatar", nil)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+}
+
+func TestDeleteAvatar_Unauthenticated(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c := h.HTTPClient(t)
+	req, _ := http.NewRequest(http.MethodDelete, h.Server.URL+"/v1/users/me/avatar", nil)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	assertCode(t, resp, http.StatusUnauthorized, apierror.CodeUnauthorized)
+}
+
 // --- GET /v1/users/me/notifications --------------------------------------
 
 func TestGetNotifications_Defaults(t *testing.T) {

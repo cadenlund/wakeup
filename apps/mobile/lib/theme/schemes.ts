@@ -86,10 +86,6 @@ export function resolveScheme(selected: SchemeOrSystem, osMode: Mode): Scheme {
   return selected;
 }
 
-// Stable sentinel used as the AsyncStorage key — never change without
-// also writing a migration.
-export const STORAGE_KEY = 'theme:scheme';
-
 export const DEFAULT_SCHEME: SchemeOrSystem = 'system';
 
 // ComponentType<unknown> is what the swatch grid actually consumes —

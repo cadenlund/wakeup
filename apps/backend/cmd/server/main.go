@@ -187,6 +187,15 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("user service: %w", err)
 	}
+	// Wire the package-wide avatar URL presigner that MeResponse /
+	// UserResponse mappers use to convert stored S3 keys into signed
+	// URLs the client can drop into <Image>. context.Background() is
+	// fine here: the underlying AWS presigner is sync HMAC work and
+	// the mappers run on already-cancelled-aware request goroutines
+	// that finish before the value is observed by the client anyway.
+	httpapi.SetAvatarURLPresigner(func(key string) (string, error) {
+		return userSvc.PresignAvatarGetURL(context.Background(), key)
+	})
 	notifPrefSvc, err := notifprefsvc.New(notifprefsvc.Config{Prefs: prefsRepo})
 	if err != nil {
 		return fmt.Errorf("notificationpref service: %w", err)
@@ -481,19 +490,44 @@ func run() error {
 // production) a missing key is a startup error — silently no-op'ing
 // would turn a bad secret rollout into a silent password-reset outage
 // (CodeRabbit caught this on PR #28).
+//
+// The two reset-link bases (app deep link, browser URL) default to the
+// local-dev values in `local`/`test`. In any other env both are required
+// — there is no production fallback because every deployment owns its
+// own domain and bundle id, and a wrong default would silently email
+// links that point nowhere we control.
 func buildMailer(cfg *config.Config) (mailer.Mailer, error) {
+	isDev := cfg.Env == "local" || cfg.Env == "test"
+
 	if cfg.ResendAPIKey == "" {
-		switch cfg.Env {
-		case "local", "test":
+		if isDev {
 			return noopMailer{}, nil
-		default:
-			return nil, fmt.Errorf("mailer: RESEND_API_KEY is required in env=%s", cfg.Env)
 		}
+		return nil, fmt.Errorf("mailer: RESEND_API_KEY is required in env=%s", cfg.Env)
 	}
+
+	appURL := cfg.ResetPasswordAppURLBase
+	webURL := cfg.ResetPasswordWebURLBase
+	if isDev {
+		if appURL == "" {
+			// Mobile scheme is "wakeup" (apps/mobile/app.json); reset.tsx
+			// reads the token via useLocalSearchParams.
+			appURL = "wakeup://reset?token="
+		}
+		if webURL == "" {
+			// Expo Router web defaults to :8081 and serves the (auth)/reset
+			// route at /reset.
+			webURL = "http://localhost:8081/reset?token="
+		}
+	} else if appURL == "" || webURL == "" {
+		return nil, fmt.Errorf("mailer: RESET_PASSWORD_APP_URL_BASE and RESET_PASSWORD_WEB_URL_BASE are required in env=%s", cfg.Env)
+	}
+
 	return mailer.New(mailer.Config{
-		APIKey:       cfg.ResendAPIKey,
-		FromEmail:    cfg.ResendFromEmail,
-		ResetURLBase: "https://wakeup.app/auth/reset?token=",
+		APIKey:          cfg.ResendAPIKey,
+		FromEmail:       cfg.ResendFromEmail,
+		ResetAppURLBase: appURL,
+		ResetWebURLBase: webURL,
 	})
 }
 

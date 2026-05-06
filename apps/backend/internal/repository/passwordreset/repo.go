@@ -16,11 +16,20 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/storage"
 )
 
-// ErrNotFound is returned when Get can't find a live, unconsumed row.
-// Auth treats "wrong token", "expired token", and "already used token"
-// uniformly via this sentinel — clients learn nothing about which case
-// applied, defeating timing-based oracles.
+// ErrNotFound is returned when Get can't find a row with the given
+// token hash, or when the row exists but has already been consumed
+// (used_at is set). Used and missing are treated identically — clients
+// learn nothing from the difference, defeating timing oracles and
+// preventing an attacker from confirming a reused token was once valid.
 var ErrNotFound = errors.New("passwordreset: not found")
+
+// ErrExpired is returned when Get finds a row that hasn't been used
+// but whose expires_at is in the past. Distinguished from ErrNotFound
+// so the service can surface a "your reset link expired, request a
+// new one" UX. Differentiating expired-vs-missing is acceptable here
+// because an attacker holding an expired token already had it (e.g.
+// from an email leak) — they learn nothing new from the distinction.
+var ErrExpired = errors.New("passwordreset: expired")
 
 // Entry mirrors a row in password_resets.
 type Entry struct {
@@ -47,16 +56,26 @@ const createSQL = `-- name: Create :exec
 INSERT INTO password_resets (token_hash, user_id, expires_at)
 VALUES ($1, $2, $3)`
 
+// getSQL returns the row by hash regardless of expiry/used state. The
+// service inspects used_at and expires_at to choose between
+// ErrNotFound (used/missing — uniform for security) and ErrExpired
+// (live but past expiry).
 const getSQL = `-- name: Get :one
 SELECT token_hash, user_id, expires_at, used_at
 FROM password_resets
-WHERE token_hash = $1
-  AND used_at IS NULL
-  AND expires_at > now()`
+WHERE token_hash = $1`
 
 const markUsedSQL = `-- name: MarkUsed :exec
 UPDATE password_resets SET used_at = now()
 WHERE token_hash = $1 AND used_at IS NULL`
+
+// markAllUsedForUserSQL invalidates every live token for a given user.
+// Used by the service before issuing a fresh reset token so only ONE
+// token is active per user at any moment — resending the email
+// silently kills the previous link.
+const markAllUsedForUserSQL = `-- name: MarkAllUsedForUser :exec
+UPDATE password_resets SET used_at = now()
+WHERE user_id = $1 AND used_at IS NULL`
 
 const deleteExpiredAndUsedSQL = `-- name: DeleteExpiredAndUsed :execrows
 DELETE FROM password_resets
@@ -74,10 +93,16 @@ func (q *Queries) Create(ctx context.Context, tokenHash []byte, userID uuid.UUID
 	return nil
 }
 
-// Get returns the entry only if the row exists, has not expired, and has
-// not been consumed. Returns ErrNotFound otherwise — callers can't
-// distinguish between the three failure modes from the error alone, which
-// is intentional.
+// Get loads the row by hash and classifies the result:
+//   - missing or already used → ErrNotFound (uniform for security)
+//   - exists, unused, but past expiry → ErrExpired
+//   - exists, unused, not expired → Entry, nil
+//
+// Treating "missing" and "used" identically prevents an attacker from
+// confirming a reused token was once valid. Expired is distinguished
+// only because the legitimate user benefits from a clear "your link
+// expired" message and the disclosure is harmless (an attacker with
+// an expired token already had it).
 func (q *Queries) Get(ctx context.Context, tokenHash []byte) (Entry, error) {
 	row := q.db.QueryRow(ctx, getSQL, tokenHash)
 	var e Entry
@@ -87,6 +112,12 @@ func (q *Queries) Get(ctx context.Context, tokenHash []byte) (Entry, error) {
 	}
 	if err != nil {
 		return Entry{}, fmt.Errorf("passwordreset: get: %w", err)
+	}
+	if e.UsedAt != nil {
+		return Entry{}, ErrNotFound
+	}
+	if !e.ExpiresAt.After(time.Now()) {
+		return Entry{}, ErrExpired
 	}
 	return e, nil
 }
@@ -104,6 +135,19 @@ func (q *Queries) MarkUsed(ctx context.Context, tokenHash []byte) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// MarkAllUsedForUser invalidates every live (unused) reset token for
+// the given user. Returns the number of rows affected for the caller's
+// log line. The auth service calls this before creating a fresh token
+// so only ONE token is active at a time — resending the reset email
+// silently kills any earlier link the user might still try to click.
+func (q *Queries) MarkAllUsedForUser(ctx context.Context, userID uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, markAllUsedForUserSQL, userID)
+	if err != nil {
+		return 0, fmt.Errorf("passwordreset: mark all used for user: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // DeleteExpiredAndUsed garbage-collects rows past their expiry or already

@@ -383,6 +383,70 @@ func TestUploadAvatar_ExtMappings(t *testing.T) {
 	}
 }
 
+// --- ClearAvatar ---------------------------------------------------------
+
+// Upload then clear: the row's avatar_url flips back to nil and the
+// returned domain.User reflects that. Mirrors the UploadAvatar happy
+// path so the round-trip is covered end to end.
+func TestClearAvatar_AfterUpload(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	uid := makeUser(t, st)
+
+	uploaded, err := st.svc.UploadAvatar(context.Background(), uid,
+		bytes.NewReader(minimalPNG), int64(len(minimalPNG)))
+	if err != nil {
+		t.Fatalf("UploadAvatar: %v", err)
+	}
+	if uploaded.AvatarURL == nil {
+		t.Fatal("expected AvatarURL after upload")
+	}
+
+	cleared, err := st.svc.ClearAvatar(context.Background(), uid)
+	if err != nil {
+		t.Fatalf("ClearAvatar: %v", err)
+	}
+	if cleared.AvatarURL != nil {
+		t.Errorf("AvatarURL = %v, want nil after clear", *cleared.AvatarURL)
+	}
+}
+
+// Clearing a row that already had no avatar is a no-op success.
+// The endpoint is documented as idempotent and the carousel-style
+// flows on the client may double-fire it under network stutter.
+func TestClearAvatar_NoExistingAvatar_Idempotent(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	uid := makeUser(t, st)
+
+	cleared, err := st.svc.ClearAvatar(context.Background(), uid)
+	if err != nil {
+		t.Fatalf("ClearAvatar: %v", err)
+	}
+	if cleared.AvatarURL != nil {
+		t.Errorf("AvatarURL = %v, want nil", *cleared.AvatarURL)
+	}
+	// Second call must also succeed without error.
+	if _, err := st.svc.ClearAvatar(context.Background(), uid); err != nil {
+		t.Fatalf("second ClearAvatar: %v", err)
+	}
+}
+
+// Soft-deleted users can't have their avatar cleared — repo's
+// WHERE deleted_at IS NULL returns ErrNotFound, which the service
+// surfaces as 404.
+func TestClearAvatar_MissingUserReturns404(t *testing.T) {
+	t.Parallel()
+	st := newStack(t)
+	_, err := st.svc.ClearAvatar(context.Background(), uuid.New())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if asAPIError(t, err).Code != apierror.CodeNotFound {
+		t.Errorf("Code = %q, want RESOURCE_NOT_FOUND", asAPIError(t, err).Code)
+	}
+}
+
 // --- SoftDeleteAccount ---------------------------------------------------
 
 func TestSoftDeleteAccount_Success(t *testing.T) {

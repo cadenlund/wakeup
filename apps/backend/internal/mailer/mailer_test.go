@@ -54,9 +54,10 @@ func newMailerAt(t *testing.T, serverURL string) *mailer.Resend {
 	client.BaseURL = u
 
 	m, err := mailer.NewWithClient(client, mailer.Config{
-		APIKey:       "test-key",
-		FromEmail:    "Wakeup <no-reply@wakeup.test>",
-		ResetURLBase: "https://wakeup.app/auth/reset?token=",
+		APIKey:          "test-key",
+		FromEmail:       "Wakeup <no-reply@wakeup.test>",
+		ResetAppURLBase: "wakeup://reset?token=",
+		ResetWebURLBase: "https://app.example.test/reset?token=",
 	})
 	if err != nil {
 		t.Fatalf("NewWithClient: %v", err)
@@ -85,12 +86,15 @@ func TestSendPasswordReset_Success(t *testing.T) {
 	if !strings.Contains(captured.Subject, "Reset") {
 		t.Errorf("Subject = %q", captured.Subject)
 	}
-	wantLink := "https://wakeup.app/auth/reset?token=" + token
-	if !strings.Contains(captured.Html, wantLink) {
-		t.Errorf("Html missing reset link: %q", captured.Html)
-	}
-	if !strings.Contains(captured.Text, wantLink) {
-		t.Errorf("Text missing reset link: %q", captured.Text)
+	wantApp := "wakeup://reset?token=" + token
+	wantWeb := "https://app.example.test/reset?token=" + token
+	for _, want := range []string{wantApp, wantWeb} {
+		if !strings.Contains(captured.Html, want) {
+			t.Errorf("Html missing %q: %q", want, captured.Html)
+		}
+		if !strings.Contains(captured.Text, want) {
+			t.Errorf("Text missing %q: %q", want, captured.Text)
+		}
 	}
 }
 
@@ -145,9 +149,10 @@ func TestSendPasswordReset_RejectsBlankInputs(t *testing.T) {
 func TestNew_ValidatesConfig(t *testing.T) {
 	t.Parallel()
 	base := mailer.Config{
-		APIKey:       "test-key",
-		FromEmail:    "x@example.com",
-		ResetURLBase: "https://wakeup.app/auth/reset?token=",
+		APIKey:          "test-key",
+		FromEmail:       "x@example.com",
+		ResetAppURLBase: "wakeup://reset?token=",
+		ResetWebURLBase: "https://app.example.test/reset?token=",
 	}
 	cases := []struct {
 		name string
@@ -155,10 +160,13 @@ func TestNew_ValidatesConfig(t *testing.T) {
 	}{
 		{"missing api key", func(c *mailer.Config) { c.APIKey = "" }},
 		{"missing from", func(c *mailer.Config) { c.FromEmail = "" }},
-		{"missing reset URL", func(c *mailer.Config) { c.ResetURLBase = "" }},
-		{"relative reset URL", func(c *mailer.Config) { c.ResetURLBase = "/auth/reset?token=" }},
-		{"scheme-only reset URL", func(c *mailer.Config) { c.ResetURLBase = "https:///path" }},
-		{"non-URL reset", func(c *mailer.Config) { c.ResetURLBase = "not a url" }},
+		{"missing app URL", func(c *mailer.Config) { c.ResetAppURLBase = "" }},
+		{"missing web URL", func(c *mailer.Config) { c.ResetWebURLBase = "" }},
+		{"relative app URL", func(c *mailer.Config) { c.ResetAppURLBase = "/reset?token=" }},
+		{"relative web URL", func(c *mailer.Config) { c.ResetWebURLBase = "/reset?token=" }},
+		{"scheme-only web URL", func(c *mailer.Config) { c.ResetWebURLBase = "https:///path" }},
+		{"non-URL app", func(c *mailer.Config) { c.ResetAppURLBase = "not a url" }},
+		{"non-URL web", func(c *mailer.Config) { c.ResetWebURLBase = "not a url" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -175,7 +183,10 @@ func TestNew_ValidatesConfig(t *testing.T) {
 func TestNewWithClient_RejectsNilClient(t *testing.T) {
 	t.Parallel()
 	cfg := mailer.Config{
-		APIKey: "k", FromEmail: "from@x", ResetURLBase: "https://x/reset?token=",
+		APIKey:          "k",
+		FromEmail:       "from@x",
+		ResetAppURLBase: "wakeup://reset?token=",
+		ResetWebURLBase: "https://x/reset?token=",
 	}
 	_, err := mailer.NewWithClient(nil, cfg)
 	if err == nil {

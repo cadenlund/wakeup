@@ -39,25 +39,25 @@ func (q *Queries) WithTx(tx pgx.Tx) *Queries { return &Queries{db: tx} }
 const createSQL = `-- name: Create :one
 INSERT INTO users (id, username, display_name, email, password_hash)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at`
+RETURNING id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at`
 
 const getByIDSQL = `-- name: GetByID :one
-SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1 AND deleted_at IS NULL`
 
 const getByIDIncludingDeletedSQL = `-- name: GetByIDIncludingDeleted :one
-SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1`
 
 const getByUsernameSQL = `-- name: GetByUsername :one
-SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
 WHERE username = $1 AND deleted_at IS NULL`
 
 const getByEmailSQL = `-- name: GetByEmail :one
-SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
 WHERE email = $1 AND deleted_at IS NULL`
 
@@ -69,7 +69,7 @@ SET display_name = COALESCE($2, display_name),
     bio          = COALESCE($5, bio),
     status_emoji = COALESCE($6, status_emoji)
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at`
+RETURNING id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at`
 
 const updatePasswordSQL = `-- name: UpdatePassword :exec
 UPDATE users SET password_hash = $2 WHERE id = $1 AND deleted_at IS NULL`
@@ -80,8 +80,25 @@ UPDATE users SET role = $2 WHERE id = $1 AND deleted_at IS NULL`
 const softDeleteSQL = `-- name: SoftDelete :exec
 UPDATE users SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`
 
+const markOnboardedSQL = `-- name: MarkOnboarded :exec
+UPDATE users
+SET onboarded_at = COALESCE(onboarded_at, now())
+WHERE id = $1 AND deleted_at IS NULL`
+
+// clearAvatarSQL is the dedicated "remove the user's profile photo"
+// path. The general Update query treats nil as "leave unchanged" via
+// COALESCE so it can't represent "blow this column to NULL" — hence
+// the separate query. Returns the previous avatar_url so the service
+// can best-effort delete the underlying S3 object without an extra
+// round-trip.
+const clearAvatarSQL = `-- name: ClearAvatar :one
+UPDATE users
+SET avatar_url = NULL
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING avatar_url`
+
 const listByPrefixSQL = `-- name: ListByPrefix :many
-SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
 WHERE deleted_at IS NULL
   AND (
@@ -127,12 +144,12 @@ func needsLikeEscape(s string) bool {
 }
 
 const listByIDsSQL = `-- name: ListByIDs :many
-SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
 WHERE id = ANY($1::uuid[])`
 
 const matchByEmailHashesSQL = `-- name: MatchByEmailHashes :many
-SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, created_at, updated_at, deleted_at
+SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
 WHERE deleted_at IS NULL
   AND email_hash = ANY(
@@ -154,6 +171,7 @@ func scanUser(row pgx.Row) (domain.User, error) {
 		&u.StatusEmoji,
 		&u.ColorScheme,
 		&u.Role,
+		&u.OnboardedAt,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 		&u.DeletedAt,
@@ -279,6 +297,42 @@ func (q *Queries) SoftDelete(ctx context.Context, id uuid.UUID) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// MarkOnboarded stamps onboarded_at = now() on the row, idempotently —
+// a second call leaves the existing timestamp in place via COALESCE so
+// the carousel can re-trigger the endpoint without bumping the value.
+// Used by the mobile post-login onboarding carousel (WAKEUPEXPO §3.0)
+// when the user finishes the slides.
+func (q *Queries) MarkOnboarded(ctx context.Context, id uuid.UUID) error {
+	tag, err := q.db.Exec(ctx, markOnboardedSQL, id)
+	if err != nil {
+		return fmt.Errorf("user: mark onboarded: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearAvatar sets the user's avatar_url to NULL and returns the
+// previous value so callers can purge the underlying S3 object.
+// Returns ("", nil) when the column was already empty — that's a
+// no-op success, not an error. ErrNotFound when the user row is
+// missing or soft-deleted.
+func (q *Queries) ClearAvatar(ctx context.Context, id uuid.UUID) (string, error) {
+	var prev *string
+	err := q.db.QueryRow(ctx, clearAvatarSQL, id).Scan(&prev)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("user: clear avatar: %w", err)
+	}
+	if prev == nil {
+		return "", nil
+	}
+	return *prev, nil
 }
 
 // ListByPrefix returns up to limit users whose username or display_name

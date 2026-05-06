@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -269,4 +270,73 @@ func (s *Service) SoftDeleteAccount(ctx context.Context, userID uuid.UUID) error
 		return apierror.Internal("soft delete").WithCause(err)
 	}
 	return nil
+}
+
+// avatarPresignTTL is the read window we hand to the client for an
+// avatar URL. Long enough that a chat list scroll won't refresh
+// while the user is staring at it, short enough that a leaked URL
+// expires before it matters. The me query invalidates often enough
+// that the client has a fresh URL on every meaningful state change
+// (login, profile update, onboarding finish, etc.).
+const avatarPresignTTL = 1 * time.Hour
+
+// PresignAvatarGetURL turns an S3 object key (e.g. "avatars/<uid>/<obj>.png")
+// into a short-lived signed URL the mobile/web client can drop into
+// <Image src=...>. Pass values that already look like a URL through
+// untouched so the caller doesn't have to inspect the field shape —
+// future migrations to a CDN-prefixed avatar_url won't break.
+func (s *Service) PresignAvatarGetURL(ctx context.Context, key string) (string, error) {
+	if key == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(key, "http://") || strings.HasPrefix(key, "https://") {
+		return key, nil
+	}
+	return s.storage.PresignGet(ctx, key, avatarPresignTTL, "")
+}
+
+// MarkOnboarded stamps the per-account onboarding-completed timestamp.
+// Idempotent: a second call leaves the existing value in place. Backs
+// the mobile post-login carousel (WAKEUPEXPO §3.0); /v1/auth/me
+// surfaces `onboarded_at` and the AuthGate routes to (onboarding) when
+// the field is null.
+func (s *Service) MarkOnboarded(ctx context.Context, userID uuid.UUID) error {
+	if err := s.users.MarkOnboarded(ctx, userID); err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return apierror.NotFound("user")
+		}
+		return apierror.Internal("mark onboarded").WithCause(err)
+	}
+	return nil
+}
+
+// ClearAvatar nulls the user's avatar_url and best-effort deletes the
+// underlying S3 object. The DB write is the source of truth: if the
+// row update succeeds, the call returns success even when the S3
+// delete fails — the orphan object is acceptable per §4.6 (it gets
+// reaped by the sweeper) and we never want a flaky storage layer to
+// keep the user's photo "stuck" on their profile. Idempotent: calling
+// twice on a user with no avatar is a clean success and a no-op on S3.
+func (s *Service) ClearAvatar(ctx context.Context, userID uuid.UUID) (domain.User, error) {
+	prevKey, err := s.users.ClearAvatar(ctx, userID)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return domain.User{}, apierror.NotFound("user")
+		}
+		return domain.User{}, apierror.Internal("clear avatar").WithCause(err)
+	}
+	if prevKey != "" {
+		// Best-effort: log via the cause-wrap path doesn't make sense
+		// here because the operation itself succeeded — we just left a
+		// stale object. Swallow the error; the orphan sweeper handles it.
+		_ = s.storage.Delete(ctx, prevKey)
+	}
+	updated, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return domain.User{}, apierror.NotFound("user")
+		}
+		return domain.User{}, apierror.Internal("get user").WithCause(err)
+	}
+	return updated, nil
 }

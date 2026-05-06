@@ -16,6 +16,11 @@ export interface InternalHandlerHttpMeResponse {
   email?: string;
   id?: string;
   impersonated_by?: InternalHandlerHttpImpersonatorInfo;
+  /** OnboardedAt is null until the user finishes the post-login
+  onboarding carousel. The mobile AuthGate (WAKEUPEXPO §3.0)
+  routes to (onboarding) while this is null so a fresh sign-in
+  on a new device doesn't re-onboard a user who already finished. */
+  onboarded_at?: string;
   role?: string;
   status_emoji?: string;
   username?: string;

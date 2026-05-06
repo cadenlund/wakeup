@@ -31,10 +31,19 @@ export default function RegisterScreen() {
 
   const register = usePostV1AuthRegister({
     mutation: {
-      onSuccess: async () => {
+      onSuccess: async (response) => {
         haptics.success();
+        // Register envelope is `{ user: MeResponse }`. Push the
+        // embedded user into the me-query cache up front so
+        // AuthGate routes from `onboarded_at: null` directly to
+        // /(onboarding) without first flashing /(tabs) while the
+        // me query refetches.
+        const body = response as unknown as { user?: { id?: string; onboarded_at?: string } };
+        if (body?.user?.id) {
+          qc.setQueryData(getGetV1AuthMeQueryKey(), body.user);
+        }
         await qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        router.replace('/');
+        router.replace('/(onboarding)');
       },
     },
   });

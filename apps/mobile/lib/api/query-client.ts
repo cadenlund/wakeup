@@ -21,6 +21,7 @@ import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 
 import { APIError } from '@/lib/api/client';
+import { STORAGE_KEYS } from '@/lib/storage-keys';
 import { toast } from '@/lib/toast';
 
 const RETRY_DELAY_BASE_MS = 1000;
@@ -139,7 +140,7 @@ export const queryClient = new QueryClient({
 
 export const queryPersister = createAsyncStoragePersister({
   storage: AsyncStorage,
-  key: 'query-cache:v1',
+  key: STORAGE_KEYS.queryCache,
 });
 
 // Allowlist of query-key prefixes that may be persisted to

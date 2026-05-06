@@ -233,8 +233,10 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
 					Delete("/v1/users/me", d.UserHandler.DeleteMe)
 				r.Post("/v1/users/me/avatar", d.UserHandler.UploadAvatar)
+				r.Delete("/v1/users/me/avatar", d.UserHandler.DeleteAvatar)
 				r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
 					Patch("/v1/users/me/notifications", d.UserHandler.UpdateNotifications)
+				r.Post("/v1/users/me/onboard", d.UserHandler.CompleteOnboarding)
 				r.Post("/v1/friends/requests", d.FriendHandler.SendRequest)
 				r.Post("/v1/friends/requests/{id}/accept", d.FriendHandler.AcceptRequest)
 				r.Post("/v1/friends/requests/{id}/decline", d.FriendHandler.DeclineRequest)

@@ -522,6 +522,110 @@ export const usePostV1UsersMeAvatar = <TError = InternalHandlerHttpErrorResponse
       > => {
       return useMutation(getPostV1UsersMeAvatarMutationOptions(options), queryClient);
     }
+    export type deleteV1UsersMeAvatarResponse200 = {
+  data: InternalHandlerHttpAvatarUploadResponse
+  status: 200
+}
+
+export type deleteV1UsersMeAvatarResponse401 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 401
+}
+
+export type deleteV1UsersMeAvatarResponse404 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 404
+}
+
+export type deleteV1UsersMeAvatarResponse429 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 429
+}
+
+export type deleteV1UsersMeAvatarResponse500 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 500
+}
+
+export type deleteV1UsersMeAvatarResponseSuccess = (deleteV1UsersMeAvatarResponse200) & {
+  headers: Headers;
+};
+export type deleteV1UsersMeAvatarResponseError = (deleteV1UsersMeAvatarResponse401 | deleteV1UsersMeAvatarResponse404 | deleteV1UsersMeAvatarResponse429 | deleteV1UsersMeAvatarResponse500) & {
+  headers: Headers;
+};
+
+export type deleteV1UsersMeAvatarResponse = (deleteV1UsersMeAvatarResponseSuccess | deleteV1UsersMeAvatarResponseError)
+
+export const getDeleteV1UsersMeAvatarUrl = () => {
+
+
+
+
+  return `/v1/users/me/avatar`
+}
+
+/**
+ * Sets `avatar_url = NULL` on the authenticated user and best-effort deletes the underlying S3 object. Idempotent — calling twice on a user without an avatar returns 200 with no avatar_url.
+ * @summary Remove current user's avatar
+ */
+export const deleteV1UsersMeAvatar = async ( options?: RequestInit): Promise<deleteV1UsersMeAvatarResponse> => {
+
+  return orvalMutator<deleteV1UsersMeAvatarResponse>(getDeleteV1UsersMeAvatarUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteV1UsersMeAvatarMutationOptions = <TError = InternalHandlerHttpErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1UsersMeAvatar>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteV1UsersMeAvatar>>, TError,void, TContext> => {
+
+const mutationKey = ['deleteV1UsersMeAvatar'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteV1UsersMeAvatar>>, void> = () => {
+
+
+          return  deleteV1UsersMeAvatar(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteV1UsersMeAvatarMutationResult = NonNullable<Awaited<ReturnType<typeof deleteV1UsersMeAvatar>>>
+
+    export type DeleteV1UsersMeAvatarMutationError = InternalHandlerHttpErrorResponse
+
+    /**
+ * @summary Remove current user's avatar
+ */
+export const useDeleteV1UsersMeAvatar = <TError = InternalHandlerHttpErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1UsersMeAvatar>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteV1UsersMeAvatar>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDeleteV1UsersMeAvatarMutationOptions(options), queryClient);
+    }
     export type getV1UsersMeNotificationsResponse200 = {
   data: InternalHandlerHttpNotificationPreferencesResponse
   status: 200
@@ -766,6 +870,110 @@ export const usePatchV1UsersMeNotifications = <TError = InternalHandlerHttpError
         TContext
       > => {
       return useMutation(getPatchV1UsersMeNotificationsMutationOptions(options), queryClient);
+    }
+    export type postV1UsersMeOnboardResponse200 = {
+  data: InternalHandlerHttpMeResponse
+  status: 200
+}
+
+export type postV1UsersMeOnboardResponse401 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 401
+}
+
+export type postV1UsersMeOnboardResponse404 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 404
+}
+
+export type postV1UsersMeOnboardResponse429 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 429
+}
+
+export type postV1UsersMeOnboardResponse500 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 500
+}
+
+export type postV1UsersMeOnboardResponseSuccess = (postV1UsersMeOnboardResponse200) & {
+  headers: Headers;
+};
+export type postV1UsersMeOnboardResponseError = (postV1UsersMeOnboardResponse401 | postV1UsersMeOnboardResponse404 | postV1UsersMeOnboardResponse429 | postV1UsersMeOnboardResponse500) & {
+  headers: Headers;
+};
+
+export type postV1UsersMeOnboardResponse = (postV1UsersMeOnboardResponseSuccess | postV1UsersMeOnboardResponseError)
+
+export const getPostV1UsersMeOnboardUrl = () => {
+
+
+
+
+  return `/v1/users/me/onboard`
+}
+
+/**
+ * Sets `onboarded_at = now()` on the authenticated user (idempotent — second call preserves the original timestamp). Returns the updated /v1/auth/me view so the client can update its cache.
+ * @summary Mark onboarding complete
+ */
+export const postV1UsersMeOnboard = async ( options?: RequestInit): Promise<postV1UsersMeOnboardResponse> => {
+
+  return orvalMutator<postV1UsersMeOnboardResponse>(getPostV1UsersMeOnboardUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getPostV1UsersMeOnboardMutationOptions = <TError = InternalHandlerHttpErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1UsersMeOnboard>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
+): UseMutationOptions<Awaited<ReturnType<typeof postV1UsersMeOnboard>>, TError,void, TContext> => {
+
+const mutationKey = ['postV1UsersMeOnboard'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1UsersMeOnboard>>, void> = () => {
+
+
+          return  postV1UsersMeOnboard(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostV1UsersMeOnboardMutationResult = NonNullable<Awaited<ReturnType<typeof postV1UsersMeOnboard>>>
+
+    export type PostV1UsersMeOnboardMutationError = InternalHandlerHttpErrorResponse
+
+    /**
+ * @summary Mark onboarding complete
+ */
+export const usePostV1UsersMeOnboard = <TError = InternalHandlerHttpErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1UsersMeOnboard>>, TError,void, TContext>, request?: SecondParameter<typeof orvalMutator>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postV1UsersMeOnboard>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getPostV1UsersMeOnboardMutationOptions(options), queryClient);
     }
     export type getV1UsersIdResponse200 = {
   data: InternalHandlerHttpUserResponse

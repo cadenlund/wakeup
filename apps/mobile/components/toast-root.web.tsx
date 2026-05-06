@@ -8,12 +8,15 @@
 // matches the rest of the app. Per-scheme accent colours aren't
 // surfaced — sonner's theme prop only takes the broad mode.
 //
-// sonner v2 ships a separate styles.css that has to load on web —
-// the Toaster renders invisibly without it. We pull it in via an
-// `@import` at the top of `apps/mobile/global.css` (which Metro
-// already processes for web through NativeWind's pipeline) rather
-// than importing here, because Expo Web's Metro doesn't reliably
-// resolve bare CSS imports from .tsx files.
+// CSS: sonner ships its styles in a separate file. We mirror it to
+// `apps/mobile/sonner.css` (committed) and import it here so Metro's
+// web pipeline bundles it without going through `global.css` —
+// global.css is loaded on native too, and NativeWind's native CSS
+// parser chokes on web-only properties (`aspect-ratio: 1 / 1`) that
+// sonner's stylesheet uses. Native bundles never see this `.web.tsx`
+// file, so the import is naturally web-only.
+import '../sonner.css';
+
 import { Toaster } from 'sonner';
 
 import { useThemeStore } from '@/lib/theme/store';

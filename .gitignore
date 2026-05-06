@@ -61,3 +61,10 @@ dist-mobile/
 
 # Claude Code scheduling lock
 .claude/
+
+# Maestro UI-test screenshots — useful for local dev review, but
+# they're emitted by every flow run and would balloon the repo
+# fast. The directory itself stays tracked so a fresh checkout
+# still has a place to drop them; only the content is ignored.
+/apps/mobile/.maestro/screenshots/*
+!/apps/mobile/.maestro/screenshots/.gitkeep
