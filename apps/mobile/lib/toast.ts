@@ -68,4 +68,53 @@ function info(title: string, message?: string) {
   fire('info', title, message, NORMAL_VISIBILITY_MS);
 }
 
-export const toast = { error, success, info };
+// Cross-navigation toast: stash a single toast in sessionStorage so it
+// survives a full page reload (e.g. after `window.location.assign` on
+// the post-reset → /login flow). The receiving page calls `flushPending`
+// on mount to display + clear it. Web-only; native has no equivalent
+// because we never hard-navigate there.
+const PENDING_KEY = 'wakeup:toast:pending';
+
+type PendingToast = {
+  variant: 'error' | 'success' | 'info';
+  title: string;
+  message?: string;
+};
+
+function queueForNextMount(variant: PendingToast['variant'], title: string, message?: string) {
+  if (typeof window === 'undefined' || !window.sessionStorage) return;
+  try {
+    window.sessionStorage.setItem(
+      PENDING_KEY,
+      JSON.stringify({ variant, title, message } satisfies PendingToast)
+    );
+  } catch {
+    // sessionStorage can throw in privacy modes / over-quota — non-
+    // critical, the user just won't see a delayed toast.
+  }
+}
+
+function flushPending() {
+  if (typeof window === 'undefined' || !window.sessionStorage) return;
+  let raw: string | null = null;
+  try {
+    raw = window.sessionStorage.getItem(PENDING_KEY);
+    if (raw) window.sessionStorage.removeItem(PENDING_KEY);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+  try {
+    const p = JSON.parse(raw) as PendingToast;
+    fire(
+      p.variant,
+      p.title,
+      p.message,
+      p.variant === 'error' ? ERROR_VISIBILITY_MS : NORMAL_VISIBILITY_MS
+    );
+  } catch {
+    // malformed payload — drop silently.
+  }
+}
+
+export const toast = { error, success, info, queueForNextMount, flushPending };
