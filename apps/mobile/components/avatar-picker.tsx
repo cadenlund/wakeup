@@ -278,8 +278,12 @@ function SheetRow({
 }) {
   // Destructive rows lean on the theme's `destructive` token (red in
   // every scheme) so the "remove photo" action visually separates
-  // from the create/upload rows above it.
-  const tint = destructive ? '#ef4444' : color;
+  // from the create/upload rows above it. Read it from the active
+  // palette rather than a hardcoded hex so a dark scheme's destructive
+  // (a lighter red, per palettes.ts) lines up with the `text-destructive`
+  // class on the label.
+  const destructiveColor = useThemeColor('destructive');
+  const tint = destructive ? destructiveColor : color;
   return (
     <Pressable
       accessibilityRole="button"

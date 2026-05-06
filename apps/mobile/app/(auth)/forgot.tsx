@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Text } from '@/components/ui/text';
 import { usePostV1AuthPasswordResetRequest } from '@/lib/api/hooks/auth/auth';
 import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
+import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
 export default function ForgotScreen() {
@@ -36,7 +37,10 @@ export default function ForgotScreen() {
   const topError = useTopLevelError(reset.error);
 
   const submit = () => {
-    if (!email.trim()) return;
+    if (!email.trim()) {
+      haptics.warning();
+      return;
+    }
     reset.mutate({ data: { email: email.trim() } });
   };
 

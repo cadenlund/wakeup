@@ -75,7 +75,10 @@ export default function LoginScreen() {
   const topError = useTopLevelError(login.error);
 
   const submit = () => {
-    if (!identifier.trim() || !password) return;
+    if (!identifier.trim() || !password) {
+      haptics.warning();
+      return;
+    }
     login.mutate({ data: { identifier: identifier.trim(), password } });
   };
 

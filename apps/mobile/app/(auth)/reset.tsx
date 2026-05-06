@@ -41,17 +41,19 @@ export default function ResetScreen() {
 
   // Preflight: hit the validate endpoint on mount so a bad / used /
   // expired token bounces the user back to /login before they bother
-  // typing a new password. The endpoint is a pure read and returns
-  // the same generic "Reset link has expired…" message the confirm
-  // path does, so the user sees a clear toast instead of a mid-flow
-  // submission failure.
+  // typing a new password. Server-side this is idempotent (no DB
+  // writes) — it's modelled as a POST only because it carries the
+  // token in the body rather than the URL. The mutation framing
+  // here is therefore a thin wrapper, NOT a typical write.
+  //
+  // Manual retry config because react-query's mutation defaults
+  // (retry: 0 in lib/api/query-client.ts) would otherwise drop the
+  // user off a valid token on a single transient 5xx / network
+  // blip. We only redirect on a definitive auth error (401 codes);
+  // anything else — including unmapped 5xx — falls through here so
+  // the global mutationCache toast gets the chance to retry.
   const validate = usePostV1AuthPasswordResetValidate({
     mutation: {
-      // No manual toast — query-client's mutationCache.onError already
-      // surfaces the backend's "Unauthorized: invalid reset token"
-      // message. We only redirect on a definitive auth error (401);
-      // network blips and 5xx fall through to React Query's retry so
-      // a transient outage doesn't kick the user off a valid token.
       onError: (err) => {
         if (
           err instanceof APIError &&
@@ -124,8 +126,12 @@ export default function ResetScreen() {
   const topError = useTopLevelError(confirmReset.error);
 
   const submit = () => {
-    if (!token || password.length < 8) return;
+    if (!token || password.length < 8) {
+      haptics.warning();
+      return;
+    }
     if (password !== confirm) {
+      haptics.warning();
       setMismatchError('Passwords do not match.');
       return;
     }

@@ -10,7 +10,6 @@
 // two mutations issued in the same millisecond collide vanishingly
 // often. Math.random() gives ~52 bits per call; we burn 74 bits per
 // key, which is more than enough.
-import * as React from 'react';
 
 const HEX = '0123456789abcdef';
 
@@ -40,19 +39,4 @@ export function newIdempotencyKey(): string {
   const part4 = variantNibble + randomHex(3);
   const part5 = randomHex(12);
   return `${part1}-${part2}-${part3}-${part4}-${part5}`;
-}
-
-// `freshKey` is a caller-controlled token — bumping it forces a new
-// idempotency key. The argument is required (no default) because a
-// shared default would silently dedupe distinct submissions when
-// callers forget to bump it. Pass a stable value (e.g. 0) to keep
-// retries idempotent within one mutation invocation; bump it per
-// submit to force a new dedupe window. (CR on PR #115.)
-export function useIdempotencyKey(freshKey: number): string {
-  return React.useMemo(() => {
-    // `freshKey` reference signals to the linter that it's an
-    // intentional dependency — bumping it regenerates the key.
-    void freshKey;
-    return newIdempotencyKey();
-  }, [freshKey]);
 }

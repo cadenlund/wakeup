@@ -20,8 +20,13 @@ export type FieldErrors = Record<string, string>;
 //   - the error is a VALIDATION_FAILED (the per-field errors are
 //     already shown next to each input — repeating the top-level
 //     "validation failed" message would be noise)
-// Otherwise returns the backend's `error.message` string, or a
-// generic fallback for non-APIError throws.
+// Otherwise returns the backend's `error.message` string for typed
+// APIErrors. Non-APIError throws (network failure, JSON parse error,
+// any internal stack-tagged Error) get a generic message — we don't
+// surface raw `Error.message` because it can leak technical details
+// ("Network request failed", "SyntaxError: Unexpected token <") or
+// internal context to the user. The mutationCache toast already
+// shows the raw text for diagnostics; the inline copy stays generic.
 export function useTopLevelError(error: unknown): string | undefined {
   return React.useMemo(() => {
     if (!error) return undefined;
@@ -29,8 +34,7 @@ export function useTopLevelError(error: unknown): string | undefined {
       if (error.body?.code === 'VALIDATION_FAILED') return undefined;
       return error.body?.message ?? `Request failed (${error.status})`;
     }
-    if (error instanceof Error) return error.message;
-    return 'Request failed';
+    return 'Network problem. Try again.';
   }, [error]);
 }
 
