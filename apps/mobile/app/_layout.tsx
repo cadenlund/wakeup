@@ -8,7 +8,13 @@ import '@/lib/dev-warnings';
 // the navigation container ref hooks into below.
 import { Sentry, navigationIntegration, sentryEnabled } from '@/lib/sentry';
 
-import { Stack, useNavigationContainerRef, usePathname } from 'expo-router';
+import {
+  Stack,
+  useNavigationContainerRef,
+  usePathname,
+  useRootNavigationState,
+  useRouter,
+} from 'expo-router';
 import * as React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
@@ -46,9 +52,23 @@ function readURLToken(): boolean {
 // which causes deep-link URLs (e.g. `/reset?token=…`) to fall back to
 // `/` before they can be matched. We instead fold `isLoading` into the
 // group guards.
+// Routes the (auth) group claims. Used by the redirect effect below
+// to decide whether the user is currently sitting in /(auth) — the
+// (auth) layout strips the group prefix so pathname is `/login` etc.,
+// not `/(auth)/login`. Listing them here is cheaper than walking the
+// route tree at render time.
+const AUTH_PATHS = new Set(['/login', '/register', '/forgot', '/reset']);
+
 function ProtectedStack() {
   const auth = useAuthState();
   const pathname = usePathname();
+  const router = useRouter();
+  // `useRootNavigationState()` returns null until the root navigator
+  // is mounted. router.replace before that throws "Attempted to
+  // navigate before mounting the Root Layout component." We gate the
+  // imperative redirect effect below on `navReady` so it can't fire
+  // until the Stack underneath us has registered with expo-router.
+  const navReady = !!useRootNavigationState()?.key;
   const [hasToken, setHasToken] = React.useState(readURLToken);
   // Re-read the URL whenever pathname changes — once the user has
   // navigated away from `/reset?token=…` (e.g. after submitting the
@@ -58,23 +78,70 @@ function ProtectedStack() {
     setHasToken(readURLToken());
   }, [pathname]);
 
+  // Belt-and-braces redirect alongside Stack.Protected. The Protected
+  // groups handle initial mount (don't show /(tabs) on cold start
+  // when auth isn't loaded yet, etc.), but mid-session transitions
+  // can race the React render — most visibly on the post-reset login
+  // path, where the (auth) back-stack carries /reset history that
+  // confuses Stack.Protected's group switch and leaves the user
+  // stranded on /login until a manual reload.
+  //
+  // The actual replace is wrapped in setTimeout(0) so it lands on the
+  // next tick — `useRootNavigationState()` flips truthy a render
+  // before `router.replace` is genuinely safe, and the bare call
+  // throws "Attempted to navigate before mounting the Root Layout
+  // component." Deferring one tick clears that.
+  React.useEffect(() => {
+    if (!navReady) return;
+    if (auth.isLoading || hasToken) return;
+    const inAuth = AUTH_PATHS.has(pathname);
+
+    let target: '/' | '/(onboarding)' | '/login' | null = null;
+    if (auth.isAuthenticated && auth.onboardingDone && inAuth) {
+      target = '/';
+    } else if (auth.isAuthenticated && !auth.onboardingDone && inAuth) {
+      target = '/(onboarding)';
+    } else if (!auth.isAuthenticated && !inAuth) {
+      target = '/login';
+    }
+    if (!target) return;
+
+    const t = target;
+    const id = setTimeout(() => router.replace(t), 0);
+    return () => clearTimeout(id);
+  }, [
+    navReady,
+    auth.isLoading,
+    auth.isAuthenticated,
+    auth.onboardingDone,
+    hasToken,
+    pathname,
+    router,
+  ]);
+
+  // While auth is loading, ALL three groups are in the navigation
+  // tree. This is the only way to keep Stack.Protected from trying to
+  // fix up the URL during the cold-start window — if the URL matches
+  // a route that isn't currently in the tree, Stack.Protected
+  // synchronously redirects, which on the first render throws
+  // "Attempted to navigate before mounting the Root Layout component."
+  // Once auth resolves, the loaded-state guards tighten to expose
+  // exactly the group the user belongs in.
   return (
     <Stack>
       {/* `Stack.Protected` is the canonical Expo Router auth pattern:
-          each group is in the navigation tree only when its guard is
-          true, so the wrong screen never mounts on cold start.
           https://docs.expo.dev/router/advanced/protected/ */}
       <Stack.Protected guard={auth.isLoading || !auth.isAuthenticated || hasToken}>
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       </Stack.Protected>
 
       <Stack.Protected
-        guard={!auth.isLoading && auth.isAuthenticated && !auth.onboardingDone && !hasToken}>
+        guard={auth.isLoading || (auth.isAuthenticated && !auth.onboardingDone && !hasToken)}>
         <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
       </Stack.Protected>
 
       <Stack.Protected
-        guard={!auth.isLoading && auth.isAuthenticated && auth.onboardingDone && !hasToken}>
+        guard={auth.isLoading || (auth.isAuthenticated && auth.onboardingDone && !hasToken)}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
       </Stack.Protected>

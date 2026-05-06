@@ -9,7 +9,18 @@ module.exports = defineConfig([
     // emitted by `just gen-client` (openapi-typescript + orval). Don't
     // lint generated output — fixing the generator's style nits would
     // be undone on every regen.
-    ignores: ['dist/*', 'lib/api/schema.ts', 'lib/api/hooks/**', 'lib/api/model/**'],
+    //
+    // `.maestro/flows/**/*.js` are Maestro `runScript` payloads. They
+    // execute inside Maestro's Rhino sandbox where the `output` global
+    // is injected by the runner — ESLint's no-undef flags it as an
+    // error. Skipped so the script files only get format-checked.
+    ignores: [
+      'dist/*',
+      'lib/api/schema.ts',
+      'lib/api/hooks/**',
+      'lib/api/model/**',
+      '.maestro/flows/**/*.js',
+    ],
   },
   {
     rules: {

@@ -1010,6 +1010,67 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/auth/password-reset/validate": {
+            "post": {
+                "description": "Returns 204 when the token is valid + unconsumed + unexpired. 401 on any failure path. No DB writes.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Validate a password-reset token",
+                "parameters": [
+                    {
+                        "description": "Token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.PasswordResetValidateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "Echoed request id"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed JSON / empty body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or expired reset token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limited",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/auth/register": {
             "post": {
                 "description": "Creates a new user account, hashes the password with argon2id, and binds the new session cookie.",
@@ -5524,6 +5585,20 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 254,
                     "example": "caden@example.com"
+                }
+            }
+        },
+        "internal_handler_http.PasswordResetValidateRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
+                    "type": "string",
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "example": "3f8a1c2d9e6b4f2a8d1c7b3e9f5a2c4d3f8a1c2d9e6b4f2a8d1c7b3e9f5a2c4d"
                 }
             }
         },

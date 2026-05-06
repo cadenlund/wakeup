@@ -1026,7 +1026,7 @@ Shared sub-flows live under `.maestro/flows/_shared/`:
 - `register-fresh.yaml` — generates a unique username + email, calls register, leaves the user signed in.
 - Other helpers (open-conversation, send-friend-request, etc.) get added as the phase suites need them.
 
-The Maestro MCP runs these locally and surfaces screenshots; the same flow set is what runs in CI (Android emulator, Linux runner) at the end of each phase.
+The Maestro MCP runs these locally and surfaces screenshots. Flows are NOT wired into GitHub Actions — `bunx maestro test .maestro/flows/<phase-N>-*.yaml` is run manually by the implementer at the end of each phase, with the resulting screenshots posted to the PR description for the operator review (§12.4 / §12.5). Reasoning: the full Android-emulator pipeline (build APK + boot emulator + run flow) added 10–15 min to every PR for marginal gating value over the local Maestro-MCP run that lands the operator sign-off anyway.
 
 ### 12.3 What we DON'T test
 
@@ -1071,7 +1071,7 @@ The MCP only drives the iOS Simulator / Android Emulator — it does NOT drive E
 
 ### 12.7 Flow catalog (v1)
 
-Every entry below is a YAML file under `.maestro/flows/` (or one level deeper for shared sub-flows). The implementer creates the file the first time the matching milestone in §16 is touched. CI fails if a screen in §5.1 has no flow file.
+Every entry below is a YAML file under `.maestro/flows/` (or one level deeper for shared sub-flows). The implementer creates the file the first time the matching milestone in §16 is touched and runs it manually via the Maestro MCP before requesting operator review (§12.4 / §12.5). CI does not run these flows; the local + operator review is the gate.
 
 **Shared sub-flows** (used by every screen-level flow via `runFlow:`):
 
@@ -1140,7 +1140,7 @@ Every entry below is a YAML file under `.maestro/flows/` (or one level deeper fo
 | `call-pip.yaml` | navigate away from call → corner bubble snaps in; tap → returns to full overlay. |
 | `call-decline.yaml` | incoming ring → tap Decline → ring stops, no overlay. |
 
-Each flow file ends with at least one `assertVisible:` so a silent failure is caught by `bunx maestro test .maestro/`. Screenshots are taken at the final assertion point and uploaded to the PR by the per-milestone CI workflow (§13.7).
+Each flow file ends with at least one `assertVisible:` so a silent failure is caught by `bunx maestro test .maestro/`. Screenshots are taken at the final assertion point; the implementer attaches them to the PR description manually for operator review (§12.4 / §12.5).
 
 ### 12.8 Flow assertion conventions
 
@@ -1148,7 +1148,7 @@ Each flow file ends with at least one `assertVisible:` so a silent failure is ca
 - **`tapOn:` uses accessibility labels**, not test ids. Every interactive element has `accessibilityLabel` set in JSX (`<Button accessibilityLabel="Send" />`); flows tap the label. This survives copy edits worse than hard-coded strings, but it pays back during the §10 accessibility audit because the labels are already there.
 - **Time-sensitive checks use `extendedWaitUntil:` with a generous timeout** (10s default). The operator's network is sometimes slow on cell — flaky flows are worse than slow flows.
 - **State pollution between flows is forbidden.** `clearState: true` runs at the top of every screen-level flow. Sub-flows don't clear state; their parents do. Cross-flow seeds go through API setup, not by chaining UI flows.
-- **Screenshots go in `.maestro/screenshots/<flow-name>/`** and are committed alongside the flow. CI compares the latest screenshot to the committed one and posts the diff in the PR — operator-visible regressions get caught at review time, not in the wild.
+- **Screenshots go in `.maestro/screenshots/<flow-name>/`** but are gitignored — they're useful for the implementer's local sanity check + the per-milestone PR description, not version-controlled artifacts. Operator-visible regressions get caught at review time when the implementer re-runs the flow before requesting review.
 
 ---
 
@@ -1354,7 +1354,7 @@ Adds `.github/workflows/mobile.yml` running on changes to `apps/mobile/**`:
 - `just gen-client && just mobile-gen-hooks` (regenerate schema + hooks)
 - `bunx tsc --noEmit`
 - `bunx eslint .`
-- (Maestro flows run in EAS Build's preview, not on every Action — Actions doesn't have a simulator.)
+- Maestro flows are NOT wired into Actions. The implementer runs them manually via the Maestro MCP at end-of-phase and posts screenshots to the PR description for operator review — see §12.2 for the rationale.
 
 ---
 
@@ -1510,7 +1510,7 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
   - Commit: `feat(mobile): add password reset flow with deep link`
 - [x] **3.4** `useGetMe()` integrated into root: returns 401 → redirect to `(auth)/login`. Maestro flow `auth-redirect.yaml`.
   - Commit: `feat(mobile): wire auth-state redirect`
-- [ ] **3.5** **Phase-3 Maestro suite** (per §12.1). One YAML at `.maestro/flows/phase-3-auth.yaml` driving register → home → logout → login (with fresh creds minted inline). Wired into the mobile CI workflow against an Android emulator on Linux.
+- [x] **3.5** **Phase-3 Maestro suite** (per §12.1). One YAML at `.maestro/flows/phase-3-auth.yaml` driving register → home → logout → login (with fresh creds minted inline). Run manually via the Maestro MCP at end-of-phase; not wired into CI (see §12.2 for the rationale).
   - Commit: `test(mobile): add phase-3 auth maestro suite`
 
 ### Phase 4 — Tabs + Friends

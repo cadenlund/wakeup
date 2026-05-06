@@ -21,6 +21,7 @@ import { getGetV1AuthMeQueryKey, usePostV1AuthLogin } from '@/lib/api/hooks/auth
 import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
 import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { toast } from '@/lib/toast';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -31,21 +32,42 @@ export default function LoginScreen() {
 
   const login = usePostV1AuthLogin({
     mutation: {
-      onSuccess: async (response) => {
+      onSuccess: (response) => {
         haptics.success();
+        toast.success('Welcome back');
         // Login envelope is `{ user: MeResponse }`; orval types it as
         // the wrapped `{data, status, headers}` envelope but apiFetch
-        // returns the unwrapped body. Prime the me-query cache so the
-        // root layout's auth state flips synchronously, then await the
-        // canonical /me refetch before navigating — by the time we
-        // call router.replace the (tabs) / (onboarding) guard is true,
-        // so Stack.Protected accepts the new route instead of bouncing.
+        // returns the unwrapped body. Prime the me-query cache
+        // synchronously so the root layout's auth state flips this
+        // render. Don't await the canonical /me refetch — on iOS
+        // the cookie store sometimes hasn't processed the Set-Cookie
+        // header from the login response by the time the next
+        // request goes out, so the refetch lands as a 401 and
+        // knocks the cache back to error state before the navigate
+        // can fire (the post-password-reset login was hitting this
+        // race). Fire-and-forget the invalidate; it'll reconcile in
+        // the background after navigation.
         const body = response as unknown as { user?: { id?: string; onboarded_at?: string } };
         if (body?.user?.id) {
           qc.setQueryData(getGetV1AuthMeQueryKey(), body.user);
         }
-        await qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        router.replace(body?.user?.onboarded_at ? '/(tabs)' : '/(onboarding)');
+        void qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
+        // Defer the route transition to the next tick so React has
+        // rendered the new Stack.Protected guards (auth=false →
+        // (auth) unmounted, (tabs)/(onboarding) mounted). Routing
+        // in the same tick that primes the cache races the render
+        // and the replace silently no-ops.
+        //
+        // For onboarded users, target the absolute root '/' instead
+        // of '/(tabs)'. The group-name form occasionally fails to
+        // resolve when the (auth) back-stack has history (e.g. the
+        // /reset → /login chain that the user hits via the email
+        // link); '/' goes through expo-router's root resolver which
+        // picks whichever Stack.Protected group is currently valid,
+        // so it lands on (tabs) without fighting the stale (auth)
+        // history.
+        const target = body?.user?.onboarded_at ? '/' : '/(onboarding)';
+        setTimeout(() => router.replace(target), 0);
       },
     },
   });

@@ -1,0 +1,89 @@
+# Phase 3 end-of-phase suite per WAKEUPEXPO §12.1 / §16 3.5.
+#
+# This is the gate for Phase 3 — every screen added in Phases 3.0
+# through 3.4 wired together end-to-end:
+#
+#   1. Cold launch with cleared state lands on /login (AuthGate).
+#   2. Tap "Create account" → register a fresh user inline.
+#   3. Server returns 200; AuthGate routes to /(onboarding) since
+#      onboarded_at is null on a fresh row.
+#   4. Tap "Skip" on the carousel — the skip CTA fires the same
+#      onboard endpoint as Get-started, so it's a fast cover.
+#   5. AuthGate sees onboarded_at populated and routes to /(tabs).
+#   6. Logout via the temporary header button → /login.
+#   7. Sign back in with the same fresh creds → land on /(tabs)
+#      WITHOUT the onboarding carousel reappearing (server-side
+#      flag persists across logout/login per Phase 3.0).
+appId: app.wakeup.client
+---
+# Stop any running instance first — `clearState: true` alone
+# leaves iOS's NSHTTPCookieStorage intact across launches when the
+# app was already foregrounded, so a previous flow's cookie can
+# leak the user past AuthGate into (tabs). stopApp + relaunch
+# clears the in-memory session reliably on the iOS sim.
+- stopApp
+- launchApp:
+    clearState: true
+    # iOS-only: wipes the system "Use Strong Password?" sheet so it
+    # doesn't cover the register form. No-op on Android.
+    clearKeychain: true
+
+# 1. Cold start → login. Give the JS bundle a moment to mount
+# before checking which state we landed in — `runFlow.when.visible`
+# evaluates immediately, so a same-tick check races the mount and
+# the conditional silently skips. After the settle wait, log out
+# from (tabs) if a stray cookie kept us authed past clearState
+# (an iOS-sim quirk we've reproduced).
+- waitForAnimationToEnd:
+    timeout: 5000
+# Tap the temporary header logout if it's there; `optional: true`
+# makes this a no-op when the cold-launched app already landed on
+# /login (the expected case). When clearState left a stale cookie
+# behind on iOS, the tap flushes us back to /login.
+- tapOn:
+    id: header-logout
+    optional: true
+- extendedWaitUntil:
+    visible: 'Sign in'
+    timeout: 20000
+- assertVisible: 'Welcome back. We saved your spot.'
+- takeScreenshot: phase-3-cold-login
+
+# 2. Register inline
+- runFlow: ./_shared/register-fresh.yaml
+- takeScreenshot: phase-3-onboarding-slide-1
+
+# 3. Skip the carousel
+- tapOn:
+    id: onboarding-skip
+- extendedWaitUntil:
+    visible: 'Log out'
+    timeout: 10000
+- takeScreenshot: phase-3-tabs-after-onboard
+
+# 4. Logout
+- tapOn:
+    id: header-logout
+- extendedWaitUntil:
+    visible: 'Sign in'
+    timeout: 20000
+- assertVisible: 'Welcome back. We saved your spot.'
+- takeScreenshot: phase-3-after-logout
+
+# 5. Re-login with the same creds → straight to tabs
+- tapOn:
+    id: login-identifier
+- inputText: ${output.username}
+- tapOn:
+    id: login-password
+- inputText: ${output.password}
+- hideKeyboard
+- tapOn:
+    id: login-submit
+- extendedWaitUntil:
+    visible: 'Log out'
+    timeout: 10000
+# The carousel must NOT reappear — onboarded_at is per-account, not
+# per-device, so a re-login on the same account skips it entirely.
+- assertNotVisible: 'Just your friends'
+- takeScreenshot: phase-3-relogin-tabs
