@@ -8,7 +8,7 @@ import '@/lib/dev-warnings';
 // the navigation container ref hooks into below.
 import { Sentry, navigationIntegration, sentryEnabled } from '@/lib/sentry';
 
-import { Stack, useNavigationContainerRef, usePathname } from 'expo-router';
+import { Stack, useNavigationContainerRef, usePathname, useRouter } from 'expo-router';
 import * as React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
@@ -46,9 +46,17 @@ function readURLToken(): boolean {
 // which causes deep-link URLs (e.g. `/reset?token=…`) to fall back to
 // `/` before they can be matched. We instead fold `isLoading` into the
 // group guards.
+// Routes the (auth) group claims. Used by the redirect effect below
+// to decide whether the user is currently sitting in /(auth) — the
+// (auth) layout strips the group prefix so pathname is `/login` etc.,
+// not `/(auth)/login`. Listing them here is cheaper than walking the
+// route tree at render time.
+const AUTH_PATHS = new Set(['/login', '/register', '/forgot', '/reset']);
+
 function ProtectedStack() {
   const auth = useAuthState();
   const pathname = usePathname();
+  const router = useRouter();
   const [hasToken, setHasToken] = React.useState(readURLToken);
   // Re-read the URL whenever pathname changes — once the user has
   // navigated away from `/reset?token=…` (e.g. after submitting the
@@ -57,6 +65,30 @@ function ProtectedStack() {
   React.useEffect(() => {
     setHasToken(readURLToken());
   }, [pathname]);
+
+  // Belt-and-braces redirect alongside Stack.Protected. The Protected
+  // groups handle initial mount (don't show /(tabs) on cold start
+  // when auth isn't loaded yet, etc.), but mid-session transitions
+  // can race the React render — most visibly on the post-reset login
+  // path, where the (auth) back-stack carries /reset history that
+  // confuses Stack.Protected's group switch and leaves the user
+  // stranded on /login until a manual reload. This effect runs AFTER
+  // every reconciliation so the cache flip from setQueryData has
+  // already landed by the time we look at auth state. (CR-style
+  // belt: AuthGate's old imperative redirect, alongside the new
+  // declarative Stack.Protected gating.)
+  React.useEffect(() => {
+    if (auth.isLoading || hasToken) return;
+    const inAuth = AUTH_PATHS.has(pathname);
+
+    if (auth.isAuthenticated && auth.onboardingDone && inAuth) {
+      router.replace('/');
+    } else if (auth.isAuthenticated && !auth.onboardingDone && inAuth) {
+      router.replace('/(onboarding)');
+    } else if (!auth.isAuthenticated && !inAuth) {
+      router.replace('/login');
+    }
+  }, [auth.isLoading, auth.isAuthenticated, auth.onboardingDone, hasToken, pathname, router]);
 
   return (
     <Stack>
