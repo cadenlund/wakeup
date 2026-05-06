@@ -161,3 +161,10 @@ type PasswordResetConfirmRequest struct {
 	Token       string `json:"token"        validate:"required,min=1,max=512" example:"3f8a1c2d9e6b4f2a8d1c7b3e9f5a2c4d3f8a1c2d9e6b4f2a8d1c7b3e9f5a2c4d"`
 	NewPassword string `json:"new_password" validate:"required,min=8,max=128" example:"new-correct-horse-battery"`
 }
+
+// PasswordResetValidateRequest is the body for
+// POST /v1/auth/password-reset/validate. Token-only preflight that
+// the mobile / web reset surface fires on screen mount.
+type PasswordResetValidateRequest struct {
+	Token string `json:"token" validate:"required,min=1,max=512" example:"3f8a1c2d9e6b4f2a8d1c7b3e9f5a2c4d3f8a1c2d9e6b4f2a8d1c7b3e9f5a2c4d"`
+}

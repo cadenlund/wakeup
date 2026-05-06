@@ -57,8 +57,23 @@ export default function LoginScreen() {
         // (auth) unmounted, (tabs)/(onboarding) mounted). Routing
         // in the same tick that primes the cache races the render
         // and the replace silently no-ops.
+        //
+        // dismissAll first to clear any (auth) back-stack history
+        // (a /reset → /login chain leaves /reset in the stack on
+        // iOS; without dismissing, the post-login replace bounces
+        // off the stale entry and the user is stranded on /login
+        // even though the cache flipped to authenticated). Wrapped
+        // in try/catch because dismissAll throws when there's
+        // nothing to dismiss.
         const target = body?.user?.onboarded_at ? '/(tabs)' : '/(onboarding)';
-        setTimeout(() => router.replace(target), 0);
+        setTimeout(() => {
+          try {
+            router.dismissAll();
+          } catch {
+            // No back-stack to dismiss — first-launch login path.
+          }
+          router.replace(target);
+        }, 0);
       },
     },
   });

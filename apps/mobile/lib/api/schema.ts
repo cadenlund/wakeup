@@ -1354,6 +1354,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/password-reset/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a password-reset token
+         * @description Returns 204 when the token is valid + unconsumed + unexpired. 401 on any failure path. No DB writes.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["internal_handler_http.PasswordResetValidateRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        /** @description Echoed request id */
+                        "X-Request-ID"?: string;
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Malformed JSON / empty body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description Invalid or expired reset token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+                /** @description Internal error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/register": {
         parameters: {
             query?: never;
@@ -6286,6 +6365,10 @@ export interface components {
         "internal_handler_http.PasswordResetRequestRequest": {
             /** @example caden@example.com */
             email: string;
+        };
+        "internal_handler_http.PasswordResetValidateRequest": {
+            /** @example 3f8a1c2d9e6b4f2a8d1c7b3e9f5a2c4d3f8a1c2d9e6b4f2a8d1c7b3e9f5a2c4d */
+            token: string;
         };
         "internal_handler_http.PresenceListResponse": {
             data?: components["schemas"]["internal_handler_http.PresenceResponse"][];

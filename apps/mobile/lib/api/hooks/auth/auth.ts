@@ -31,6 +31,7 @@ import type {
   InternalHandlerHttpMeResponse,
   InternalHandlerHttpPasswordResetConfirmRequest,
   InternalHandlerHttpPasswordResetRequestRequest,
+  InternalHandlerHttpPasswordResetValidateRequest,
   InternalHandlerHttpRegisterRequest,
   InternalHandlerHttpRegisterResponse
 } from '../../model';
@@ -704,6 +705,111 @@ export const usePostV1AuthPasswordResetRequest = <TError = InternalHandlerHttpEr
         TContext
       > => {
       return useMutation(getPostV1AuthPasswordResetRequestMutationOptions(options), queryClient);
+    }
+    export type postV1AuthPasswordResetValidateResponse204 = {
+  data: void
+  status: 204
+}
+
+export type postV1AuthPasswordResetValidateResponse400 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 400
+}
+
+export type postV1AuthPasswordResetValidateResponse401 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 401
+}
+
+export type postV1AuthPasswordResetValidateResponse429 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 429
+}
+
+export type postV1AuthPasswordResetValidateResponse500 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 500
+}
+
+export type postV1AuthPasswordResetValidateResponseSuccess = (postV1AuthPasswordResetValidateResponse204) & {
+  headers: Headers;
+};
+export type postV1AuthPasswordResetValidateResponseError = (postV1AuthPasswordResetValidateResponse400 | postV1AuthPasswordResetValidateResponse401 | postV1AuthPasswordResetValidateResponse429 | postV1AuthPasswordResetValidateResponse500) & {
+  headers: Headers;
+};
+
+export type postV1AuthPasswordResetValidateResponse = (postV1AuthPasswordResetValidateResponseSuccess | postV1AuthPasswordResetValidateResponseError)
+
+export const getPostV1AuthPasswordResetValidateUrl = () => {
+
+
+
+
+  return `/v1/auth/password-reset/validate`
+}
+
+/**
+ * Returns 204 when the token is valid + unconsumed + unexpired. 401 on any failure path. No DB writes.
+ * @summary Validate a password-reset token
+ */
+export const postV1AuthPasswordResetValidate = async (internalHandlerHttpPasswordResetValidateRequest: InternalHandlerHttpPasswordResetValidateRequest, options?: RequestInit): Promise<postV1AuthPasswordResetValidateResponse> => {
+
+  return orvalMutator<postV1AuthPasswordResetValidateResponse>(getPostV1AuthPasswordResetValidateUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      internalHandlerHttpPasswordResetValidateRequest,)
+  }
+);}
+
+
+
+
+export const getPostV1AuthPasswordResetValidateMutationOptions = <TError = InternalHandlerHttpErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetValidate>>, TError,{data: InternalHandlerHttpPasswordResetValidateRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
+): UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetValidate>>, TError,{data: InternalHandlerHttpPasswordResetValidateRequest}, TContext> => {
+
+const mutationKey = ['postV1AuthPasswordResetValidate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1AuthPasswordResetValidate>>, {data: InternalHandlerHttpPasswordResetValidateRequest}> = (props) => {
+          const {data} = props ?? {};
+
+          return  postV1AuthPasswordResetValidate(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostV1AuthPasswordResetValidateMutationResult = NonNullable<Awaited<ReturnType<typeof postV1AuthPasswordResetValidate>>>
+    export type PostV1AuthPasswordResetValidateMutationBody = InternalHandlerHttpPasswordResetValidateRequest
+    export type PostV1AuthPasswordResetValidateMutationError = InternalHandlerHttpErrorResponse
+
+    /**
+ * @summary Validate a password-reset token
+ */
+export const usePostV1AuthPasswordResetValidate = <TError = InternalHandlerHttpErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1AuthPasswordResetValidate>>, TError,{data: InternalHandlerHttpPasswordResetValidateRequest}, TContext>, request?: SecondParameter<typeof orvalMutator>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postV1AuthPasswordResetValidate>>,
+        TError,
+        {data: InternalHandlerHttpPasswordResetValidateRequest},
+        TContext
+      > => {
+      return useMutation(getPostV1AuthPasswordResetValidateMutationOptions(options), queryClient);
     }
     export type postV1AuthRegisterResponse201 = {
   data: InternalHandlerHttpRegisterResponse

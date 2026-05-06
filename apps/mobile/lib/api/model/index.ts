@@ -63,6 +63,7 @@ export * from './internalHandlerHttpNotificationPreferencesResponseThemeModePref
 export * from './internalHandlerHttpNotificationPreferencesResponseThemeScheme';
 export * from './internalHandlerHttpPasswordResetConfirmRequest';
 export * from './internalHandlerHttpPasswordResetRequestRequest';
+export * from './internalHandlerHttpPasswordResetValidateRequest';
 export * from './internalHandlerHttpPresenceListResponse';
 export * from './internalHandlerHttpPresenceResponse';
 export * from './internalHandlerHttpRegisterDeviceRequest';

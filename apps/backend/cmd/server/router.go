@@ -198,6 +198,8 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				Post("/v1/auth/password-reset/request", d.AuthHandler.RequestPasswordReset)
 			r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
 				Post("/v1/auth/password-reset/confirm", d.AuthHandler.ConfirmPasswordReset)
+			r.With(mw.BlockDuringImpersonation(httpapi.WriteError)).
+				Post("/v1/auth/password-reset/validate", d.AuthHandler.ValidatePasswordResetToken)
 			// Logout is idempotent (handler returns 204 even with no
 			// active session), so it sits OUTSIDE RequireAuth so a
 			// stale-cookie client can still drop their session cleanly.
