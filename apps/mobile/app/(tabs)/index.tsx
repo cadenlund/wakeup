@@ -16,13 +16,14 @@
 // Pull-to-refresh wraps everything per §5.4. Pin/mute long-press
 // menus + last-message preview land in 5.6 / 5.5 respectively. The
 // new-conversation flow lives at /conversations/new (Phase 5.2).
-import { MessageCircle, Plus } from 'lucide-react-native';
+import { MessageCircle, Plus, Search } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, RefreshControl, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ConversationRow } from '@/components/conversation-row';
 import { List } from '@/components/ui/list';
+import { Text } from '@/components/ui/text';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
@@ -73,11 +74,13 @@ export default function ChatsScreen() {
 
   const router = useRouter();
   const goCompose = React.useCallback(() => router.push('/conversations/new'), [router]);
+  const goSearch = React.useCallback(() => router.push('/search'), [router]);
 
   const isInitialLoad = conversationsQ.isLoading && !conversationsQ.data;
 
   return (
     <View className="flex-1 bg-background">
+      <SearchTrigger onPress={goSearch} />
       {isInitialLoad ? (
         <ChatsLoading />
       ) : sorted.length === 0 ? (
@@ -255,6 +258,29 @@ function ComposeFab({ onPress }: { onPress: () => void }) {
       testID="conversation-compose"
       className="absolute bottom-6 right-6 h-14 w-14 items-center justify-center rounded-full bg-primary shadow-lg shadow-black/30 active:opacity-80">
       <Plus size={26} color={fg} />
+    </Pressable>
+  );
+}
+
+// Tap-to-open trigger for the global /search modal. Looks like a
+// search field (the iMessage convention) but is a Pressable —
+// keystrokes happen inside the modal itself, so a real input here
+// would intercept focus and conflict with the modal route.
+function SearchTrigger({ onPress }: { onPress: () => void }) {
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Search people, chats, messages"
+      testID="chats-search-trigger"
+      className="border-b border-border bg-background px-4 pb-3 pt-3 active:bg-muted">
+      <View className="flex-row items-center gap-2 rounded-md border border-input bg-background px-3 py-2 dark:bg-input/30">
+        <Search size={16} color={mutedFg} />
+        <Text style={{ color: mutedFg }} className="text-base">
+          Search
+        </Text>
+      </View>
     </Pressable>
   );
 }
