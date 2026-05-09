@@ -89,13 +89,13 @@ function ConversationRow({
         (onPress || onLongPress) && 'active:bg-muted'
       )}>
       {showStacked ? (
-        <StackedAvatars members={stackedMembers!} size={48} />
+        <StackedAvatars members={stackedMembers!} size={40} />
       ) : (
         <View className="relative">
-          <Avatar source={avatarUrl} fallbackName={fallbackInitial ?? title} size={48} />
+          <Avatar source={avatarUrl} fallbackName={fallbackInitial ?? title} size={40} />
           {presence ? (
             <View className="absolute -bottom-0.5 -right-0.5">
-              <PresenceDot status={presence} size={11} />
+              <PresenceDot status={presence} size={10} />
             </View>
           ) : null}
         </View>

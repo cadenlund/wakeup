@@ -242,7 +242,7 @@ function ModalHeader({
   const primary = useThemeColor('primary');
   const mutedFg = useThemeColor('muted-foreground');
   return (
-    <View className="flex-row items-center justify-between border-b border-border bg-card px-4 py-3">
+    <View className="flex-row items-center justify-between border-b border-border bg-card px-5 py-3">
       <Pressable
         onPress={onCancel}
         accessibilityRole="button"

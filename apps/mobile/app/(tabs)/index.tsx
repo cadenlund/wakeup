@@ -16,13 +16,19 @@
 // Pull-to-refresh wraps everything per §5.4. Pin/mute long-press
 // menus + last-message preview land in 5.6 / 5.5 respectively. The
 // new-conversation flow lives at /conversations/new (Phase 5.2).
-import { MessageCircle, Plus } from 'lucide-react-native';
+import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, RefreshControl, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ConversationRow } from '@/components/conversation-row';
+import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import {
+  conversationDisplay,
+  filterConversations,
+  isCurrentlyMuted,
+} from '@/lib/conversation-display';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
@@ -58,6 +64,14 @@ export default function ChatsScreen() {
 
   const sorted = React.useMemo(() => sortConversations(data?.data ?? []), [data]);
 
+  // Inline filter input. Matches the friends-tab shape so the two
+  // tabs read the same. Filter narrows the existing list by name —
+  // global search (across users/chats/messages) lives behind the
+  // header icon, this is a local filter only.
+  const [query, setQuery] = React.useState('');
+  const visible = React.useMemo(() => filterConversations(sorted, query), [sorted, query]);
+  const filterActive = query.trim().length > 0;
+
   // Pull-to-refresh: refetch the list. Local refreshing flag is
   // independent of conversationsQ.isFetching so passive background
   // refetches (focus, mount) don't surface the spinner.
@@ -78,15 +92,26 @@ export default function ChatsScreen() {
 
   return (
     <View className="flex-1 bg-background">
+      <ChatsSearchBar value={query} onChange={setQuery} />
       {isInitialLoad ? (
         <ChatsLoading />
       ) : sorted.length === 0 ? (
         <PullableEmpty refreshing={refreshing} onRefresh={onRefresh} />
+      ) : visible.length === 0 ? (
+        <NoFilterMatches />
       ) : (
         <List
-          data={sorted}
+          data={visible}
           keyExtractor={(item, i) => item.id ?? `idx-${i}`}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={
+            // Skip pull-to-refresh while a filter is active — refetching
+            // would replace the visible subset with a fresh full list and
+            // re-filter, which feels right but the pull gesture conflicts
+            // with scrolling a short filtered result set.
+            filterActive ? undefined : (
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            )
+          }
           renderItem={({ item }) => (
             <RenderedConversationRow
               conversation={item}
@@ -99,6 +124,57 @@ export default function ChatsScreen() {
 
       <ComposeFab onPress={goCompose} />
     </View>
+  );
+}
+
+function ChatsSearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <View className="border-b border-border bg-background px-4 pb-3 pt-3">
+      <View className="relative">
+        <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
+          <Search size={16} color={mutedFg} />
+        </View>
+        <Input
+          value={value}
+          onChangeText={onChange}
+          placeholder="Filter your chats"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="off"
+          returnKeyType="search"
+          testID="chats-filter-input"
+          accessibilityLabel="Filter your chats"
+          className="pl-9 pr-9"
+        />
+        {value.length > 0 ? (
+          <Pressable
+            onPress={() => onChange('')}
+            accessibilityRole="button"
+            accessibilityLabel="Clear filter"
+            testID="chats-filter-clear"
+            hitSlop={8}
+            className="absolute bottom-0 right-3 top-0 z-10 justify-center">
+            <X size={16} color={mutedFg} />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function NoFilterMatches() {
+  // Use the shared EmptyState primitive so this state reads with
+  // the same shape every other "no results" surface in the app
+  // (friends-tab no-matches, search modal no-matches, etc.). §4.9
+  // forbids ad-hoc Text+View pairs for empty states.
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <EmptyState
+      icon={<Search size={40} color={mutedFg} />}
+      title="No matches"
+      subtitle="Try a different name or member."
+    />
   );
 }
 
@@ -149,100 +225,6 @@ function RenderedConversationRow({
       }}
     />
   );
-}
-
-type ConversationDisplay = {
-  title: string;
-  subtitle?: string;
-  avatarUrl?: string | null;
-  fallbackInitial?: string;
-  // Two member avatars to render in a stacked cluster when the
-  // group has no avatar_url. Each carries its own presence so the
-  // cluster can show two dots. Empty / undefined for direct convos.
-  stackedMembers?: {
-    avatarUrl?: string | null;
-    fallbackName?: string | null;
-    presence?: string | null;
-  }[];
-  // Presence to overlay on the (single) avatar. Set for direct DMs
-  // where there's a clear "the other person"; unset for groups
-  // where per-member dots ride on stackedMembers instead.
-  presence?: string | null;
-};
-
-function conversationDisplay(
-  c: Conversation,
-  myUserId: string | undefined,
-  presenceByUser: Map<string, string>
-): ConversationDisplay {
-  if (c.type === 'direct') {
-    // For a 1:1 conversation, we want the *other* member. Server may
-    // include the caller as a member; filter them out so a self-DM
-    // (rare; admin tooling) at least falls back to the same row.
-    const others = (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId);
-    const other = others[0]?.user ?? c.members?.[0]?.user;
-    const title = other?.display_name?.trim() || other?.username?.trim() || 'Direct message';
-    return {
-      title,
-      avatarUrl: other?.avatar_url,
-      fallbackInitial: title,
-      presence: other?.id ? (presenceByUser.get(other.id) ?? null) : null,
-    };
-  }
-  // group
-  const others = (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId);
-  const memberCount = (c.members ?? []).length;
-  const stackedMembers = others.slice(0, 2).map((m) => ({
-    avatarUrl: m.user?.avatar_url,
-    fallbackName: m.user?.display_name ?? m.user?.username ?? null,
-    presence: m.user?.id ? (presenceByUser.get(m.user.id) ?? null) : null,
-  }));
-
-  const named = c.name?.trim();
-  if (named) {
-    // Named group → subtitle is "N members" so the avatar / name +
-    // count read as a complete identity even before any messages.
-    const subtitle = memberCount > 0 ? membersLabel(memberCount) : undefined;
-    return {
-      title: named,
-      subtitle,
-      avatarUrl: c.avatar_url,
-      fallbackInitial: named,
-      stackedMembers,
-    };
-  }
-  // Unnamed group — fall back to a comma-joined preview of up to
-  // three member names so the row isn't empty.
-  const previewNames = others
-    .map((m) => m.user?.display_name?.trim() || m.user?.username?.trim())
-    .filter((s): s is string => !!s);
-  const previewShown = previewNames.slice(0, 3).join(', ');
-  const remaining = previewNames.length - 3;
-  // "Caden, Test, Alice +2" when there's overflow; bare list when
-  // it all fits.
-  const subtitle = previewShown
-    ? remaining > 0
-      ? `${previewShown} +${remaining}`
-      : previewShown
-    : undefined;
-  return {
-    title: previewShown || 'Group',
-    subtitle,
-    avatarUrl: c.avatar_url,
-    fallbackInitial: previewShown || 'G',
-    stackedMembers,
-  };
-}
-
-function membersLabel(n: number): string {
-  return n === 1 ? '1 member' : `${n} members`;
-}
-
-function isCurrentlyMuted(mutedUntil: string | null | undefined): boolean {
-  if (!mutedUntil) return false;
-  const t = Date.parse(mutedUntil);
-  if (Number.isNaN(t)) return false;
-  return t > Date.now();
 }
 
 function ComposeFab({ onPress }: { onPress: () => void }) {

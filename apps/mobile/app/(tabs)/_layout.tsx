@@ -4,7 +4,7 @@
 // header tint) and the Phase-3 temporary logout button on the
 // global header.
 import { Tabs, useRouter } from 'expo-router';
-import { LogOut, MessageCircle, User, Users } from 'lucide-react-native';
+import { LogOut, MessageCircle, Search, User, Users } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -71,24 +71,23 @@ export default function TabLayout() {
         // when settings/account lands in Phase 11.6 — at that point
         // logout moves into the account screen.
         headerRight: () => (
+          <LogoutPill onPress={() => logout.mutate()} pending={logout.isPending} fg={fg} />
+        ),
+        // Header-left search icon present on every tab (Chats,
+        // Friends, Profile) so the global /search modal is one tap
+        // away regardless of where the user is. Visually distinct
+        // from the friends-tab inline search input (which is
+        // friend-discovery — a different flow that filters and
+        // adds people in place).
+        headerLeft: () => (
           <Pressable
+            onPress={() => router.push('/search')}
             accessibilityRole="button"
-            accessibilityLabel="Log out"
-            testID="header-logout"
-            onPress={() => logout.mutate()}
-            disabled={logout.isPending}
+            accessibilityLabel="Search people, chats, messages"
+            testID="header-search"
             hitSlop={8}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              marginRight: 14,
-              opacity: logout.isPending ? 0.5 : 1,
-            }}>
-            <LogOut size={16} color={fg} />
-            <Text className="text-sm font-medium">
-              {logout.isPending ? 'Logging out…' : 'Log out'}
-            </Text>
+            className="ml-3 h-9 w-9 items-center justify-center rounded-full active:bg-muted">
+            <Search size={18} color={fg} />
           </Pressable>
         ),
       }}>
@@ -114,5 +113,35 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+  );
+}
+
+function LogoutPill({
+  onPress,
+  pending,
+  fg,
+}: {
+  onPress: () => void;
+  pending: boolean;
+  fg: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Log out"
+      testID="header-logout"
+      onPress={onPress}
+      disabled={pending}
+      hitSlop={8}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginRight: 14,
+        opacity: pending ? 0.5 : 1,
+      }}>
+      <LogOut size={16} color={fg} />
+      <Text className="text-sm font-medium">{pending ? 'Logging out…' : 'Log out'}</Text>
+    </Pressable>
   );
 }

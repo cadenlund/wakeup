@@ -1,0 +1,69 @@
+# Phase 5.5 — global /search modal.
+#
+# Walks the empty-state happy path from a freshly-registered
+# account: open the modal from the chats tab, type a query that
+# can't match anything ("zzzzz"), assert the empty-results state,
+# clear, dismiss.
+#
+# A populated end-to-end (search → tap user → DM created → land
+# in thread) needs a second-account fixture; Phase 5+ multi-user
+# flows will exercise it.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. The placeholder empty state confirms
+# we're authed and on (tabs)/index.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+
+# --- Open the search modal ----------------------------------------
+- tapOn:
+    id: header-search
+- extendedWaitUntil:
+    visible: 'Search'
+    timeout: 6000
+- takeScreenshot: search-opened
+
+# Below the min-chars threshold the modal renders the "Type at
+# least 2 characters" hint.
+- assertVisible: 'Type at least 2 characters to find people, chats, and messages.'
+
+# --- Type a query that won't match -------------------------------
+- tapOn:
+    id: search-input
+- inputText: 'zzzzz'
+# Debounce is 200ms; give the request room to land.
+- extendedWaitUntil:
+    visible: 'No matches'
+    timeout: 6000
+- assertVisible: 'No matches'
+- takeScreenshot: search-no-matches
+
+# Clear via the X icon — the hint should come back.
+- tapOn:
+    id: search-clear
+- extendedWaitUntil:
+    visible: 'Type at least 2 characters to find people, chats, and messages.'
+    timeout: 6000
+
+# Dismiss via Cancel — back to chats tab.
+- tapOn:
+    id: search-cancel
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 6000
+- assertVisible: 'No conversations yet'
+- takeScreenshot: search-dismissed
