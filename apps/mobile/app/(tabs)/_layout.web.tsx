@@ -168,9 +168,15 @@ export default function TabsWebLayout() {
             toggle. Toggle is shrink-0 so it always renders at full
             size, naturally near-centered when the column is narrow. */}
         <View className="h-12 flex-row items-center border-b border-border px-3">
+          {/* min-w-0 is critical: web flex items default to min-width:
+              auto (= min-content), which would refuse to shrink below
+              the intrinsic width of "Moon + Wakeup" (~78px) and shove
+              the toggle off the right edge when the sidebar narrows.
+              With min-w-0 the brand collapses cleanly to 0 width and
+              the toggle stays put. */}
           <Animated.View
             style={labelStyle}
-            className="mr-2 flex-1 flex-row items-center gap-2 overflow-hidden"
+            className="mr-3 min-w-0 flex-1 flex-row items-center gap-3 overflow-hidden"
             pointerEvents="none">
             <Moon size={20} color={primary} />
             <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
