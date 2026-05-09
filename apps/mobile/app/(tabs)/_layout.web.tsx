@@ -171,14 +171,16 @@ export default function TabsWebLayout() {
             collapsed ? 'justify-center' : 'justify-between'
           }`}>
           {!collapsed ? (
-            <Animated.View
-              style={labelStyle}
-              className="flex-row items-center gap-3 overflow-hidden"
-              pointerEvents="none">
-              <Moon size={20} color={primary} />
-              <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
-                Wakeup
-              </Text>
+            // Animated.View handles only opacity; layout lives on a
+            // plain View inside it so NativeWind's flex classes apply
+            // without fighting reanimated's style merging.
+            <Animated.View style={labelStyle} pointerEvents="none">
+              <View className="flex-row items-center gap-2">
+                <Moon size={20} color={primary} />
+                <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
+                  Wakeup
+                </Text>
+              </View>
             </Animated.View>
           ) : null}
           <Pressable
