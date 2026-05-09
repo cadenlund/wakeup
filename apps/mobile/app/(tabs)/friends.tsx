@@ -337,24 +337,23 @@ export default function FriendsScreen() {
   // — fine for now; persistence under STORAGE_KEYS lands when there
   // are more user-prefs to keep with it.
   const [collapsedSections, setCollapsedSections] = React.useState<Set<SectionId>>(new Set());
-  // Track the section that was just expanded so the post-render
-  // effect can scroll its header to the top — without this, on
-  // native, FlashList preserves the user's scroll offset which
-  // pushes the just-expanded section's header off the top of the
-  // viewport (cut off behind the screen header).
-  const justExpandedRef = React.useRef<SectionId | null>(null);
+  // Track the section that was just toggled (in either direction)
+  // so the post-render effect can scroll its header to the top.
+  // Without this, FlashList preserves the prior scroll offset:
+  //   - on expand, the new rows can push the tapped header behind
+  //     the screen chrome
+  //   - on collapse, removed rows above the offset leave the list
+  //     scrolled into empty space below the (now-shorter) content
+  // Pinning the tapped header to the top side-steps both.
+  const justToggledRef = React.useRef<SectionId | null>(null);
   const toggleSection = React.useCallback((id: SectionId) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-        justExpandedRef.current = id;
-      } else {
-        next.add(id);
-        justExpandedRef.current = null;
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
+    justToggledRef.current = id;
   }, []);
 
   const sectionRows = React.useMemo<Row[]>(() => {
@@ -508,7 +507,7 @@ export default function FriendsScreen() {
           onToggleSection={toggleSection}
           refreshing={refreshing}
           onRefresh={onRefresh}
-          justExpandedRef={justExpandedRef}
+          justToggledRef={justToggledRef}
         />
       )}
 
@@ -580,7 +579,7 @@ function SectionsPane({
   onToggleSection,
   refreshing,
   onRefresh,
-  justExpandedRef,
+  justToggledRef,
 }: {
   rows: Row[];
   pendingAction: Set<string>;
@@ -590,23 +589,28 @@ function SectionsPane({
   onToggleSection: (id: SectionId) => void;
   refreshing: boolean;
   onRefresh: () => void;
-  justExpandedRef: React.MutableRefObject<SectionId | null>;
+  justToggledRef: React.MutableRefObject<SectionId | null>;
 }) {
   const listRef = React.useRef<ListRef<Row>>(null);
 
-  // After a section just expanded, scroll its header to the top of
-  // the viewport. Without this, FlashList preserves the user's
-  // scroll offset and the inserted rows above the offset push the
-  // just-expanded section's header behind the screen header.
+  // After any section toggle (expand OR collapse), scroll its
+  // header to the top of the viewport. FlashList preserves the
+  // prior scroll offset across data updates, so without this:
+  //   - expand → inserted rows push the header behind the screen
+  //     chrome
+  //   - collapse → removed rows above the offset leave the list
+  //     scrolled into empty space below the now-shorter content
+  // Pinning the tapped header to the top is the predictable shape
+  // either way.
   React.useEffect(() => {
-    const id = justExpandedRef.current;
+    const id = justToggledRef.current;
     if (!id) return;
     const idx = rows.findIndex((r) => r.kind === 'header' && r.sectionId === id);
     if (idx >= 0) {
       listRef.current?.scrollToIndex({ index: idx, animated: true });
     }
-    justExpandedRef.current = null;
-  }, [rows, justExpandedRef]);
+    justToggledRef.current = null;
+  }, [rows, justToggledRef]);
 
   const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
 
