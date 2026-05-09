@@ -123,9 +123,9 @@ func toConversationMemberResponse(m domain.ConversationMember) ConversationMembe
 
 // toConversationMemberRow renders a single conversation_members row
 // with the embedded counterparty profile.
-func toConversationMemberRow(m domain.ConversationMember, u domain.User) ConversationMemberRow {
+func toConversationMemberRow(m domain.ConversationMember, u domain.User, p Presigner) ConversationMemberRow {
 	return ConversationMemberRow{
-		User:     toUserResponse(u),
+		User:     toUserResponse(u, p),
 		Role:     string(m.Role),
 		JoinedAt: m.JoinedAt,
 	}
@@ -139,7 +139,7 @@ func toConversationMemberRow(m domain.ConversationMember, u domain.User) Convers
 // pin state — those fields are surfaced at the top level so the
 // client can render a mute icon / sort pinned-first without scanning
 // the embedded members slice.
-func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members []domain.ConversationMember, usersByID map[uuid.UUID]domain.User) ConversationResponse {
+func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members []domain.ConversationMember, usersByID map[uuid.UUID]domain.User, p Presigner) ConversationResponse {
 	rows := make([]ConversationMemberRow, 0, len(members))
 	var mutedUntil, pinnedAt *time.Time
 	for _, m := range members {
@@ -149,7 +149,7 @@ func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members [
 			// §4.6 placeholder rather than a half-empty payload.
 			u = domain.User{ID: m.UserID}
 		}
-		rows = append(rows, toConversationMemberRow(m, u))
+		rows = append(rows, toConversationMemberRow(m, u, p))
 		if m.UserID == callerID {
 			mutedUntil = m.MutedUntil
 			pinnedAt = m.PinnedAt

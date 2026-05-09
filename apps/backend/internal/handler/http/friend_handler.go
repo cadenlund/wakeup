@@ -25,11 +25,12 @@ type FriendHandler struct {
 	users   *usersvc.Service
 	auth    *auth.Service
 	v       *validator.Validate
+	presign Presigner // optional; nil → raw avatar keys
 }
 
 // NewFriendHandler wires up the handler. Returns an error when any
 // dependency is nil.
-func NewFriendHandler(friends *friendsvc.Service, users *usersvc.Service, a *auth.Service, v *validator.Validate) (*FriendHandler, error) {
+func NewFriendHandler(friends *friendsvc.Service, users *usersvc.Service, a *auth.Service, v *validator.Validate, presign Presigner) (*FriendHandler, error) {
 	if friends == nil {
 		return nil, errors.New("httpapi: FriendHandler requires non-nil friend service")
 	}
@@ -42,7 +43,7 @@ func NewFriendHandler(friends *friendsvc.Service, users *usersvc.Service, a *aut
 	if v == nil {
 		return nil, errors.New("httpapi: FriendHandler requires non-nil validator")
 	}
-	return &FriendHandler{friends: friends, users: users, auth: a, v: v}, nil
+	return &FriendHandler{friends: friends, users: users, auth: a, v: v, presign: presign}, nil
 }
 
 // Mount attaches every /v1/friends/* route onto r.
@@ -393,7 +394,7 @@ func (h *FriendHandler) ListBlocks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]UserResponse, 0, len(users))
 	for _, u := range users {
-		out = append(out, toUserResponse(u))
+		out = append(out, toUserResponse(u, h.presign))
 	}
 	WriteJSON(w, http.StatusOK, BlockListResponse{Data: out})
 }
@@ -450,7 +451,7 @@ func (h *FriendHandler) renderFriendship(ctx context.Context, self uuid.UUID, f 
 		// client doesn't see a half-empty payload.
 		other = domain.User{ID: otherID}
 	}
-	return toFriendshipResponse(f, other), nil
+	return toFriendshipResponse(f, other, h.presign), nil
 }
 
 // renderFriendships batch-loads counterparties for a list of friendships.
@@ -476,7 +477,7 @@ func (h *FriendHandler) renderFriendships(ctx context.Context, self uuid.UUID, f
 		if !ok {
 			other = domain.User{ID: f.OtherID(self)}
 		}
-		out = append(out, toFriendshipResponse(f, other))
+		out = append(out, toFriendshipResponse(f, other, h.presign))
 	}
 	return out, nil
 }

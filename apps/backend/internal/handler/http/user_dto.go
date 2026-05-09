@@ -62,7 +62,7 @@ type UpdateNotificationPreferencesRequest struct {
 // toUserResponse renders the public view of a domain.User. Soft-deleted
 // users collapse to the §4.6 placeholder so callers can't enumerate
 // real usernames via deleted accounts.
-func toUserResponse(u domain.User) UserResponse {
+func toUserResponse(u domain.User, p Presigner) UserResponse {
 	if u.DeletedAt != nil {
 		return UserResponse{
 			ID: u.ID, Username: "deleted-user", DisplayName: "Deleted User",
@@ -71,20 +71,20 @@ func toUserResponse(u domain.User) UserResponse {
 	}
 	return UserResponse{
 		ID: u.ID, Username: u.Username, DisplayName: u.DisplayName,
-		AvatarURL: presignAvatarKey(u.AvatarURL), Bio: u.Bio, StatusEmoji: u.StatusEmoji,
+		AvatarURL: presignAvatarKey(p, u.AvatarURL), Bio: u.Bio, StatusEmoji: u.StatusEmoji,
 		CreatedAt: u.CreatedAt,
 	}
 }
 
 // toUserListResponse builds the paginated envelope from a service search result.
-func toUserListResponse(users []domain.User, next *string, hasMore bool) UserListResponse {
+func toUserListResponse(users []domain.User, next *string, hasMore bool, p Presigner) UserListResponse {
 	out := UserListResponse{
 		Data:       make([]UserResponse, len(users)),
 		NextCursor: next,
 		HasMore:    hasMore,
 	}
 	for i, u := range users {
-		out.Data[i] = toUserResponse(u)
+		out.Data[i] = toUserResponse(u, p)
 	}
 	return out
 }

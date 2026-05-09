@@ -41,19 +41,19 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	}
 
 	v := httpapi.NewValidator()
-	authHandler, err := httpapi.NewAuthHandler(h.AuthSvc, h.MsgRepo, v)
+	authHandler, err := httpapi.NewAuthHandler(h.AuthSvc, h.MsgRepo, v, nil)
 	if err != nil {
 		t.Fatalf("auth handler: %v", err)
 	}
-	userHandler, err := httpapi.NewUserHandler(h.UserSvc, h.AuthSvc, h.NotifPrefSvc, v)
+	userHandler, err := httpapi.NewUserHandler(h.UserSvc, h.AuthSvc, h.NotifPrefSvc, v, nil)
 	if err != nil {
 		t.Fatalf("user handler: %v", err)
 	}
-	friendHandler, err := httpapi.NewFriendHandler(h.FriendSvc, h.UserSvc, h.AuthSvc, v)
+	friendHandler, err := httpapi.NewFriendHandler(h.FriendSvc, h.UserSvc, h.AuthSvc, v, nil)
 	if err != nil {
 		t.Fatalf("friend handler: %v", err)
 	}
-	convHandler, err := httpapi.NewConversationHandler(h.ConvSvc, h.UserSvc, h.AuthSvc, v)
+	convHandler, err := httpapi.NewConversationHandler(h.ConvSvc, h.UserSvc, h.AuthSvc, v, nil)
 	if err != nil {
 		t.Fatalf("conversation handler: %v", err)
 	}
@@ -74,7 +74,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("ws handler: %v", err)
 	}
-	presenceHandler, err := httpapi.NewPresenceHandler(h.PresenceSvc, h.UserSvc, h.AuthSvc, v)
+	presenceHandler, err := httpapi.NewPresenceHandler(h.PresenceSvc, h.UserSvc, h.AuthSvc, v, nil)
 	if err != nil {
 		t.Fatalf("presence handler: %v", err)
 	}
@@ -86,7 +86,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("device handler: %v", err)
 	}
-	adminHandler, err := httpapi.NewAdminHandler(h.AdminSvc, h.AuthSvc, h.Sessions, v)
+	adminHandler, err := httpapi.NewAdminHandler(h.AdminSvc, h.AuthSvc, h.Sessions, v, nil)
 	if err != nil {
 		t.Fatalf("admin handler: %v", err)
 	}
@@ -94,7 +94,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("contacts service: %v", err)
 	}
-	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, h.AuthSvc, v)
+	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, h.AuthSvc, v, nil)
 	if err != nil {
 		t.Fatalf("contacts handler: %v", err)
 	}
@@ -104,7 +104,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("search service: %v", err)
 	}
-	searchHandler, err := httpapi.NewSearchHandler(searchSvc, h.AuthSvc, v)
+	searchHandler, err := httpapi.NewSearchHandler(searchSvc, h.AuthSvc, v, nil)
 	if err != nil {
 		t.Fatalf("search handler: %v", err)
 	}

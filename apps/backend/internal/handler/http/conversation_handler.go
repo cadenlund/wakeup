@@ -22,10 +22,11 @@ import (
 // conversation service + user service so member rows can be rendered
 // with their public profiles inline.
 type ConversationHandler struct {
-	convs *convsvc.Service
-	users *usersvc.Service
-	auth  *auth.Service
-	v     *validator.Validate
+	convs   *convsvc.Service
+	users   *usersvc.Service
+	auth    *auth.Service
+	v       *validator.Validate
+	presign Presigner // optional; nil → raw avatar keys
 }
 
 // NewConversationHandler wires up the handler.
@@ -34,6 +35,7 @@ func NewConversationHandler(
 	users *usersvc.Service,
 	a *auth.Service,
 	v *validator.Validate,
+	presign Presigner,
 ) (*ConversationHandler, error) {
 	if convs == nil {
 		return nil, errors.New("httpapi: ConversationHandler requires non-nil conversation service")
@@ -47,7 +49,7 @@ func NewConversationHandler(
 	if v == nil {
 		return nil, errors.New("httpapi: ConversationHandler requires non-nil validator")
 	}
-	return &ConversationHandler{convs: convs, users: users, auth: a, v: v}, nil
+	return &ConversationHandler{convs: convs, users: users, auth: a, v: v, presign: presign}, nil
 }
 
 // Mount attaches every /v1/conversations/* route onto r.
@@ -533,7 +535,7 @@ func (h *ConversationHandler) renderOne(ctx context.Context, callerID uuid.UUID,
 	if err != nil {
 		return ConversationResponse{}, err
 	}
-	return toConversationResponse(conv, callerID, members, usersByID), nil
+	return toConversationResponse(conv, callerID, members, usersByID, h.presign), nil
 }
 
 // renderConversationList batch-loads members + their user records for
@@ -578,7 +580,7 @@ func (h *ConversationHandler) renderConversationList(ctx context.Context, caller
 
 	out := make([]ConversationResponse, 0, len(convs))
 	for _, c := range convs {
-		out = append(out, toConversationResponse(c, callerID, membersByConv[c.ID], usersByID))
+		out = append(out, toConversationResponse(c, callerID, membersByConv[c.ID], usersByID, h.presign))
 	}
 	return out, nil
 }
@@ -596,7 +598,7 @@ func (h *ConversationHandler) renderMembers(ctx context.Context, members []domai
 		if !ok {
 			u = domain.User{ID: m.UserID}
 		}
-		out = append(out, toConversationMemberRow(m, u))
+		out = append(out, toConversationMemberRow(m, u, h.presign))
 	}
 	return out, nil
 }

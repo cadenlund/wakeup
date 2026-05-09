@@ -51,11 +51,11 @@ type SendFriendRequestRequest struct {
 // counterparty user as the embedded `Other` field. Caller is responsible
 // for resolving the right counterparty (Friendship.OtherID handles the
 // branch on direction).
-func toFriendshipResponse(f domain.Friendship, otherUser domain.User) FriendshipResponse {
+func toFriendshipResponse(f domain.Friendship, otherUser domain.User, p Presigner) FriendshipResponse {
 	return FriendshipResponse{
 		ID:         f.ID,
 		Status:     string(f.Status),
-		Other:      toUserResponse(otherUser),
+		Other:      toUserResponse(otherUser, p),
 		CreatedAt:  f.CreatedAt,
 		AcceptedAt: f.AcceptedAt,
 	}

@@ -17,10 +17,11 @@ type ContactsHandler struct {
 	contacts *contactssvc.Service
 	auth     *auth.Service
 	v        *validator.Validate
+	presign  Presigner // optional; nil → raw avatar keys
 }
 
 // NewContactsHandler wires up the handler.
-func NewContactsHandler(c *contactssvc.Service, a *auth.Service, v *validator.Validate) (*ContactsHandler, error) {
+func NewContactsHandler(c *contactssvc.Service, a *auth.Service, v *validator.Validate, presign Presigner) (*ContactsHandler, error) {
 	if c == nil {
 		return nil, errors.New("httpapi: ContactsHandler requires non-nil contacts service")
 	}
@@ -30,7 +31,7 @@ func NewContactsHandler(c *contactssvc.Service, a *auth.Service, v *validator.Va
 	if v == nil {
 		return nil, errors.New("httpapi: ContactsHandler requires non-nil validator")
 	}
-	return &ContactsHandler{contacts: c, auth: a, v: v}, nil
+	return &ContactsHandler{contacts: c, auth: a, v: v, presign: presign}, nil
 }
 
 // Mount attaches /v1/contacts/* onto r.
@@ -94,7 +95,7 @@ func (h *ContactsHandler) Match(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]UserResponse, 0, len(matched))
 	for _, u := range matched {
-		out = append(out, toUserResponse(u))
+		out = append(out, toUserResponse(u, h.presign))
 	}
 	WriteJSON(w, http.StatusOK, ContactsMatchResponse{Matched: out})
 }

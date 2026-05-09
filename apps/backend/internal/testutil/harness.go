@@ -277,19 +277,19 @@ func New(t *testing.T) *Harness {
 		t.Fatalf("Harness: build room service: %v", err)
 	}
 	v := httpapi.NewValidator()
-	authHandler, err := httpapi.NewAuthHandler(authSvc, msgs, v)
+	authHandler, err := httpapi.NewAuthHandler(authSvc, msgs, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build auth handler: %v", err)
 	}
-	userHandler, err := httpapi.NewUserHandler(userSvc, authSvc, notifSvc, v)
+	userHandler, err := httpapi.NewUserHandler(userSvc, authSvc, notifSvc, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build user handler: %v", err)
 	}
-	friendHandler, err := httpapi.NewFriendHandler(friendSvc, userSvc, authSvc, v)
+	friendHandler, err := httpapi.NewFriendHandler(friendSvc, userSvc, authSvc, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build friend handler: %v", err)
 	}
-	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, v)
+	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build conversation handler: %v", err)
 	}
@@ -301,7 +301,7 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build attachment handler: %v", err)
 	}
-	presenceHandler, err := httpapi.NewPresenceHandler(presenceSvc, userSvc, authSvc, v)
+	presenceHandler, err := httpapi.NewPresenceHandler(presenceSvc, userSvc, authSvc, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build presence handler: %v", err)
 	}
@@ -313,7 +313,7 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build device handler: %v", err)
 	}
-	adminHandler, err := httpapi.NewAdminHandler(adminSvc, authSvc, sm, v)
+	adminHandler, err := httpapi.NewAdminHandler(adminSvc, authSvc, sm, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build admin handler: %v", err)
 	}
@@ -321,7 +321,7 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build contacts service: %v", err)
 	}
-	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, authSvc, v)
+	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, authSvc, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build contacts handler: %v", err)
 	}
@@ -331,7 +331,7 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build search service: %v", err)
 	}
-	searchHandler, err := httpapi.NewSearchHandler(searchSvc, authSvc, v)
+	searchHandler, err := httpapi.NewSearchHandler(searchSvc, authSvc, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build search handler: %v", err)
 	}

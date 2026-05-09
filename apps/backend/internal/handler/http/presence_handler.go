@@ -24,6 +24,7 @@ type PresenceHandler struct {
 	users    *usersvc.Service
 	auth     *auth.Service
 	v        *validator.Validate
+	presign  Presigner // optional; nil → raw avatar keys
 }
 
 // NewPresenceHandler wires the handler.
@@ -32,6 +33,7 @@ func NewPresenceHandler(
 	users *usersvc.Service,
 	a *auth.Service,
 	v *validator.Validate,
+	presign Presigner,
 ) (*PresenceHandler, error) {
 	if presence == nil {
 		return nil, errors.New("httpapi: PresenceHandler requires non-nil presence service")
@@ -45,7 +47,7 @@ func NewPresenceHandler(
 	if v == nil {
 		return nil, errors.New("httpapi: PresenceHandler requires non-nil validator")
 	}
-	return &PresenceHandler{presence: presence, users: users, auth: a, v: v}, nil
+	return &PresenceHandler{presence: presence, users: users, auth: a, v: v, presign: presign}, nil
 }
 
 // Mount attaches presence + widget routes onto r.
@@ -185,7 +187,7 @@ func (h *PresenceHandler) renderWidget(ctx context.Context, presence []domain.Pr
 			u = domain.User{ID: p.UserID}
 		}
 		out = append(out, WidgetFriendRow{
-			User:     toUserResponse(u),
+			User:     toUserResponse(u, h.presign),
 			Presence: toPresenceResponse(p),
 		})
 	}

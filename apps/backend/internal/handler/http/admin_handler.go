@@ -25,6 +25,7 @@ type AdminHandler struct {
 	auth     *auth.Service
 	sessions *scs.SessionManager
 	v        *validator.Validate
+	presign  Presigner // optional; nil → raw avatar keys
 }
 
 // NewAdminHandler wires the handler.
@@ -33,6 +34,7 @@ func NewAdminHandler(
 	authSvc *auth.Service,
 	sessions *scs.SessionManager,
 	v *validator.Validate,
+	presign Presigner,
 ) (*AdminHandler, error) {
 	if a == nil {
 		return nil, errors.New("httpapi: AdminHandler requires non-nil admin service")
@@ -46,7 +48,7 @@ func NewAdminHandler(
 	if v == nil {
 		return nil, errors.New("httpapi: AdminHandler requires non-nil validator")
 	}
-	return &AdminHandler{admin: a, auth: authSvc, sessions: sessions, v: v}, nil
+	return &AdminHandler{admin: a, auth: authSvc, sessions: sessions, v: v, presign: presign}, nil
 }
 
 // Mount attaches admin routes onto r. The router is responsible for
@@ -237,7 +239,7 @@ func (h *AdminHandler) StartImpersonation(w http.ResponseWriter, r *http.Request
 	// Persist the target id on the admin's session. scs.LoadAndSave will
 	// flush the change in the response Set-Cookie before write.
 	h.sessions.Put(r.Context(), mw.SessionImpersonatingKey, id.String())
-	WriteJSON(w, http.StatusOK, toMeResponse(target, actor))
+	WriteJSON(w, http.StatusOK, toMeResponse(target, actor, h.presign))
 }
 
 // EndImpersonation clears the impersonation field and returns the
@@ -274,7 +276,7 @@ func (h *AdminHandler) EndImpersonation(w http.ResponseWriter, r *http.Request) 
 		}
 		h.sessions.Remove(r.Context(), mw.SessionImpersonatingKey)
 	}
-	WriteJSON(w, http.StatusOK, toMeResponse(*actor, nil))
+	WriteJSON(w, http.StatusOK, toMeResponse(*actor, nil, h.presign))
 }
 
 // ListAudit returns paginated audit_log rows.

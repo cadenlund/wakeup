@@ -27,9 +27,10 @@ type UnreadCounter interface {
 // (§3.2) and the package-level validator. Goroutine-safe; instantiate
 // once in cmd/server/main.go.
 type AuthHandler struct {
-	svc    *auth.Service
-	unread UnreadCounter
-	v      *validator.Validate
+	svc     *auth.Service
+	unread  UnreadCounter
+	v       *validator.Validate
+	presign Presigner // optional; nil means raw avatar keys pass through
 }
 
 // NewAuthHandler wires up the handler. The validator can be shared
@@ -38,14 +39,17 @@ type AuthHandler struct {
 //
 // `unread` is optional; when nil, GET /v1/auth/me skips the
 // X-Unread-Total header (graceful degradation).
-func NewAuthHandler(svc *auth.Service, unread UnreadCounter, v *validator.Validate) (*AuthHandler, error) {
+//
+// `presign` is optional; when nil, MeResponse.AvatarURL renders the
+// raw stored S3 key (used by tests that don't boot a storage layer).
+func NewAuthHandler(svc *auth.Service, unread UnreadCounter, v *validator.Validate, presign Presigner) (*AuthHandler, error) {
 	if svc == nil {
 		return nil, errors.New("httpapi: AuthHandler requires non-nil auth service")
 	}
 	if v == nil {
 		return nil, errors.New("httpapi: AuthHandler requires non-nil validator")
 	}
-	return &AuthHandler{svc: svc, unread: unread, v: v}, nil
+	return &AuthHandler{svc: svc, unread: unread, v: v, presign: presign}, nil
 }
 
 // Mount attaches every /v1/auth/* route onto r. Caller controls the
@@ -97,7 +101,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusCreated, RegisterResponse{User: toMeResponse(created, nil)})
+	WriteJSON(w, http.StatusCreated, RegisterResponse{User: toMeResponse(created, nil, h.presign)})
 }
 
 // Login validates credentials and binds the session cookie.
@@ -131,7 +135,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, LoginResponse{User: toMeResponse(u, nil)})
+	WriteJSON(w, http.StatusOK, LoginResponse{User: toMeResponse(u, nil, h.presign)})
 }
 
 // Logout destroys the current session. Idempotent — missing session is
@@ -222,7 +226,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		effective = &u
 	}
 	h.writeUnreadHeader(r.Context(), w, effective.ID)
-	WriteJSON(w, http.StatusOK, toMeResponse(*effective, impersonator))
+	WriteJSON(w, http.StatusOK, toMeResponse(*effective, impersonator, h.presign))
 }
 
 // writeUnreadHeader sets X-Unread-Total based on the message-repo's

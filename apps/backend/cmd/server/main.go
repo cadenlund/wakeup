@@ -187,15 +187,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("user service: %w", err)
 	}
-	// Wire the package-wide avatar URL presigner that MeResponse /
-	// UserResponse mappers use to convert stored S3 keys into signed
-	// URLs the client can drop into <Image>. context.Background() is
-	// fine here: the underlying AWS presigner is sync HMAC work and
-	// the mappers run on already-cancelled-aware request goroutines
-	// that finish before the value is observed by the client anyway.
-	httpapi.SetAvatarURLPresigner(func(key string) (string, error) {
+	// Avatar URL presigner that MeResponse / UserResponse mappers use to
+	// convert stored S3 keys into signed URLs the client can drop into
+	// <Image>. Threaded explicitly through every handler constructor so
+	// tests can pass nil for a no-op (raw key passthrough). The underlying
+	// AWS presigner is sync HMAC work, so context.Background() is fine.
+	var avatarPresigner httpapi.Presigner = func(key string) (string, error) {
 		return userSvc.PresignAvatarGetURL(context.Background(), key)
-	})
+	}
 	notifPrefSvc, err := notifprefsvc.New(notifprefsvc.Config{Prefs: prefsRepo})
 	if err != nil {
 		return fmt.Errorf("notificationpref service: %w", err)
@@ -309,19 +308,19 @@ func run() error {
 	defer jobRunner.Stop()
 
 	v := httpapi.NewValidator()
-	authHandler, err := httpapi.NewAuthHandler(authSvc, msgsRepo, v)
+	authHandler, err := httpapi.NewAuthHandler(authSvc, msgsRepo, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("auth handler: %w", err)
 	}
-	userHandler, err := httpapi.NewUserHandler(userSvc, authSvc, notifPrefSvc, v)
+	userHandler, err := httpapi.NewUserHandler(userSvc, authSvc, notifPrefSvc, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("user handler: %w", err)
 	}
-	friendHandler, err := httpapi.NewFriendHandler(friendSvc, userSvc, authSvc, v)
+	friendHandler, err := httpapi.NewFriendHandler(friendSvc, userSvc, authSvc, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("friend handler: %w", err)
 	}
-	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, v)
+	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("conversation handler: %w", err)
 	}
@@ -333,7 +332,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("attachment handler: %w", err)
 	}
-	presenceHandler, err := httpapi.NewPresenceHandler(presenceSvc, userSvc, authSvc, v)
+	presenceHandler, err := httpapi.NewPresenceHandler(presenceSvc, userSvc, authSvc, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("presence handler: %w", err)
 	}
@@ -345,7 +344,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("device handler: %w", err)
 	}
-	adminHandler, err := httpapi.NewAdminHandler(adminSvc, authSvc, sessions, v)
+	adminHandler, err := httpapi.NewAdminHandler(adminSvc, authSvc, sessions, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("admin handler: %w", err)
 	}
@@ -353,7 +352,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("contacts service: %w", err)
 	}
-	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, authSvc, v)
+	contactsHandler, err := httpapi.NewContactsHandler(contactsSvc, authSvc, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("contacts handler: %w", err)
 	}
@@ -363,7 +362,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("search service: %w", err)
 	}
-	searchHandler, err := httpapi.NewSearchHandler(searchSvc, authSvc, v)
+	searchHandler, err := httpapi.NewSearchHandler(searchSvc, authSvc, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("search handler: %w", err)
 	}
