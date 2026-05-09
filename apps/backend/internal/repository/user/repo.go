@@ -97,6 +97,11 @@ SET avatar_url = NULL
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING avatar_url`
 
+// listByPrefixSQL hides users on either side of a 'blocked' friendship
+// row from the caller — both directions, so blocking is symmetric in
+// search visibility (Discord/Instagram convention). When $5 is NULL
+// the NOT EXISTS clause short-circuits true and no filtering happens
+// — that's the admin / system path that wants the full catalog.
 const listByPrefixSQL = `-- name: ListByPrefix :many
 SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
@@ -107,6 +112,15 @@ WHERE deleted_at IS NULL
     OR display_name ILIKE $1::text || '%' ESCAPE '\'
   )
   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
+  AND (
+    $5::uuid IS NULL
+    OR NOT EXISTS (
+      SELECT 1 FROM friendships f
+      WHERE f.status = 'blocked'
+        AND ((f.requester_id = $5::uuid AND f.addressee_id = users.id)
+          OR (f.requester_id = users.id AND f.addressee_id = $5::uuid))
+    )
+  )
 ORDER BY created_at DESC, id DESC
 LIMIT $4`
 
@@ -339,9 +353,14 @@ func (q *Queries) ClearAvatar(ctx context.Context, id uuid.UUID) (string, error)
 // starts with q (case-insensitive). q="" returns all non-deleted users
 // in (created_at DESC, id DESC) order. Pass cursor=nil for the first page.
 //
+// callerID, when non-nil, hides users on either side of a 'blocked'
+// friendship row with that caller — symmetric block visibility so
+// neither party finds the other in search. Pass nil for callers that
+// should bypass the filter (admin user lookup, internal system paths).
+//
 // Always over-fetches limit+1 so the service layer can use pagination.Page
 // to compute next_cursor + has_more.
-func (q *Queries) ListByPrefix(ctx context.Context, prefix string, cursor *pagination.Cursor, limit int) ([]domain.User, error) {
+func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uuid.UUID, cursor *pagination.Cursor, limit int) ([]domain.User, error) {
 	if limit <= 0 {
 		limit = pagination.DefaultLimit
 	}
@@ -357,7 +376,7 @@ func (q *Queries) ListByPrefix(ctx context.Context, prefix string, cursor *pagin
 	// Escape LIKE metachars so a search for "100%" matches the literal
 	// string "100%" instead of becoming a wildcard. The SQL has an explicit
 	// `ESCAPE '\'` clause to honor the escapes.
-	rows, err := q.db.Query(ctx, listByPrefixSQL, escapeLikePrefix(prefix), ts, id, overFetch)
+	rows, err := q.db.Query(ctx, listByPrefixSQL, escapeLikePrefix(prefix), ts, id, overFetch, callerID)
 	if err != nil {
 		return nil, fmt.Errorf("user: list by prefix: %w", err)
 	}

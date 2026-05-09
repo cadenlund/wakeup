@@ -92,7 +92,8 @@ func (h *UserHandler) Mount(r chi.Router) {
 // @Failure      500     {object} ErrorResponse     "Internal error"
 // @Router       /v1/users [get]
 func (h *UserHandler) Search(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.auth.CurrentUser(r.Context()); err != nil {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
@@ -114,7 +115,7 @@ func (h *UserHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.users.Search(r.Context(), usersvc.SearchParams{
-		Query: q, Cursor: cursor, Limit: limit,
+		Query: q, Cursor: cursor, Limit: limit, CallerID: &uid,
 	})
 	if err != nil {
 		WriteError(w, r, err)

@@ -12,6 +12,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
+	"github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	"github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
@@ -122,6 +123,80 @@ func TestSearch_FindsMessageByBody(t *testing.T) {
 	row := msgs[0].(map[string]any)
 	if !strings.Contains(row["body"].(string), "meeting") {
 		t.Errorf("body = %v, want substring 'meeting'", row["body"])
+	}
+}
+
+func TestSearch_HidesBlockedUserFromUserSection(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, alice := h.AuthClient(t)
+	_, bob := h.AuthClient(t, testutil.WithDisplayName("BlockedBob"))
+
+	// Alice blocks Bob — symmetric block visibility means he should
+	// no longer surface in /v1/search?types=users for her, and
+	// (covered separately below) she shouldn't surface for him.
+	if _, err := h.FriendRepo.Create(context.Background(), friendship.CreateParams{
+		ID:          uuid.Must(uuid.NewV7()),
+		RequesterID: alice.ID,
+		AddresseeID: bob.ID,
+		Status:      domain.FriendshipBlocked,
+	}); err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	resp, err := c.Get(h.Server.URL + "/v1/search?q=blockedbob&types=users")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	users, _ := got["users"].([]any)
+	for _, u := range users {
+		row, _ := u.(map[string]any)
+		if row["id"] == bob.ID.String() {
+			t.Fatalf("blocked user surfaced in search: %v", row)
+		}
+	}
+}
+
+func TestSearch_BlockedUserDoesNotSeeBlocker(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	_, alice := h.AuthClient(t, testutil.WithDisplayName("AliceBlocker"))
+	cBob, bob := h.AuthClient(t)
+
+	// Alice blocks Bob; Bob still shouldn't be able to find Alice
+	// in user-search either — symmetric visibility means the row is
+	// hidden in both directions, regardless of who initiated.
+	if _, err := h.FriendRepo.Create(context.Background(), friendship.CreateParams{
+		ID:          uuid.Must(uuid.NewV7()),
+		RequesterID: alice.ID,
+		AddresseeID: bob.ID,
+		Status:      domain.FriendshipBlocked,
+	}); err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	resp, err := cBob.Get(h.Server.URL + "/v1/search?q=aliceblocker&types=users")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	users, _ := got["users"].([]any)
+	for _, u := range users {
+		row, _ := u.(map[string]any)
+		if row["id"] == alice.ID.String() {
+			t.Fatalf("blocker surfaced for blocked user: %v", row)
+		}
 	}
 }
 

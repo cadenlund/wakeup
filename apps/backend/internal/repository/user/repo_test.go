@@ -210,7 +210,7 @@ func TestSoftDelete_OnMissingReturnsErrNotFound(t *testing.T) {
 func TestListByPrefix_Empty(t *testing.T) {
 	t.Parallel()
 	repo, _ := newRepo(t)
-	got, err := repo.ListByPrefix(context.Background(), "", nil, 10)
+	got, err := repo.ListByPrefix(context.Background(), "", nil, nil, 10)
 	if err != nil {
 		t.Fatalf("ListByPrefix: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestListByPrefix_QEmptyReturnsAll(t *testing.T) {
 		}
 	}
 
-	got, err := repo.ListByPrefix(ctx, "", nil, 10)
+	got, err := repo.ListByPrefix(ctx, "", nil, nil, 10)
 	if err != nil {
 		t.Fatalf("ListByPrefix: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestListByPrefix_PrefixMatch(t *testing.T) {
 		}
 	}
 
-	got, err := repo.ListByPrefix(ctx, "cad", nil, 10)
+	got, err := repo.ListByPrefix(ctx, "cad", nil, nil, 10)
 	if err != nil {
 		t.Fatalf("ListByPrefix: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestListByPrefix_EscapesWildcardChars(t *testing.T) {
 		t.Fatalf("Create other: %v", err)
 	}
 
-	got, err := repo.ListByPrefix(ctx, "%", nil, 10)
+	got, err := repo.ListByPrefix(ctx, "%", nil, nil, 10)
 	if err != nil {
 		t.Fatalf("ListByPrefix: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestListByPrefix_ExcludesSoftDeleted(t *testing.T) {
 		t.Fatalf("SoftDelete: %v", err)
 	}
 
-	got, err := repo.ListByPrefix(ctx, "deleted", nil, 10)
+	got, err := repo.ListByPrefix(ctx, "deleted", nil, nil, 10)
 	if err != nil {
 		t.Fatalf("ListByPrefix: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestListByPrefix_PaginationOverFetch(t *testing.T) {
 		}
 	}
 	// Limit 2 → over-fetch 3 → returns 3 rows.
-	got, err := repo.ListByPrefix(ctx, "", nil, 2)
+	got, err := repo.ListByPrefix(ctx, "", nil, nil, 2)
 	if err != nil {
 		t.Fatalf("ListByPrefix: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestListByPrefix_CursorAdvances(t *testing.T) {
 		created = append(created, u.ID)
 	}
 
-	page1, err := repo.ListByPrefix(ctx, "", nil, 2)
+	page1, err := repo.ListByPrefix(ctx, "", nil, nil, 2)
 	if err != nil {
 		t.Fatalf("page1: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestListByPrefix_CursorAdvances(t *testing.T) {
 		Timestamp: page1[1].CreatedAt,
 		ID:        page1[1].ID,
 	}
-	page2, err := repo.ListByPrefix(ctx, "", cursor, 2)
+	page2, err := repo.ListByPrefix(ctx, "", nil, cursor, 2)
 	if err != nil {
 		t.Fatalf("page2: %v", err)
 	}
