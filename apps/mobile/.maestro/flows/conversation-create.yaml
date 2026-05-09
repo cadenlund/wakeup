@@ -1,0 +1,58 @@
+# Phase 5.2 — new-conversation flow.
+#
+# Walks the +-button-to-thread happy path on a freshly-registered
+# user. The freshly-registered account has no friends, so we drive
+# down to the empty-state branch (the only deterministic check we
+# can run from a single Maestro flow without orchestrating a second
+# user). The full pick-friend → POST → land-on-thread happy path
+# needs a second-account fixture; Phase 5+ multi-user flows will
+# exercise it.
+#
+# What this asserts:
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs).
+#   2. Tap the compose FAB on the chats tab.
+#   3. Modal opens at /conversations/new and shows the no-friends
+#      empty state with the "Go to Friends" CTA (because the
+#      fresh account has no accepted friends).
+#   4. Tap Cancel — modal dismisses, back on the chats tab with
+#      the conversations empty state intact.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. The placeholder empty state confirms
+# we're authed and on (tabs)/index.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+- takeScreenshot: chats-empty
+
+# Tap the compose FAB → /conversations/new modal.
+- tapOn:
+    id: conversation-compose
+- extendedWaitUntil:
+    visible: 'No friends to message yet'
+    timeout: 6000
+- assertVisible: 'No friends to message yet'
+- takeScreenshot: conversation-new-empty
+
+# Cancel — back to chats tab.
+- tapOn:
+    id: conversation-new-cancel
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 6000
+- assertVisible: 'No conversations yet'
+- takeScreenshot: chats-after-cancel

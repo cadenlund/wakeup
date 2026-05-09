@@ -14,36 +14,25 @@
 //     — the row mirrors them with a Pin / BellOff icon.
 //
 // Pull-to-refresh wraps everything per §5.4. Pin/mute long-press
-// menus + last-message preview land in 5.6 / 5.5 respectively.
-import { MessageCircle, Plus, X } from 'lucide-react-native';
+// menus + last-message preview land in 5.6 / 5.5 respectively. The
+// new-conversation flow lives at /conversations/new (Phase 5.2).
+import { MessageCircle, Plus } from 'lucide-react-native';
 import * as React from 'react';
-import { Modal, Pressable, RefreshControl, View } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import { Pressable, RefreshControl, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ConversationRow } from '@/components/conversation-row';
-import { FriendRow } from '@/components/friend-row';
-import { EmptyState } from '@/components/ui/empty-state';
 import { List } from '@/components/ui/list';
-import { Text } from '@/components/ui/text';
-import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
-import {
-  getGetV1ConversationsQueryKey,
-  useGetV1Conversations,
-  usePostV1Conversations,
-} from '@/lib/api/hooks/conversations/conversations';
-import { useGetV1Friends } from '@/lib/api/hooks/friends/friends';
+import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
-  InternalHandlerHttpFriendListResponse,
-  InternalHandlerHttpFriendshipResponse,
   InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
-import { toast } from '@/lib/toast';
+import { EmptyState } from '@/components/ui/empty-state';
 
 type Conversation = InternalHandlerHttpConversationResponse;
 
@@ -82,7 +71,8 @@ export default function ChatsScreen() {
     }
   }, [conversationsQ]);
 
-  const [composing, setComposing] = React.useState(false);
+  const router = useRouter();
+  const goCompose = React.useCallback(() => router.push('/conversations/new'), [router]);
 
   const isInitialLoad = conversationsQ.isLoading && !conversationsQ.data;
 
@@ -107,8 +97,7 @@ export default function ChatsScreen() {
         />
       )}
 
-      <ComposeFab onPress={() => setComposing(true)} />
-      <NewConversationSheet visible={composing} onClose={() => setComposing(false)} />
+      <ComposeFab onPress={goCompose} />
     </View>
   );
 }
@@ -267,122 +256,6 @@ function ComposeFab({ onPress }: { onPress: () => void }) {
       className="absolute bottom-6 right-6 h-14 w-14 items-center justify-center rounded-full bg-primary shadow-lg shadow-black/30 active:opacity-80">
       <Plus size={26} color={fg} />
     </Pressable>
-  );
-}
-
-function NewConversationSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const router = useRouter();
-  const qc = useQueryClient();
-  const friendsQ = useGetV1Friends(
-    { limit: 100 },
-    { query: { enabled: visible, staleTime: 30_000 } }
-  );
-  const friendsData = friendsQ.data as InternalHandlerHttpFriendListResponse | undefined;
-  const friends = friendsData?.data ?? [];
-
-  const create = usePostV1Conversations();
-  const [creatingFor, setCreatingFor] = React.useState<string | null>(null);
-
-  const onPickFriend = React.useCallback(
-    async (friendship: InternalHandlerHttpFriendshipResponse) => {
-      const userId = friendship.user?.id;
-      if (!userId || creatingFor) return;
-      setCreatingFor(userId);
-      try {
-        const res = (await create.mutateAsync({
-          data: { type: 'direct', member_ids: [userId] },
-        })) as InternalHandlerHttpConversationResponse | undefined;
-        await qc.invalidateQueries({ queryKey: getGetV1ConversationsQueryKey() });
-        onClose();
-        if (res?.id) router.push(`/conversations/${res.id}`);
-      } catch (err) {
-        const msg =
-          err instanceof APIError && err.message
-            ? err.message
-            : "Couldn't start the conversation — try again in a sec.";
-        toast.error(msg);
-      } finally {
-        setCreatingFor(null);
-      }
-    },
-    [create, qc, router, onClose, creatingFor]
-  );
-
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}>
-      <View className="flex-1 bg-background">
-        <View className="flex-row items-center justify-between border-b border-border px-4 py-3">
-          <Text variant="h4">New conversation</Text>
-          <Pressable
-            onPress={onClose}
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-            testID="conversation-compose-close"
-            hitSlop={8}
-            className="h-8 w-8 items-center justify-center rounded-md active:bg-muted">
-            <SheetCloseIcon />
-          </Pressable>
-        </View>
-
-        {friendsQ.isLoading && !friendsQ.data ? null : friends.length === 0 ? (
-          <NoFriendsEmpty onClose={onClose} />
-        ) : (
-          <List
-            data={friends}
-            keyExtractor={(f, i) => f.id ?? f.user?.id ?? `idx-${i}`}
-            renderItem={({ item }) => {
-              const u = item.user;
-              const userId = u?.id;
-              const isCreating = userId === creatingFor;
-              return (
-                <FriendRow
-                  displayName={u?.display_name}
-                  username={u?.username}
-                  avatarUrl={u?.avatar_url}
-                  hidePresence
-                  onPress={isCreating ? undefined : () => onPickFriend(item)}
-                  trailing={
-                    isCreating ? (
-                      <Text variant="muted" className="text-xs">
-                        Starting…
-                      </Text>
-                    ) : undefined
-                  }
-                />
-              );
-            }}
-          />
-        )}
-      </View>
-    </Modal>
-  );
-}
-
-function SheetCloseIcon() {
-  const fg = useThemeColor('foreground');
-  return <X size={18} color={fg} />;
-}
-
-function NoFriendsEmpty({ onClose }: { onClose: () => void }) {
-  const router = useRouter();
-  const mutedFg = useThemeColor('muted-foreground');
-  return (
-    <EmptyState
-      icon={<MessageCircle size={40} color={mutedFg} />}
-      title="No friends to message yet"
-      subtitle="Add a friend first, then come back here to start a conversation."
-      cta={{
-        label: 'Go to Friends',
-        onPress: () => {
-          onClose();
-          router.push('/friends');
-        },
-      }}
-    />
   );
 }
 
