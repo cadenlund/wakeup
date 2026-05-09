@@ -42,11 +42,12 @@ import {
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as React from 'react';
-import { ActivityIndicator, Modal, Pressable, RefreshControl, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendRow } from '@/components/friend-row';
 import { Button } from '@/components/ui/button';
+import { DrawerSheet } from '@/components/ui/drawer-sheet';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List, type ListRef } from '@/components/ui/list';
@@ -972,65 +973,47 @@ function FriendActionMenu({
   const handle = target?.username ? `@${target.username}` : (target?.display_name ?? '');
   const inFlight = target?.id ? pendingAction.has(target.id) : false;
   return (
-    <Modal
-      visible={!!target}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-      // Stop scrolling underneath while the sheet is up.
-      statusBarTranslucent>
-      <Pressable
-        accessibilityLabel="Dismiss"
-        onPress={onClose}
-        className="flex-1 justify-end bg-black/40">
-        {/* Inner Pressable absorbs touches on the sheet itself so taps
-            inside don't bubble to the dimmer and dismiss it. */}
-        <Pressable onPress={() => {}} className="rounded-t-3xl bg-card">
-          <View className="items-center pt-3">
-            <View className="h-1 w-12 rounded-full bg-muted-foreground/30" />
-          </View>
-          <View className="px-4 pb-2 pt-3">
-            <Text variant="muted" className="text-center text-sm">
-              {handle}
-            </Text>
-          </View>
-          <View className="px-2 pb-6">
-            <Pressable
-              onPress={() => target && onUnfriend(target)}
-              disabled={inFlight}
-              accessibilityRole="button"
-              accessibilityLabel="Unfriend"
-              testID="friend-menu-unfriend"
-              className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
-              <UserMinus size={18} color={fg} />
-              <Text className="text-base">Unfriend</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => target && onBlock(target)}
-              disabled={inFlight}
-              accessibilityRole="button"
-              accessibilityLabel="Block"
-              testID="friend-menu-block"
-              className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
-              <ShieldOff size={18} color={destructive} />
-              <Text style={{ color: destructive }} className="text-base font-medium">
-                Block
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={onClose}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel"
-              testID="friend-menu-cancel"
-              className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
-              <Text style={{ color: mutedFg }} className="text-sm">
-                Cancel
-              </Text>
-            </Pressable>
-          </View>
+    <DrawerSheet visible={!!target} onClose={onClose}>
+      <View className="px-4 pb-2 pt-3">
+        <Text variant="muted" className="text-center text-sm">
+          {handle}
+        </Text>
+      </View>
+      <View className="px-2 pb-6">
+        <Pressable
+          onPress={() => target && onUnfriend(target)}
+          disabled={inFlight}
+          accessibilityRole="button"
+          accessibilityLabel="Unfriend"
+          testID="friend-menu-unfriend"
+          className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
+          <UserMinus size={18} color={fg} />
+          <Text className="text-base">Unfriend</Text>
         </Pressable>
-      </Pressable>
-    </Modal>
+        <Pressable
+          onPress={() => target && onBlock(target)}
+          disabled={inFlight}
+          accessibilityRole="button"
+          accessibilityLabel="Block"
+          testID="friend-menu-block"
+          className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
+          <ShieldOff size={18} color={destructive} />
+          <Text style={{ color: destructive }} className="text-base font-medium">
+            Block
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel"
+          testID="friend-menu-cancel"
+          className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
+          <Text style={{ color: mutedFg }} className="text-sm">
+            Cancel
+          </Text>
+        </Pressable>
+      </View>
+    </DrawerSheet>
   );
 }
 

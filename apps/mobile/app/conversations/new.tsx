@@ -25,6 +25,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import { ModalScreenShell } from '@/components/ui/modal-screen-shell';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import {
@@ -153,7 +154,11 @@ export default function NewConversationScreen() {
   );
 
   if (friendsQ.isLoading && !friendsQ.data) {
-    return <FullPaneLoading />;
+    return (
+      <ModalScreenShell onClose={onCancel}>
+        <FullPaneLoading />
+      </ModalScreenShell>
+    );
   }
   // Genuine empty list vs failed cold-load look identical without
   // the isError gate — both just have data === undefined / []. Show
@@ -161,56 +166,66 @@ export default function NewConversationScreen() {
   // failed; only fall through to "no friends yet" when we have a
   // confirmed empty array.
   if (friendsQ.isError && !friendsQ.data) {
-    return <FetchError onRetry={() => friendsQ.refetch()} onClose={onCancel} />;
+    return (
+      <ModalScreenShell onClose={onCancel}>
+        <FetchError onRetry={() => friendsQ.refetch()} onClose={onCancel} />
+      </ModalScreenShell>
+    );
   }
   if (friends.length === 0) {
-    return <NoFriends onClose={onCancel} />;
+    return (
+      <ModalScreenShell onClose={onCancel}>
+        <NoFriends onClose={onCancel} />
+      </ModalScreenShell>
+    );
   }
 
   return (
-    <View className="flex-1 bg-background">
-      <ModalHeader
-        canCreate={canCreate}
-        creating={creating}
-        onCancel={onCancel}
-        onCreate={onCreate}
-        ctaLabel={isGroup ? 'Create' : 'Start'}
-      />
+    <ModalScreenShell onClose={onCancel} testID="new-conversation-shell">
+      <View className="flex-1 bg-background">
+        <ModalHeader
+          canCreate={canCreate}
+          creating={creating}
+          onCancel={onCancel}
+          onCreate={onCreate}
+          ctaLabel={isGroup ? 'Create' : 'Start'}
+        />
 
-      {/* Selected pills strip — only when 1+ selected, gives the
-          user a visual confirmation of who's in the new conv. */}
-      {selectedFriends.length > 0 ? (
-        <SelectedStrip friends={selectedFriends} onRemove={(id) => toggleSelect(id)} />
-      ) : null}
+        {/* Selected pills strip — only when 1+ selected, gives the
+            user a visual confirmation of who's in the new conv. */}
+        {selectedFriends.length > 0 ? (
+          <SelectedStrip friends={selectedFriends} onRemove={(id) => toggleSelect(id)} />
+        ) : null}
 
-      {/* Group name field appears only at 2+ — DMs don't need a
-          name, and showing it for a 1-friend selection would be
-          cognitive noise. */}
-      {isGroup ? <GroupNameField value={groupName} onChange={setGroupName} /> : null}
+        {/* Group name field appears only at 2+ — DMs don't need a
+            name, and showing it for a 1-friend selection would be
+            cognitive noise. */}
+        {isGroup ? <GroupNameField value={groupName} onChange={setGroupName} /> : null}
 
-      {overMemberCap ? (
-        <View className="border-b border-border bg-destructive/10 px-4 py-2">
-          <Text variant="muted" className="text-center text-xs">
-            Groups can have at most {GROUP_MEMBER_MAX} other members.
-          </Text>
-        </View>
-      ) : null}
+        {overMemberCap ? (
+          <View className="border-b border-border bg-destructive/10 px-4 py-2">
+            <Text variant="muted" className="text-center text-xs">
+              Groups can have at most {GROUP_MEMBER_MAX} other members.
+            </Text>
+          </View>
+        ) : null}
 
-      <SearchField value={query} onChange={setQuery} />
+        <SearchField value={query} onChange={setQuery} />
 
-      <List
-        data={filtered}
-        keyExtractor={(f, i) => f.user?.id ?? f.id ?? `idx-${i}`}
-        renderItem={({ item }) => (
-          <FriendCheckRow
-            friendship={item}
-            selected={!!item.user?.id && selectedIds.has(item.user.id)}
-            disabled={creating}
-            onToggle={() => item.user?.id && toggleSelect(item.user.id)}
-          />
-        )}
-      />
-    </View>
+        <List
+          data={filtered}
+          keyExtractor={(f, i) => f.user?.id ?? f.id ?? `idx-${i}`}
+          renderItem={({ item }) => (
+            <FriendCheckRow
+              friendship={item}
+              selected={!!item.user?.id && selectedIds.has(item.user.id)}
+              disabled={creating}
+              onToggle={() => item.user?.id && toggleSelect(item.user.id)}
+            />
+          )}
+        />
+      </View>
+    </ModalScreenShell>
   );
 }
 

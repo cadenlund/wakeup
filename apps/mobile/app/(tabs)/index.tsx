@@ -18,7 +18,7 @@
 // new-conversation flow lives at /conversations/new (Phase 5.2).
 import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
-import { Pressable, RefreshControl, View } from 'react-native';
+import { Platform, Pressable, RefreshControl, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
@@ -26,6 +26,7 @@ import { ConversationRow } from '@/components/conversation-row';
 import { MuteSheet } from '@/components/mute-sheet';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import { Text } from '@/components/ui/text';
 import {
   conversationDisplay,
   filterConversations,
@@ -116,6 +117,7 @@ export default function ChatsScreen() {
 
   return (
     <View className="flex-1 bg-background">
+      {Platform.OS === 'web' ? <ChatsWebHeader onCompose={goCompose} /> : null}
       <ChatsSearchBar value={query} onChange={setQuery} />
       {isInitialLoad ? (
         <ChatsLoading />
@@ -156,7 +158,11 @@ export default function ChatsScreen() {
         />
       )}
 
-      <ComposeFab onPress={goCompose} />
+      {/* The floating compose FAB is the right thumb-zone affordance
+          on touch but on a desktop browser it's a stranded floating
+          button. Web gets the top-bar "New chat" button instead
+          (rendered above) — this stays native-only. */}
+      {Platform.OS !== 'web' ? <ComposeFab onPress={goCompose} /> : null}
 
       <ConversationActionMenu
         visible={activeAction?.screen === 'menu'}
@@ -193,6 +199,31 @@ export default function ChatsScreen() {
         onClose={closeMenu}
         testID="mute-sheet"
       />
+    </View>
+  );
+}
+
+// Web-only header bar above the filter input. Holds the page
+// title on the left and a primary "New chat" button on the right
+// — replaces the floating compose FAB which feels marooned on a
+// desktop browser. The button text is "New chat" rather than
+// just "+" so the affordance reads at a glance on a wide screen.
+function ChatsWebHeader({ onCompose }: { onCompose: () => void }) {
+  const fg = useThemeColor('primary-foreground');
+  return (
+    <View className="flex-row items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <Text className="text-lg font-semibold">Chats</Text>
+      <Pressable
+        onPress={onCompose}
+        accessibilityRole="button"
+        accessibilityLabel="New conversation"
+        testID="conversation-compose-web"
+        className="flex-row items-center gap-2 rounded-full bg-primary px-4 py-2 active:opacity-80">
+        <Plus size={16} color={fg} />
+        <Text style={{ color: fg }} className="text-sm font-semibold">
+          New chat
+        </Text>
+      </Pressable>
     </View>
   );
 }

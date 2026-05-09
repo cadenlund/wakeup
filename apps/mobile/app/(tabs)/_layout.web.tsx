@@ -26,6 +26,7 @@ import {
   LogOut,
   MessageCircle,
   Moon,
+  Search,
   User,
   Users,
   type LucideIcon,
@@ -194,6 +195,27 @@ export default function TabsWebLayout() {
               <ChevronLeft size={16} color={mutedFg} />
             )}
           </Pressable>
+        </View>
+
+        {/* Sidebar search trigger — sits between brand row and the
+            nav stack so it reads as the "global, anywhere" entry
+            point rather than another nav destination. Tapping
+            navigates to the /search route, which on web is styled
+            as a centered modal card (search.tsx renders inside a
+            backdrop on web). On native this layout is never
+            rendered — the global search lives in the header-left
+            icon on the bottom-tab navigator. */}
+        <View className="border-b border-border py-3">
+          <SidebarActionRow
+            icon={Search}
+            label="Search"
+            onPress={() => router.push('/search')}
+            color={mutedFg}
+            labelStyle={labelStyle}
+            labelInteractive={!collapsed}
+            testID="sidebar-search"
+            accessibilityLabel="Search people, chats, messages"
+          />
         </View>
 
         <View className="py-3">

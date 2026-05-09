@@ -30,6 +30,7 @@ import { FriendRow } from '@/components/friend-row';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import { ModalScreenShell } from '@/components/ui/modal-screen-shell';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
@@ -160,35 +161,37 @@ export default function SearchModalScreen() {
   const rows = React.useMemo<Row[]>(() => buildRows(data), [data]);
 
   return (
-    <View className="flex-1 bg-background">
-      <ModalHeader value={rawQuery} onChange={setRawQuery} onCancel={goCancel} />
+    <ModalScreenShell onClose={goCancel} testID="search-modal-shell">
+      <View className="flex-1 bg-background">
+        <ModalHeader value={rawQuery} onChange={setRawQuery} onCancel={goCancel} />
 
-      {!enabled ? (
-        <SearchHint />
-      ) : searchQ.isFetching && rows.length === 0 ? (
-        <SearchLoading />
-      ) : searchQ.isError && rows.length === 0 ? (
-        <SearchError onRetry={() => searchQ.refetch()} />
-      ) : rows.length === 0 ? (
-        <SearchNoResults />
-      ) : (
-        <List
-          data={rows}
-          keyExtractor={(item) => item.key}
-          renderItem={({ item }) => (
-            <RenderedRow
-              row={item}
-              onTapUser={onTapUser}
-              openingForUserId={openingFor}
-              fullConversationById={fullConversationById}
-              myUserId={me?.id}
-              presenceByUser={presenceByUser}
-              onOpenConversation={dismissThenGoToConversation}
-            />
-          )}
-        />
-      )}
-    </View>
+        {!enabled ? (
+          <SearchHint />
+        ) : searchQ.isFetching && rows.length === 0 ? (
+          <SearchLoading />
+        ) : searchQ.isError && rows.length === 0 ? (
+          <SearchError onRetry={() => searchQ.refetch()} />
+        ) : rows.length === 0 ? (
+          <SearchNoResults />
+        ) : (
+          <List
+            data={rows}
+            keyExtractor={(item) => item.key}
+            renderItem={({ item }) => (
+              <RenderedRow
+                row={item}
+                onTapUser={onTapUser}
+                openingForUserId={openingFor}
+                fullConversationById={fullConversationById}
+                myUserId={me?.id}
+                presenceByUser={presenceByUser}
+                onOpenConversation={dismissThenGoToConversation}
+              />
+            )}
+          />
+        )}
+      </View>
+    </ModalScreenShell>
   );
 }
 
