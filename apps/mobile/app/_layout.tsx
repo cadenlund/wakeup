@@ -86,16 +86,26 @@ function ProtectedStack() {
         guard={auth.isLoading || (auth.isAuthenticated && auth.onboardingDone && !hasToken)}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+        {/* `transparentModal` keeps the parent route mounted behind
+            the pushed screen — required on web, where the modal
+            content paints its own backdrop and we want to see the
+            chats list dimmed underneath instead of a blank viewport.
+            On native it behaves like a regular modal (the platform
+            shows the parent through the system-rendered dimmer
+            either way). */}
         <Stack.Screen
           name="conversations/new"
-          options={{ presentation: 'modal', headerShown: false }}
+          options={{ presentation: 'transparentModal', headerShown: false }}
         />
         {/* `headerShown: false` lives here, not inside search.tsx —
             toggling it from inside the screen body triggers an
             infinite-remount loop on iOS modals (the screen re-mounts
             on each header-options diff, and the screen always sets
             the same option, so it never settles). */}
-        <Stack.Screen name="search" options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen
+          name="search"
+          options={{ presentation: 'transparentModal', headerShown: false }}
+        />
       </Stack.Protected>
     </Stack>
   );

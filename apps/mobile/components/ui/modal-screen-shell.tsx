@@ -38,13 +38,26 @@ export function ModalScreenShell({ onClose, maxHeightVh = 80, testID, children }
 
   if (!isWeb) return <>{children}</>;
 
-  // Web: backdrop + centered card. The inner card needs to clip
-  // overflow so the screen's internal FlashList scrolls in-card.
+  // Web: backdrop + centered card. Pinned to the viewport via
+  // `position: fixed` so it overlays whatever route is rendered
+  // underneath rather than being a stacking child of the routed
+  // pane (which would push the previous page out of the viewport
+  // and leave just the bare bg-background visible behind the
+  // backdrop). The inner card clips overflow so internal lists
+  // scroll inside the card.
   return (
     <Pressable
       accessibilityLabel="Dismiss"
       onPress={onClose}
-      className="flex-1 items-center justify-center bg-black/40 p-4">
+      style={{
+        position: 'fixed' as unknown as 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 50,
+      }}
+      className="items-center justify-center bg-black/50 p-4">
       <Pressable
         onPress={() => {}}
         testID={testID}
