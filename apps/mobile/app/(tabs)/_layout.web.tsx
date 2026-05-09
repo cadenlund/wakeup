@@ -145,6 +145,24 @@ export default function TabsWebLayout() {
   // logout UX lands in Phase 11.6; this is the temporary surface.
   const qc = useQueryClient();
   const router = useRouter();
+
+  // ⌘K / Ctrl+K opens global search from anywhere in the app on
+  // web. Convention from Slack / Linear / Notion / GitHub. Bound
+  // at the layout level so it works regardless of which tab the
+  // user is on; the search route is itself idempotent (pushing
+  // it twice from inside the modal is a no-op since /search is
+  // already at the top of the stack).
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        router.push('/search');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [router]);
   const logout = usePostV1AuthLogout({
     mutation: {
       onSuccess: () => signedOut(qc, router),
@@ -318,6 +336,10 @@ function SidebarSearchTrigger({
       </Pressable>
     );
   }
+  // Show ⌘K on macOS, Ctrl K elsewhere. navigator.platform is
+  // deprecated but still present everywhere; userAgentData is
+  // safer when available.
+  const isMac = detectMac();
   return (
     <Pressable
       onPress={onPress}
@@ -326,13 +348,30 @@ function SidebarSearchTrigger({
       testID="sidebar-search"
       className="h-9 flex-row items-center gap-2 rounded-md border border-input bg-background px-3 active:bg-muted">
       <Search size={16} color={mutedFg} />
-      <Animated.View style={labelStyle} pointerEvents={labelInteractive ? 'auto' : 'none'}>
+      <Animated.View
+        style={labelStyle}
+        className="flex-1 flex-row items-center justify-between"
+        pointerEvents={labelInteractive ? 'auto' : 'none'}>
         <Text numberOfLines={1} style={{ color: mutedFg }} className="text-sm">
           Search
         </Text>
+        <View className="rounded border border-border bg-muted/50 px-1.5 py-0.5">
+          <Text style={{ color: mutedFg }} className="text-[10px] font-medium tracking-wide">
+            {isMac ? '⌘K' : 'Ctrl K'}
+          </Text>
+        </View>
       </Animated.View>
     </Pressable>
   );
+}
+
+function detectMac(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  // navigator.userAgentData is the modern shape; fall back to
+  // userAgent / platform on browsers that don't ship UA-CH yet.
+  const uaData = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData;
+  if (uaData?.platform) return /mac/i.test(uaData.platform);
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
 }
 
 function SidebarRow({
