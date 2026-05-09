@@ -43,6 +43,10 @@ import { toast } from '@/lib/toast';
 type Friendship = InternalHandlerHttpFriendshipResponse;
 
 const GROUP_NAME_MAX = 80;
+// Backend's CreateConversationRequest schema caps member_ids at 24
+// (you + 24 = 25 members per group). Mirror it client-side so we
+// don't kick off a doomed POST.
+const GROUP_MEMBER_MAX = 24;
 
 export default function NewConversationScreen() {
   const router = useRouter();
@@ -67,13 +71,27 @@ export default function NewConversationScreen() {
     [friends, selectedIds]
   );
   const isGroup = selectedIds.size >= 2;
-  const canCreate = !creating && selectedIds.size >= 1 && (!isGroup || groupName.trim().length > 0);
+  const overMemberCap = selectedIds.size > GROUP_MEMBER_MAX;
+  const canCreate =
+    !creating &&
+    selectedIds.size >= 1 &&
+    !overMemberCap &&
+    (!isGroup || groupName.trim().length > 0);
 
   const toggleSelect = React.useCallback((userId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(userId)) next.delete(userId);
-      else next.add(userId);
+      if (next.has(userId)) {
+        next.delete(userId);
+        return next;
+      }
+      // At-cap protection: don't add a 25th friend. The user is
+      // already deselectable above, so this never strands them.
+      if (next.size >= GROUP_MEMBER_MAX) {
+        toast.info(`Group max is ${GROUP_MEMBER_MAX} friends`);
+        return prev;
+      }
+      next.add(userId);
       return next;
     });
   }, []);
@@ -148,6 +166,14 @@ export default function NewConversationScreen() {
           name, and showing it for a 1-friend selection would be
           cognitive noise. */}
       {isGroup ? <GroupNameField value={groupName} onChange={setGroupName} /> : null}
+
+      {overMemberCap ? (
+        <View className="border-b border-border bg-destructive/10 px-4 py-2">
+          <Text variant="muted" className="text-center text-xs">
+            Groups can have at most {GROUP_MEMBER_MAX} other members.
+          </Text>
+        </View>
+      ) : null}
 
       <SearchField value={query} onChange={setQuery} />
 
@@ -329,6 +355,10 @@ function FriendCheckRow({
 }) {
   const u = friendship.user;
   const handle = u?.display_name?.trim() || u?.username?.trim() || 'Friend';
+  // Theme-aware tick colour — primary-foreground is paired with the
+  // primary background by the palette, so the contrast stays right
+  // across every scheme/mode.
+  const checkColor = useThemeColor('primary-foreground');
   return (
     <Pressable
       onPress={onToggle}
@@ -353,7 +383,7 @@ function FriendCheckRow({
         className={`h-6 w-6 items-center justify-center rounded-full border ${
           selected ? 'border-primary bg-primary' : 'border-border'
         }`}>
-        {selected ? <Check size={14} color="#fff" /> : null}
+        {selected ? <Check size={14} color={checkColor} /> : null}
       </View>
     </Pressable>
   );
