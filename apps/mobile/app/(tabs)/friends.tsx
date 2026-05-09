@@ -66,6 +66,7 @@ import type {
   InternalHandlerHttpSearchResponse,
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
+import { useThemeStore } from '@/lib/theme/store';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { toast } from '@/lib/toast';
 
@@ -457,7 +458,7 @@ export default function FriendsScreen() {
 function SearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const mutedFg = useThemeColor('muted-foreground');
   return (
-    <View className="border-b border-border px-4 pb-3 pt-3">
+    <View className="border-b border-border bg-background px-4 pb-3 pt-3">
       <View className="relative">
         <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
           <Search size={16} color={mutedFg} />
@@ -494,13 +495,22 @@ function useThemedRefreshControl(
   refreshing: boolean,
   onRefresh: () => void
 ): React.ReactElement<React.ComponentProps<typeof RefreshControl>> {
-  // The default RefreshControl uses iOS system grey for the spinner —
-  // illegible against `bg-card` on dark mode. Both `tintColor` (iOS)
-  // and `colors` (Android) get the foreground token so it sits at
-  // ~80% contrast in both themes.
-  const fg = useThemeColor('foreground');
+  // RN's RefreshControl bridges to UIRefreshControl on iOS, which
+  // doesn't parse the modern space-separated `hsl(H S% L%)` strings
+  // the theme hook returns — the prop silently falls back to the
+  // platform default grey. Hardcode pure white/black off the
+  // resolved mode instead. Both colours are unambiguous in their
+  // respective theme and don't depend on any palette token making
+  // it through Cocoa's colour parser.
+  const mode = useThemeStore((s) => s.mode);
+  const tint = mode === 'dark' ? '#FFFFFF' : '#111111';
   return (
-    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={fg} colors={[fg]} />
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      tintColor={tint}
+      colors={[tint]}
+    />
   );
 }
 
