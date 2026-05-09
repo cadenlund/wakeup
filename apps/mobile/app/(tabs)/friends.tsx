@@ -67,6 +67,12 @@ export default function FriendsScreen() {
 
     const out: Row[] = [];
 
+    // Keys must be stable across renders — Math.random() would
+    // generate a new value every render and force FlashList to
+    // remount each row, breaking recycling. Backend always populates
+    // `id` so the fallback only fires for malformed payloads, but
+    // when it does we use the row's array index so the key is at
+    // least stable within one render.
     if (incoming.length > 0) {
       out.push({
         kind: 'header',
@@ -74,14 +80,14 @@ export default function FriendsScreen() {
         title: 'Incoming requests',
         count: incoming.length,
       });
-      for (const f of incoming) {
+      incoming.forEach((f, i) => {
         out.push({
           kind: 'request',
-          key: `req:in:${f.id ?? f.user?.id ?? Math.random()}`,
+          key: `req:in:${f.id ?? f.user?.id ?? `idx-${i}`}`,
           friendship: f,
           direction: 'incoming',
         });
-      }
+      });
     }
 
     if (outgoing.length > 0) {
@@ -91,14 +97,14 @@ export default function FriendsScreen() {
         title: 'Sent requests',
         count: outgoing.length,
       });
-      for (const f of outgoing) {
+      outgoing.forEach((f, i) => {
         out.push({
           kind: 'request',
-          key: `req:out:${f.id ?? f.user?.id ?? Math.random()}`,
+          key: `req:out:${f.id ?? f.user?.id ?? `idx-${i}`}`,
           friendship: f,
           direction: 'outgoing',
         });
-      }
+      });
     }
 
     out.push({
@@ -115,14 +121,14 @@ export default function FriendsScreen() {
           'Find someone in 4.3 — for now, accepted friends will land here once a request is approved.',
       });
     } else {
-      for (const f of friends) {
+      friends.forEach((f, i) => {
         out.push({
           kind: 'friend',
-          key: `friend:${f.id ?? f.user?.id ?? Math.random()}`,
+          key: `friend:${f.id ?? f.user?.id ?? `idx-${i}`}`,
           friendship: f,
           presence: f.user?.id ? presenceByUser.get(f.user.id) : undefined,
         });
-      }
+      });
     }
 
     return out;
