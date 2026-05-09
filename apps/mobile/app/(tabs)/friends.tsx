@@ -530,6 +530,7 @@ export default function FriendsScreen() {
           onDecline={onDeclineRequest}
           onOpenMenu={setMenuTarget}
           onOpenDM={onOpenDMWithFriend}
+          menuOpen={!!menuTarget}
           onToggleSection={toggleSection}
           refreshing={refreshing}
           onRefresh={onRefresh}
@@ -603,6 +604,7 @@ function SectionsPane({
   onDecline,
   onOpenMenu,
   onOpenDM,
+  menuOpen,
   onToggleSection,
   refreshing,
   onRefresh,
@@ -614,6 +616,10 @@ function SectionsPane({
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
   onOpenDM: (friendUserId: string) => void;
+  // True while the bottom-sheet action menu is open. Threaded
+  // through to RenderedRow so a Pressable's onPress can't race the
+  // long-press → menu transition (CR #134).
+  menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
   refreshing: boolean;
   onRefresh: () => void;
@@ -675,6 +681,7 @@ function SectionsPane({
           onDecline={onDecline}
           onOpenMenu={onOpenMenu}
           onOpenDM={onOpenDM}
+          menuOpen={menuOpen}
           onToggleSection={onToggleSection}
         />
       )}
@@ -824,6 +831,7 @@ function RenderedRow({
   onDecline,
   onOpenMenu,
   onOpenDM,
+  menuOpen,
   onToggleSection,
 }: {
   row: Row;
@@ -832,6 +840,7 @@ function RenderedRow({
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
   onOpenDM: (friendUserId: string) => void;
+  menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
 }) {
   switch (row.kind) {
@@ -857,7 +866,7 @@ function RenderedRow({
           avatarUrl={u?.avatar_url}
           statusEmoji={u?.status_emoji}
           presence={row.presence}
-          onPress={userId && !inFlight ? () => onOpenDM(userId) : undefined}
+          onPress={userId && !inFlight && !menuOpen ? () => onOpenDM(userId) : undefined}
           onLongPress={u ? () => onOpenMenu(u) : undefined}
           trailing={
             u ? <RowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} /> : undefined
