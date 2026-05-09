@@ -62,5 +62,66 @@ function Avatar({ source, fallbackName, size = 40, className, testID }: AvatarPr
   );
 }
 
-export { Avatar };
-export type { AvatarProps };
+// Group-avatar fallback: two member avatars overlapping diagonally
+// (top-right + bottom-left) inside a square the same outer size as a
+// single avatar. The white ring around each inner avatar pops them
+// off whatever surface they're rendered on (matches PresenceDot's
+// ring trick). For groups with more than two members we don't try to
+// fan out a third — the row's subtitle already announces the count
+// ("3 members"), the avatar just needs to read as "this is a group".
+//
+// Used when conversation.avatar_url is missing on a group row; when
+// avatar_url is set, callers render the regular <Avatar> instead.
+type StackedMember = {
+  avatarUrl?: string | null;
+  fallbackName?: string | null;
+};
+
+type StackedAvatarsProps = {
+  members: StackedMember[];
+  size?: number;
+  className?: string;
+  testID?: string;
+};
+
+function StackedAvatars({ members, size = 48, className, testID }: StackedAvatarsProps) {
+  // The two highlighted members. We render at most two — the
+  // count-in-subtitle handles communicating "more".
+  const a = members[0];
+  const b = members[1];
+
+  // Inner avatar size = ~58% of outer, ring inset 2px on each side.
+  const inner = Math.round(size * 0.62);
+  const offset = size - inner;
+
+  return (
+    <View
+      testID={testID}
+      style={{ width: size, height: size }}
+      className={cn('relative', className)}>
+      {/* Bottom-left avatar — drawn first so the top-right one
+          overlaps it on the diagonal. */}
+      {a ? (
+        <View
+          style={{ position: 'absolute', left: 0, top: offset }}
+          className="rounded-full bg-card p-[2px]">
+          <Avatar source={a.avatarUrl} fallbackName={a.fallbackName} size={inner} />
+        </View>
+      ) : null}
+      {b ? (
+        <View
+          style={{ position: 'absolute', left: offset, top: 0 }}
+          className="rounded-full bg-card p-[2px]">
+          <Avatar source={b.avatarUrl} fallbackName={b.fallbackName} size={inner} />
+        </View>
+      ) : // Group of one (rare but possible during creation flicker) —
+      // fall back to a single avatar so the cell isn't half-empty.
+      a ? null : (
+        <Avatar source={null} fallbackName="G" size={size} />
+      )}
+    </View>
+  );
+}
+
+export { Avatar, StackedAvatars };
+export type { AvatarProps, StackedAvatarsProps, StackedMember };

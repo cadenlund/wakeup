@@ -11,6 +11,7 @@ import { View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { Text } from '@/components/ui/text';
+import { ThemedBackButton } from '@/components/ui/themed-back-button';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import {
   getGetV1ConversationsQueryKey,
@@ -46,17 +47,46 @@ export default function ConversationThreadScreen() {
 
   const title = computeTitle(conversation, me?.id);
   const mutedFg = useThemeColor('muted-foreground');
+  const fg = useThemeColor('foreground');
+  const card = useThemeColor('card');
+  const border = useThemeColor('border');
 
   return (
     <>
-      <Stack.Screen options={{ title, headerBackTitle: 'Chats' }} />
+      <Stack.Screen
+        options={{
+          title,
+          // Native back chevron looks foreign next to the rest of
+          // the app's muted-text affordances; replace it with the
+          // shared <ThemedBackButton>. headerBackVisible:false
+          // suppresses the native one underneath.
+          headerLeft: () => <ThemedBackButton label="Chats" testID="conversation-thread-back" />,
+          headerBackVisible: false,
+          headerStyle: { backgroundColor: card },
+          headerTintColor: fg,
+          headerShadowVisible: false,
+          // 1px hairline so the themed border still reads on dark
+          // mode where headerShadowVisible already hides the native
+          // line.
+          headerBackground: () => (
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: card,
+                borderBottomWidth: 1,
+                borderBottomColor: border,
+              }}
+            />
+          ),
+        }}
+      />
       <View className="flex-1 items-center justify-center gap-3 bg-background px-6">
         <MessageCircle size={48} color={mutedFg} />
         <Text variant="h3" className="text-center">
           {title}
         </Text>
         <Text variant="muted" className="text-center">
-          The message thread lands in Phase 5.2.
+          The message thread lands in Phase 6.
         </Text>
       </View>
     </>

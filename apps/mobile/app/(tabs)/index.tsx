@@ -128,6 +128,7 @@ function RenderedConversationRow({
       subtitle={display.subtitle}
       avatarUrl={display.avatarUrl}
       fallbackInitial={display.fallbackInitial}
+      stackedMembers={display.stackedMembers}
       lastMessageAt={conversation.last_message_at}
       isMuted={isMuted}
       isPinned={isPinned}
@@ -139,10 +140,17 @@ function RenderedConversationRow({
   );
 }
 
-function conversationDisplay(
-  c: Conversation,
-  myUserId: string | undefined
-): { title: string; subtitle?: string; avatarUrl?: string | null; fallbackInitial?: string } {
+type ConversationDisplay = {
+  title: string;
+  subtitle?: string;
+  avatarUrl?: string | null;
+  fallbackInitial?: string;
+  // Two member avatars to render in a stacked cluster when the
+  // group has no avatar_url. Empty / undefined for direct convos.
+  stackedMembers?: { avatarUrl?: string | null; fallbackName?: string | null }[];
+};
+
+function conversationDisplay(c: Conversation, myUserId: string | undefined): ConversationDisplay {
   if (c.type === 'direct') {
     // For a 1:1 conversation, we want the *other* member. Server may
     // include the caller as a member; filter them out so a self-DM
@@ -157,26 +165,51 @@ function conversationDisplay(
     };
   }
   // group
+  const others = (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId);
+  const memberCount = (c.members ?? []).length;
+  const stackedMembers = others.slice(0, 2).map((m) => ({
+    avatarUrl: m.user?.avatar_url,
+    fallbackName: m.user?.display_name ?? m.user?.username ?? null,
+  }));
+
   const named = c.name?.trim();
   if (named) {
+    // Named group → subtitle is "N members" so the avatar / name +
+    // count read as a complete identity even before any messages.
+    const subtitle = memberCount > 0 ? membersLabel(memberCount) : undefined;
     return {
       title: named,
+      subtitle,
       avatarUrl: c.avatar_url,
       fallbackInitial: named,
+      stackedMembers,
     };
   }
   // Unnamed group — fall back to a comma-joined preview of up to
   // three member names so the row isn't empty.
-  const preview = (c.members ?? [])
+  const previewNames = others
     .map((m) => m.user?.display_name?.trim() || m.user?.username?.trim())
-    .filter((s): s is string => !!s)
-    .filter((_s, i) => i < 3)
-    .join(', ');
+    .filter((s): s is string => !!s);
+  const previewShown = previewNames.slice(0, 3).join(', ');
+  const remaining = previewNames.length - 3;
+  // "Caden, Test, Alice +2" when there's overflow; bare list when
+  // it all fits.
+  const subtitle = previewShown
+    ? remaining > 0
+      ? `${previewShown} +${remaining}`
+      : previewShown
+    : undefined;
   return {
-    title: preview || 'Group',
+    title: previewShown || 'Group',
+    subtitle,
     avatarUrl: c.avatar_url,
-    fallbackInitial: preview || 'G',
+    fallbackInitial: previewShown || 'G',
+    stackedMembers,
   };
+}
+
+function membersLabel(n: number): string {
+  return n === 1 ? '1 member' : `${n} members`;
 }
 
 function isCurrentlyMuted(mutedUntil: string | null | undefined): boolean {
