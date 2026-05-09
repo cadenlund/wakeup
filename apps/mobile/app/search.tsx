@@ -374,7 +374,7 @@ function ModalHeader({
   // safe-area inset needed. A bit more horizontal padding lets the
   // search input breathe inside the rounded modal corners.
   return (
-    <View className="flex-row items-center gap-3 border-b border-border bg-card px-4 py-3">
+    <View className="flex-row items-center gap-3 border-b border-border bg-card px-5 py-3">
       <View className="relative flex-1">
         <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
           <Search size={16} color={mutedFg} />
