@@ -350,19 +350,19 @@ function SidebarSearchTrigger({
       testID="sidebar-search"
       className="h-9 flex-row items-center gap-2 rounded-md border border-input bg-background pl-3 pr-1 active:bg-muted">
       <Search size={16} color={mutedFg} />
+      {/* `flex: 1` lives in the inline style so the wrapper claims
+          the remaining row width even when reanimated's style
+          merging happens to drop NativeWind className-derived flex
+          on web. Without this the chip sometimes hugged the
+          placeholder text instead of pinning to the trailing edge. */}
       <Animated.View
-        style={labelStyle}
-        className="flex-1"
+        style={[labelStyle, { flex: 1 }]}
         pointerEvents={labelInteractive ? 'auto' : 'none'}>
         <Text numberOfLines={1} style={{ color: mutedFg }} className="text-sm">
           Search
         </Text>
       </Animated.View>
-      {/* Shortcut chip pinned to the trailing edge of the pill. Lives
-          outside the label's animated wrapper so it stays anchored
-          to the input's right side regardless of placeholder width;
-          the collapsed state renders a different element entirely so
-          the chip never shows when there's no room for it. */}
+      {/* Shortcut chip pinned to the trailing edge of the pill. */}
       <Animated.View style={labelStyle} pointerEvents="none">
         <View className="rounded border border-border bg-muted/50 px-1.5 py-0.5">
           <Text style={{ color: mutedFg }} className="text-[10px] font-medium tracking-wide">

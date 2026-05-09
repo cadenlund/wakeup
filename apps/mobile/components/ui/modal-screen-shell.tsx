@@ -27,13 +27,21 @@ type Props = {
 export function ModalScreenShell({ onClose, maxHeightVh = 80, testID, children }: Props) {
   // Wire the keyboard escape so desktop users can dismiss without
   // reaching for the cancel button. Native is a no-op (no DOM).
+  // Listener runs in the capture phase so an autofocused
+  // <TextInput> inside the modal can't swallow the Escape key
+  // before us — react-native-web's TextInput calls
+  // preventDefault on some Escape paths, and a bubble-phase
+  // listener never sees the event when that happens.
   React.useEffect(() => {
     if (!isWeb) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [onClose]);
 
   if (!isWeb) return <>{children}</>;
