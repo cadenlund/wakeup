@@ -25,6 +25,7 @@ import {
   ChevronRight,
   LogOut,
   MessageCircle,
+  Moon,
   User,
   Users,
   type LucideIcon,
@@ -159,19 +160,30 @@ export default function TabsWebLayout() {
       <Animated.View
         style={sidebarStyle}
         className="overflow-hidden border-r border-border bg-card">
-        {/* TOP — toggle alone in its own row so it can never be
-            displaced by a brand mark when the column narrows. The
-            row is right-aligned with a fixed inner padding; in the
-            collapsed state that puts the toggle a hair right of
-            center, which reads as intentional rather than off. */}
-        <View className="h-12 flex-row items-center justify-end border-b border-border px-3">
+        {/* TOP — brand mark on the left (Moon + Wakeup wordmark)
+            fades with the labels; toggle is pinned right with a
+            chip-style button. Brand has flex-1 + overflow-hidden so
+            when the sidebar narrows, its content is clipped (and
+            invisible at opacity 0) without ever displacing the
+            toggle. Toggle is shrink-0 so it always renders at full
+            size, naturally near-centered when the column is narrow. */}
+        <View className="h-12 flex-row items-center border-b border-border px-3">
+          <Animated.View
+            style={labelStyle}
+            className="mr-2 flex-1 flex-row items-center gap-2 overflow-hidden"
+            pointerEvents="none">
+            <Moon size={20} color={primary} />
+            <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
+              Wakeup
+            </Text>
+          </Animated.View>
           <Pressable
             onPress={toggle}
             accessibilityRole="button"
             accessibilityLabel={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             testID="sidebar-toggle"
             hitSlop={6}
-            className="h-8 w-8 shrink-0 items-center justify-center rounded-md active:bg-muted">
+            className="h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 active:bg-muted">
             {collapsed ? (
               <ChevronRight size={16} color={mutedFg} />
             ) : (
