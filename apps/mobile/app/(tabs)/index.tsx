@@ -24,7 +24,6 @@ import { useRouter } from 'expo-router';
 import { ConversationRow } from '@/components/conversation-row';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
-import { Text } from '@/components/ui/text';
 import {
   conversationDisplay,
   filterConversations,
@@ -165,12 +164,17 @@ function ChatsSearchBar({ value, onChange }: { value: string; onChange: (v: stri
 }
 
 function NoFilterMatches() {
+  // Use the shared EmptyState primitive so this state reads with
+  // the same shape every other "no results" surface in the app
+  // (friends-tab no-matches, search modal no-matches, etc.). §4.9
+  // forbids ad-hoc Text+View pairs for empty states.
+  const mutedFg = useThemeColor('muted-foreground');
   return (
-    <View className="px-6 py-12">
-      <Text variant="muted" className="text-center text-sm">
-        No conversations match that filter.
-      </Text>
-    </View>
+    <EmptyState
+      icon={<Search size={40} color={mutedFg} />}
+      title="No matches"
+      subtitle="Try a different name or member."
+    />
   );
 }
 
