@@ -93,18 +93,57 @@ type StackedAvatarsProps = {
   testID?: string;
 };
 
+// Each inner avatar carries a 2px ring (rendered as padding around
+// the Avatar inside <StackedSlot>); the wrapper's outer size is
+// therefore inner + RING_PAD * 2. We need the wrapper size — not the
+// raw inner size — to figure out the diagonal offset that keeps the
+// cluster inside the outer square.
+const RING_PAD = 2;
+
 function StackedAvatars({ members, size = 48, className, testID }: StackedAvatarsProps) {
-  // The two highlighted members. We render at most two — the
-  // count-in-subtitle handles communicating "more".
+  // 0 → "G" placeholder so the row never goes blank during a flicker.
+  // 1 → render the lone member at full outer size with a presence
+  //     dot, identical to a direct-DM render. The earlier version
+  //     dropped them in the bottom-left and left the rest of the
+  //     square empty.
+  // 2+ → the two-circle diagonal stack we actually came here for.
+  if (members.length === 0) {
+    return (
+      <View
+        testID={testID}
+        style={{ width: size, height: size }}
+        className={cn('items-center justify-center', className)}>
+        <Avatar source={null} fallbackName="G" size={size} />
+      </View>
+    );
+  }
+  if (members.length === 1) {
+    const only = members[0];
+    const dotSize = Math.max(8, Math.round(size * 0.22));
+    return (
+      <View
+        testID={testID}
+        style={{ width: size, height: size }}
+        className={cn('relative', className)}>
+        <Avatar source={only.avatarUrl} fallbackName={only.fallbackName} size={size} />
+        {only.presence ? (
+          <View className="absolute -bottom-0.5 -right-0.5">
+            <PresenceDot status={only.presence} size={dotSize} />
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
+  // Two-member diagonal layout. Wrapper size accounts for the ring
+  // padding so the cluster fits flush within `size`.
+  const inner = Math.round(size * 0.62);
+  const wrapper = inner + RING_PAD * 2;
+  const offset = size - wrapper;
+  const dotSize = Math.max(8, Math.round(inner * 0.22));
+
   const a = members[0];
   const b = members[1];
-
-  // Inner avatar size = ~62% of outer, ring inset 2px on each side.
-  const inner = Math.round(size * 0.62);
-  const offset = size - inner;
-  // Dot size scales with the inner avatar (~22% with a floor of 8px
-  // so it still reads at very small sizes).
-  const dotSize = Math.max(8, Math.round(inner * 0.22));
 
   return (
     <View
@@ -113,32 +152,24 @@ function StackedAvatars({ members, size = 48, className, testID }: StackedAvatar
       className={cn('relative', className)}>
       {/* Bottom-left avatar — drawn first so the top-right one
           overlaps it on the diagonal. */}
-      {a ? (
-        <StackedSlot
-          left={0}
-          top={offset}
-          inner={inner}
-          dotSize={dotSize}
-          source={a.avatarUrl}
-          fallbackName={a.fallbackName}
-          presence={a.presence}
-        />
-      ) : null}
-      {b ? (
-        <StackedSlot
-          left={offset}
-          top={0}
-          inner={inner}
-          dotSize={dotSize}
-          source={b.avatarUrl}
-          fallbackName={b.fallbackName}
-          presence={b.presence}
-        />
-      ) : // Group of one (rare but possible during creation flicker) —
-      // fall back to a single avatar so the cell isn't half-empty.
-      a ? null : (
-        <Avatar source={null} fallbackName="G" size={size} />
-      )}
+      <StackedSlot
+        left={0}
+        top={offset}
+        inner={inner}
+        dotSize={dotSize}
+        source={a.avatarUrl}
+        fallbackName={a.fallbackName}
+        presence={a.presence}
+      />
+      <StackedSlot
+        left={offset}
+        top={0}
+        inner={inner}
+        dotSize={dotSize}
+        source={b.avatarUrl}
+        fallbackName={b.fallbackName}
+        presence={b.presence}
+      />
     </View>
   );
 }
