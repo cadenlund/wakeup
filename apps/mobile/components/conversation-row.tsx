@@ -124,7 +124,6 @@ function ConversationRow({
           <Text numberOfLines={1} className="flex-shrink text-base font-medium">
             {title}
           </Text>
-          {isMuted ? <BellOff size={12} color={mutedFg} /> : null}
         </View>
         {subtitle ? (
           <Text numberOfLines={1} variant="muted" className="text-sm">
