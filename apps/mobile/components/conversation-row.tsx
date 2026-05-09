@@ -20,6 +20,7 @@ import { BellOff, Pin } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, View } from 'react-native';
 
+import { PresenceDot } from '@/components/presence-dot';
 import { Avatar, StackedAvatars, type StackedMember } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import { formatRelative } from '@/lib/relative-time';
@@ -35,6 +36,10 @@ type ConversationRowProps = {
   // at least one entry, the row renders <StackedAvatars> instead of
   // the single-initial fallback chip.
   stackedMembers?: StackedMember[];
+  // Presence to overlay on the (single) avatar — direct DMs use the
+  // other member's status. Group rows pass presence down per
+  // stackedMember instead and leave this undefined.
+  presence?: string | null;
   lastMessageAt?: string | null;
   isMuted?: boolean;
   isPinned?: boolean;
@@ -49,6 +54,7 @@ function ConversationRow({
   avatarUrl,
   fallbackInitial,
   stackedMembers,
+  presence,
   lastMessageAt,
   isMuted,
   isPinned,
@@ -85,7 +91,14 @@ function ConversationRow({
       {showStacked ? (
         <StackedAvatars members={stackedMembers!} size={48} />
       ) : (
-        <Avatar source={avatarUrl} fallbackName={fallbackInitial ?? title} size={48} />
+        <View className="relative">
+          <Avatar source={avatarUrl} fallbackName={fallbackInitial ?? title} size={48} />
+          {presence ? (
+            <View className="absolute -bottom-0.5 -right-0.5">
+              <PresenceDot status={presence} size={11} />
+            </View>
+          ) : null}
+        </View>
       )}
       <View className="min-w-0 flex-1">
         <View className="flex-row items-center gap-1.5">

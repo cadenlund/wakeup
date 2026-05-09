@@ -34,11 +34,13 @@ import {
   usePostV1Conversations,
 } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1Friends } from '@/lib/api/hooks/friends/friends';
+import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
   InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendshipResponse,
+  InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { toast } from '@/lib/toast';
@@ -51,6 +53,19 @@ export default function ChatsScreen() {
 
   const conversationsQ = useGetV1Conversations({ limit: 100 }, { query: { staleTime: 30_000 } });
   const data = conversationsQ.data as InternalHandlerHttpConversationListResponse | undefined;
+
+  // Presence is keyed by user_id. Cache it once per render so each
+  // row's display can look up O(1) without re-deriving the map per
+  // row. Stale 15s tracks the friends-tab choice.
+  const presenceQ = useGetV1PresenceFriends({ query: { staleTime: 15_000 } });
+  const presenceData = presenceQ.data as InternalHandlerHttpPresenceListResponse | undefined;
+  const presenceByUser = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of presenceData?.data ?? []) {
+      if (p.user_id && p.status) m.set(p.user_id, p.status);
+    }
+    return m;
+  }, [presenceData]);
 
   const sorted = React.useMemo(() => sortConversations(data?.data ?? []), [data]);
 
@@ -83,7 +98,11 @@ export default function ChatsScreen() {
           keyExtractor={(item, i) => item.id ?? `idx-${i}`}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item }) => (
-            <RenderedConversationRow conversation={item} myUserId={me?.id} />
+            <RenderedConversationRow
+              conversation={item}
+              myUserId={me?.id}
+              presenceByUser={presenceByUser}
+            />
           )}
         />
       )}
@@ -114,12 +133,14 @@ function sortConversations(rows: Conversation[]): Conversation[] {
 function RenderedConversationRow({
   conversation,
   myUserId,
+  presenceByUser,
 }: {
   conversation: Conversation;
   myUserId: string | undefined;
+  presenceByUser: Map<string, string>;
 }) {
   const router = useRouter();
-  const display = conversationDisplay(conversation, myUserId);
+  const display = conversationDisplay(conversation, myUserId, presenceByUser);
   const isMuted = isCurrentlyMuted(conversation.muted_until);
   const isPinned = !!conversation.pinned_at;
   return (
@@ -129,6 +150,7 @@ function RenderedConversationRow({
       avatarUrl={display.avatarUrl}
       fallbackInitial={display.fallbackInitial}
       stackedMembers={display.stackedMembers}
+      presence={display.presence}
       lastMessageAt={conversation.last_message_at}
       isMuted={isMuted}
       isPinned={isPinned}
@@ -146,11 +168,24 @@ type ConversationDisplay = {
   avatarUrl?: string | null;
   fallbackInitial?: string;
   // Two member avatars to render in a stacked cluster when the
-  // group has no avatar_url. Empty / undefined for direct convos.
-  stackedMembers?: { avatarUrl?: string | null; fallbackName?: string | null }[];
+  // group has no avatar_url. Each carries its own presence so the
+  // cluster can show two dots. Empty / undefined for direct convos.
+  stackedMembers?: {
+    avatarUrl?: string | null;
+    fallbackName?: string | null;
+    presence?: string | null;
+  }[];
+  // Presence to overlay on the (single) avatar. Set for direct DMs
+  // where there's a clear "the other person"; unset for groups
+  // where per-member dots ride on stackedMembers instead.
+  presence?: string | null;
 };
 
-function conversationDisplay(c: Conversation, myUserId: string | undefined): ConversationDisplay {
+function conversationDisplay(
+  c: Conversation,
+  myUserId: string | undefined,
+  presenceByUser: Map<string, string>
+): ConversationDisplay {
   if (c.type === 'direct') {
     // For a 1:1 conversation, we want the *other* member. Server may
     // include the caller as a member; filter them out so a self-DM
@@ -162,6 +197,7 @@ function conversationDisplay(c: Conversation, myUserId: string | undefined): Con
       title,
       avatarUrl: other?.avatar_url,
       fallbackInitial: title,
+      presence: other?.id ? (presenceByUser.get(other.id) ?? null) : null,
     };
   }
   // group
@@ -170,6 +206,7 @@ function conversationDisplay(c: Conversation, myUserId: string | undefined): Con
   const stackedMembers = others.slice(0, 2).map((m) => ({
     avatarUrl: m.user?.avatar_url,
     fallbackName: m.user?.display_name ?? m.user?.username ?? null,
+    presence: m.user?.id ? (presenceByUser.get(m.user.id) ?? null) : null,
   }));
 
   const named = c.name?.trim();
