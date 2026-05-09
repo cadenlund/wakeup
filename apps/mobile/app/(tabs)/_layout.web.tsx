@@ -160,36 +160,35 @@ export default function TabsWebLayout() {
       <Animated.View
         style={sidebarStyle}
         className="overflow-hidden border-r border-border bg-card">
-        {/* TOP — brand mark on the left (Moon + Wakeup wordmark)
-            fades with the labels; toggle is pinned right with a
-            chip-style button. Brand has flex-1 + overflow-hidden so
-            when the sidebar narrows, its content is clipped (and
-            invisible at opacity 0) without ever displacing the
-            toggle. Toggle is shrink-0 so it always renders at full
-            size, naturally near-centered when the column is narrow. */}
+        {/* TOP — when expanded, Moon + Wakeup wordmark on the left
+            and a chip-style toggle on the right. When collapsed, the
+            brand is unmounted entirely and the toggle centers itself
+            via mx-auto. Conditional render is deliberate: relying on
+            flex shrink + min-w-0 to keep the toggle visible while the
+            brand collapses turned out to be fragile across web flex
+            edge cases, and the sidebar's own width tween masks the
+            brand's snap-mount well enough. */}
         <View className="h-12 flex-row items-center border-b border-border px-3">
-          {/* min-w-0 is critical: web flex items default to min-width:
-              auto (= min-content), which would refuse to shrink below
-              the intrinsic width of "Moon + Wakeup" (~78px) and shove
-              the toggle off the right edge when the sidebar narrows.
-              With min-w-0 the brand collapses cleanly to 0 width and
-              the toggle stays put. */}
-          <Animated.View
-            style={labelStyle}
-            className="mr-3 min-w-0 flex-1 flex-row items-center gap-3 overflow-hidden"
-            pointerEvents="none">
-            <Moon size={20} color={primary} />
-            <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
-              Wakeup
-            </Text>
-          </Animated.View>
+          {!collapsed ? (
+            <Animated.View
+              style={labelStyle}
+              className="mr-3 flex-1 flex-row items-center gap-3 overflow-hidden"
+              pointerEvents="none">
+              <Moon size={20} color={primary} />
+              <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
+                Wakeup
+              </Text>
+            </Animated.View>
+          ) : null}
           <Pressable
             onPress={toggle}
             accessibilityRole="button"
             accessibilityLabel={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             testID="sidebar-toggle"
             hitSlop={6}
-            className="h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 active:bg-muted">
+            className={`h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 active:bg-muted ${
+              collapsed ? 'mx-auto' : ''
+            }`}>
             {collapsed ? (
               <ChevronRight size={16} color={mutedFg} />
             ) : (
