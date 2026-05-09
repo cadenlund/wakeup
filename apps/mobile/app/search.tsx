@@ -19,7 +19,7 @@
 //
 // Modal route — back / Cancel pops via canGoBack with a chats-tab
 // fallback, mirroring conversations/new's deep-link handling.
-import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ConciergeBell, MessageCircle, Search, Users as UsersIcon, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
@@ -111,30 +111,27 @@ export default function SearchModalScreen() {
   const rows = React.useMemo<Row[]>(() => buildRows(data), [data]);
 
   return (
-    <>
-      <Stack.Screen options={{ headerShown: false }} />
-      <View className="flex-1 bg-background">
-        <ModalHeader value={rawQuery} onChange={setRawQuery} onCancel={goCancel} />
+    <View className="flex-1 bg-background">
+      <ModalHeader value={rawQuery} onChange={setRawQuery} onCancel={goCancel} />
 
-        {!enabled ? (
-          <SearchHint />
-        ) : searchQ.isFetching && rows.length === 0 ? (
-          <SearchLoading />
-        ) : searchQ.isError && rows.length === 0 ? (
-          <SearchError onRetry={() => searchQ.refetch()} />
-        ) : rows.length === 0 ? (
-          <SearchNoResults />
-        ) : (
-          <List
-            data={rows}
-            keyExtractor={(item) => item.key}
-            renderItem={({ item }) => (
-              <RenderedRow row={item} onTapUser={onTapUser} openingForUserId={openingFor} />
-            )}
-          />
-        )}
-      </View>
-    </>
+      {!enabled ? (
+        <SearchHint />
+      ) : searchQ.isFetching && rows.length === 0 ? (
+        <SearchLoading />
+      ) : searchQ.isError && rows.length === 0 ? (
+        <SearchError onRetry={() => searchQ.refetch()} />
+      ) : rows.length === 0 ? (
+        <SearchNoResults />
+      ) : (
+        <List
+          data={rows}
+          keyExtractor={(item) => item.key}
+          renderItem={({ item }) => (
+            <RenderedRow row={item} onTapUser={onTapUser} openingForUserId={openingFor} />
+          )}
+        />
+      )}
+    </View>
   );
 }
 
