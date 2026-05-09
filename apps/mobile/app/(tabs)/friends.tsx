@@ -66,7 +66,6 @@ import type {
   InternalHandlerHttpSearchResponse,
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
-import { useThemeStore } from '@/lib/theme/store';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { toast } from '@/lib/toast';
 
@@ -495,23 +494,12 @@ function useThemedRefreshControl(
   refreshing: boolean,
   onRefresh: () => void
 ): React.ReactElement<React.ComponentProps<typeof RefreshControl>> {
-  // RN's RefreshControl bridges to UIRefreshControl on iOS, which
-  // doesn't parse the modern space-separated `hsl(H S% L%)` strings
-  // the theme hook returns — the prop silently falls back to the
-  // platform default grey. Hardcode pure white/black off the
-  // resolved mode instead. Both colours are unambiguous in their
-  // respective theme and don't depend on any palette token making
-  // it through Cocoa's colour parser.
-  const mode = useThemeStore((s) => s.mode);
-  const tint = mode === 'dark' ? '#FFFFFF' : '#111111';
-  return (
-    <RefreshControl
-      refreshing={refreshing}
-      onRefresh={onRefresh}
-      tintColor={tint}
-      colors={[tint]}
-    />
-  );
+  // Plain RN default tint. The custom-colour route through
+  // RefreshControl's tintColor / colors props turned out to be
+  // flaky across UIRefreshControl / SwipeRefreshLayout — the
+  // default native spinner reads fine in both modes once nothing
+  // bleeds through the search row above.
+  return <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />;
 }
 
 function SectionsPane({
