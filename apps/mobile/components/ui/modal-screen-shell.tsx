@@ -44,6 +44,9 @@ export function ModalScreenShell({ onClose, maxHeightVh = 80, testID, children }
     return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [onClose]);
 
+  // Native: the route's `presentation: 'modal'` gives us the iOS
+  // bottom-sheet with system chrome (rounded top, status bar
+  // padding, drag-to-dismiss); just pass through.
   if (!isWeb) return <>{children}</>;
 
   // Web: backdrop + centered card. Pinned to the viewport via
