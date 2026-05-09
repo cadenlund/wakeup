@@ -117,8 +117,15 @@ export default function ChatsScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      {Platform.OS === 'web' ? <ChatsWebHeader onCompose={goCompose} /> : null}
-      <ChatsSearchBar value={query} onChange={setQuery} />
+      <ChatsSearchBar
+        value={query}
+        onChange={setQuery}
+        // Web: render the "+ New chat" button on the same line as
+        // the filter input — there's plenty of horizontal room and
+        // a separate header would just steal a row. Native keeps
+        // the floating FAB; the addon is undefined.
+        rightAddon={Platform.OS === 'web' ? <NewChatButton onPress={goCompose} /> : undefined}
+      />
       {isInitialLoad ? (
         <ChatsLoading />
       ) : sorted.length === 0 ? (
@@ -203,36 +210,40 @@ export default function ChatsScreen() {
   );
 }
 
-// Web-only header bar above the filter input. Holds the page
-// title on the left and a primary "New chat" button on the right
-// — replaces the floating compose FAB which feels marooned on a
-// desktop browser. The button text is "New chat" rather than
-// just "+" so the affordance reads at a glance on a wide screen.
-function ChatsWebHeader({ onCompose }: { onCompose: () => void }) {
+// Inline "+ New chat" button rendered on web inside the filter
+// row. Rectangular with slightly rounded corners (rounded-md, not
+// full pill) so it reads as a deliberate action button, not a
+// chip — matches the inputs around it visually.
+function NewChatButton({ onPress }: { onPress: () => void }) {
   const fg = useThemeColor('primary-foreground');
   return (
-    <View className="flex-row items-center justify-between gap-3 border-b border-border px-4 py-3">
-      <Text className="text-lg font-semibold">Chats</Text>
-      <Pressable
-        onPress={onCompose}
-        accessibilityRole="button"
-        accessibilityLabel="New conversation"
-        testID="conversation-compose-web"
-        className="flex-row items-center gap-2 rounded-full bg-primary px-4 py-2 active:opacity-80">
-        <Plus size={16} color={fg} />
-        <Text style={{ color: fg }} className="text-sm font-semibold">
-          New chat
-        </Text>
-      </Pressable>
-    </View>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="New conversation"
+      testID="conversation-compose-web"
+      className="h-10 shrink-0 flex-row items-center gap-2 rounded-md bg-primary px-3 active:opacity-80">
+      <Plus size={16} color={fg} />
+      <Text style={{ color: fg }} className="text-sm font-semibold">
+        New chat
+      </Text>
+    </Pressable>
   );
 }
 
-function ChatsSearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function ChatsSearchBar({
+  value,
+  onChange,
+  rightAddon,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  rightAddon?: React.ReactNode;
+}) {
   const mutedFg = useThemeColor('muted-foreground');
   return (
-    <View className="border-b border-border bg-background px-4 pb-3 pt-3">
-      <View className="relative">
+    <View className="flex-row items-center gap-3 border-b border-border bg-background px-4 pb-3 pt-3">
+      <View className="relative flex-1">
         <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
           <Search size={16} color={mutedFg} />
         </View>
@@ -260,6 +271,7 @@ function ChatsSearchBar({ value, onChange }: { value: string; onChange: (v: stri
           </Pressable>
         ) : null}
       </View>
+      {rightAddon}
     </View>
   );
 }

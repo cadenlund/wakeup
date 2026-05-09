@@ -199,22 +199,20 @@ export default function TabsWebLayout() {
 
         {/* Sidebar search trigger — sits between brand row and the
             nav stack so it reads as the "global, anywhere" entry
-            point rather than another nav destination. Tapping
-            navigates to the /search route, which on web is styled
-            as a centered modal card (search.tsx renders inside a
-            backdrop on web). On native this layout is never
-            rendered — the global search lives in the header-left
-            icon on the bottom-tab navigator. */}
-        <View className="border-b border-border py-3">
-          <SidebarActionRow
-            icon={Search}
-            label="Search"
+            point rather than another nav destination. The visual
+            mirrors the inline filter pills at the top of the chats
+            and friends tabs (rounded border, leading search icon,
+            placeholder text) so users recognise the affordance —
+            but it's a Pressable, not an Input: tap opens /search
+            (a centered modal card on web). On native this layout
+            is never rendered. */}
+        <View className="border-b border-border px-3 py-3">
+          <SidebarSearchTrigger
+            collapsed={collapsed}
             onPress={() => router.push('/search')}
-            color={mutedFg}
+            mutedFg={mutedFg}
             labelStyle={labelStyle}
             labelInteractive={!collapsed}
-            testID="sidebar-search"
-            accessibilityLabel="Search people, chats, messages"
           />
         </View>
 
@@ -284,6 +282,56 @@ function RowShell({ active, children }: { active?: boolean; children: React.Reac
       ) : null}
       {children}
     </View>
+  );
+}
+
+// Pressable styled like the inline filter inputs on chats/
+// friends so the affordance reads the same across the app — same
+// rounded border, same leading search icon, same placeholder
+// register. It's a button, not a text field: typing on the
+// /search modal happens after the route push.
+function SidebarSearchTrigger({
+  collapsed,
+  onPress,
+  mutedFg,
+  labelStyle,
+  labelInteractive,
+}: {
+  collapsed: boolean;
+  onPress: () => void;
+  mutedFg: string;
+  labelStyle: LabelStyle;
+  labelInteractive: boolean;
+}) {
+  // Collapsed: just the icon, centered. The pill chrome only
+  // appears once the sidebar is wide enough for the placeholder
+  // text to read.
+  if (collapsed) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel="Search people, chats, messages"
+        testID="sidebar-search"
+        className="h-9 items-center justify-center rounded-md active:bg-muted">
+        <Search size={18} color={mutedFg} />
+      </Pressable>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Search people, chats, messages"
+      testID="sidebar-search"
+      className="h-9 flex-row items-center gap-2 rounded-md border border-input bg-background px-3 active:bg-muted">
+      <Search size={16} color={mutedFg} />
+      <Animated.View style={labelStyle} pointerEvents={labelInteractive ? 'auto' : 'none'}>
+        <Text numberOfLines={1} style={{ color: mutedFg }} className="text-sm">
+          Search
+        </Text>
+      </Animated.View>
+    </Pressable>
   );
 }
 
