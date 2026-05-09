@@ -25,6 +25,11 @@ import { ConversationRow } from '@/components/conversation-row';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
+import {
+  conversationDisplay,
+  filterConversations,
+  isCurrentlyMuted,
+} from '@/lib/conversation-display';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
@@ -65,10 +70,7 @@ export default function ChatsScreen() {
   // global search (across users/chats/messages) lives behind the
   // header icon, this is a local filter only.
   const [query, setQuery] = React.useState('');
-  const visible = React.useMemo(
-    () => filterConversations(sorted, me?.id, query),
-    [sorted, me, query]
-  );
+  const visible = React.useMemo(() => filterConversations(sorted, query), [sorted, query]);
   const filterActive = query.trim().length > 0;
 
   // Pull-to-refresh: refetch the list. Local refreshing flag is
@@ -172,32 +174,6 @@ function NoFilterMatches() {
   );
 }
 
-function filterConversations(
-  rows: Conversation[],
-  myUserId: string | undefined,
-  rawQuery: string
-): Conversation[] {
-  const term = rawQuery.trim().toLowerCase();
-  if (!term) return rows;
-  return rows.filter((c) => {
-    if (c.type === 'direct') {
-      const others = (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId);
-      const other = others[0]?.user;
-      const dn = other?.display_name?.toLowerCase() ?? '';
-      const un = other?.username?.toLowerCase() ?? '';
-      return dn.includes(term) || un.includes(term);
-    }
-    // group: match on group name OR any member's display/username
-    const named = c.name?.toLowerCase() ?? '';
-    if (named.includes(term)) return true;
-    return (c.members ?? []).some((m) => {
-      const dn = m.user?.display_name?.toLowerCase() ?? '';
-      const un = m.user?.username?.toLowerCase() ?? '';
-      return dn.includes(term) || un.includes(term);
-    });
-  });
-}
-
 // Sort: pinned first (most recent pin first), then by last_message_at
 // DESC, then created_at DESC as a tiebreaker so freshly-created
 // conversations with no messages still land at the top.
@@ -245,100 +221,6 @@ function RenderedConversationRow({
       }}
     />
   );
-}
-
-type ConversationDisplay = {
-  title: string;
-  subtitle?: string;
-  avatarUrl?: string | null;
-  fallbackInitial?: string;
-  // Two member avatars to render in a stacked cluster when the
-  // group has no avatar_url. Each carries its own presence so the
-  // cluster can show two dots. Empty / undefined for direct convos.
-  stackedMembers?: {
-    avatarUrl?: string | null;
-    fallbackName?: string | null;
-    presence?: string | null;
-  }[];
-  // Presence to overlay on the (single) avatar. Set for direct DMs
-  // where there's a clear "the other person"; unset for groups
-  // where per-member dots ride on stackedMembers instead.
-  presence?: string | null;
-};
-
-function conversationDisplay(
-  c: Conversation,
-  myUserId: string | undefined,
-  presenceByUser: Map<string, string>
-): ConversationDisplay {
-  if (c.type === 'direct') {
-    // For a 1:1 conversation, we want the *other* member. Server may
-    // include the caller as a member; filter them out so a self-DM
-    // (rare; admin tooling) at least falls back to the same row.
-    const others = (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId);
-    const other = others[0]?.user ?? c.members?.[0]?.user;
-    const title = other?.display_name?.trim() || other?.username?.trim() || 'Direct message';
-    return {
-      title,
-      avatarUrl: other?.avatar_url,
-      fallbackInitial: title,
-      presence: other?.id ? (presenceByUser.get(other.id) ?? null) : null,
-    };
-  }
-  // group
-  const others = (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId);
-  const memberCount = (c.members ?? []).length;
-  const stackedMembers = others.slice(0, 2).map((m) => ({
-    avatarUrl: m.user?.avatar_url,
-    fallbackName: m.user?.display_name ?? m.user?.username ?? null,
-    presence: m.user?.id ? (presenceByUser.get(m.user.id) ?? null) : null,
-  }));
-
-  const named = c.name?.trim();
-  if (named) {
-    // Named group → subtitle is "N members" so the avatar / name +
-    // count read as a complete identity even before any messages.
-    const subtitle = memberCount > 0 ? membersLabel(memberCount) : undefined;
-    return {
-      title: named,
-      subtitle,
-      avatarUrl: c.avatar_url,
-      fallbackInitial: named,
-      stackedMembers,
-    };
-  }
-  // Unnamed group — fall back to a comma-joined preview of up to
-  // three member names so the row isn't empty.
-  const previewNames = others
-    .map((m) => m.user?.display_name?.trim() || m.user?.username?.trim())
-    .filter((s): s is string => !!s);
-  const previewShown = previewNames.slice(0, 3).join(', ');
-  const remaining = previewNames.length - 3;
-  // "Caden, Test, Alice +2" when there's overflow; bare list when
-  // it all fits.
-  const subtitle = previewShown
-    ? remaining > 0
-      ? `${previewShown} +${remaining}`
-      : previewShown
-    : undefined;
-  return {
-    title: previewShown || 'Group',
-    subtitle,
-    avatarUrl: c.avatar_url,
-    fallbackInitial: previewShown || 'G',
-    stackedMembers,
-  };
-}
-
-function membersLabel(n: number): string {
-  return n === 1 ? '1 member' : `${n} members`;
-}
-
-function isCurrentlyMuted(mutedUntil: string | null | undefined): boolean {
-  if (!mutedUntil) return false;
-  const t = Date.parse(mutedUntil);
-  if (Number.isNaN(t)) return false;
-  return t > Date.now();
 }
 
 function ComposeFab({ onPress }: { onPress: () => void }) {

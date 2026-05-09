@@ -69,10 +69,10 @@ function FriendRow({
         (onPress || onLongPress) && 'active:bg-muted'
       )}>
       <View className="relative">
-        <Avatar source={avatarUrl} fallbackName={displayName ?? username} size={40} />
+        <Avatar source={avatarUrl} fallbackName={displayName ?? username} size={48} />
         {hidePresence ? null : (
           <View className="absolute -bottom-0.5 -right-0.5">
-            <PresenceDot status={presence} size={10} />
+            <PresenceDot status={presence} size={11} />
           </View>
         )}
       </View>

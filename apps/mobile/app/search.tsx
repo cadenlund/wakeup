@@ -23,6 +23,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { ConciergeBell, MessageCircle, Search, Users as UsersIcon, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { ConversationRow } from '@/components/conversation-row';
 import { FriendRow } from '@/components/friend-row';
@@ -31,14 +32,21 @@ import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
+import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
+import { getGetV1ConversationsQueryKey } from '@/lib/api/hooks/conversations/conversations';
+import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import type {
+  InternalHandlerHttpConversationListResponse,
+  InternalHandlerHttpConversationResponse,
+  InternalHandlerHttpPresenceListResponse,
   InternalHandlerHttpSearchConversationRow,
   InternalHandlerHttpSearchMessageRow,
   InternalHandlerHttpSearchResponse,
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
+import { conversationDisplay } from '@/lib/conversation-display';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { toast } from '@/lib/toast';
 
@@ -62,6 +70,7 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 export default function SearchModalScreen() {
   const router = useRouter();
+  const qc = useQueryClient();
   const [rawQuery, setRawQuery] = React.useState('');
   const debouncedQuery = useDebouncedValue(rawQuery.trim(), DEBOUNCE_MS);
   const enabled = debouncedQuery.length >= MIN_CHARS;
@@ -71,6 +80,34 @@ export default function SearchModalScreen() {
     { query: { enabled, staleTime: 30_000 } }
   );
   const data = searchQ.data as InternalHandlerHttpSearchResponse | undefined;
+
+  // The search response only carries a slim {id, name, avatar_url,
+  // last_message_at, type} per conversation hit — no members, no
+  // muted/pinned. Pull the full row out of the conversations-list
+  // cache so the search modal can render the same StackedAvatars +
+  // member-count subtitle + presence dots the chats tab does.
+  const meQ = useGetV1AuthMe({ query: { staleTime: 60_000 } });
+  const me = meQ.data as { id?: string } | undefined;
+  const presenceQ = useGetV1PresenceFriends({ query: { staleTime: 15_000 } });
+  const presenceData = presenceQ.data as InternalHandlerHttpPresenceListResponse | undefined;
+  const presenceByUser = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of presenceData?.data ?? []) {
+      if (p.user_id && p.status) m.set(p.user_id, p.status);
+    }
+    return m;
+  }, [presenceData]);
+
+  const conversationsCache = qc.getQueryData<InternalHandlerHttpConversationListResponse>(
+    getGetV1ConversationsQueryKey({ limit: 100 })
+  );
+  const fullConversationById = React.useMemo(() => {
+    const m = new Map<string, InternalHandlerHttpConversationResponse>();
+    for (const c of conversationsCache?.data ?? []) {
+      if (c.id) m.set(c.id, c);
+    }
+    return m;
+  }, [conversationsCache]);
 
   const ensureDM = useEnsureDirectConversation();
   const [openingFor, setOpeningFor] = React.useState<string | null>(null);
@@ -127,7 +164,14 @@ export default function SearchModalScreen() {
           data={rows}
           keyExtractor={(item) => item.key}
           renderItem={({ item }) => (
-            <RenderedRow row={item} onTapUser={onTapUser} openingForUserId={openingFor} />
+            <RenderedRow
+              row={item}
+              onTapUser={onTapUser}
+              openingForUserId={openingFor}
+              fullConversationById={fullConversationById}
+              myUserId={me?.id}
+              presenceByUser={presenceByUser}
+            />
           )}
         />
       )}
@@ -188,10 +232,16 @@ function RenderedRow({
   row,
   onTapUser,
   openingForUserId,
+  fullConversationById,
+  myUserId,
+  presenceByUser,
 }: {
   row: Row;
   onTapUser: (u: InternalHandlerHttpUserResponse) => void;
   openingForUserId: string | null;
+  fullConversationById: Map<string, InternalHandlerHttpConversationResponse>;
+  myUserId: string | undefined;
+  presenceByUser: Map<string, string>;
 }) {
   const router = useRouter();
   switch (row.kind) {
@@ -219,6 +269,31 @@ function RenderedRow({
     }
     case 'conversation': {
       const c = row.conversation;
+      // Hot-swap to the cached full conversation if we have it —
+      // search response carries no members, so without this the row
+      // can't render stacked avatars / presence dots.
+      const full = c.id ? fullConversationById.get(c.id) : undefined;
+      if (full) {
+        const display = conversationDisplay(full, myUserId, presenceByUser);
+        return (
+          <ConversationRow
+            title={display.title}
+            subtitle={display.subtitle}
+            avatarUrl={display.avatarUrl}
+            fallbackInitial={display.fallbackInitial}
+            stackedMembers={display.stackedMembers}
+            presence={display.presence}
+            lastMessageAt={full.last_message_at}
+            onPress={() => {
+              if (full.id) router.push(`/conversations/${full.id}`);
+            }}
+            testID={`search-conversation-${full.id}`}
+          />
+        );
+      }
+      // Fall-through render for conversations the user isn't a
+      // member of (search hits across the wider system) — slim
+      // shape because we only have name / avatar_url / type.
       return (
         <ConversationRow
           title={c.name?.trim() || 'Conversation'}
