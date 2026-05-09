@@ -19,11 +19,11 @@ import { PasswordInput } from '@/components/ui/password-input';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import {
-  getGetV1AuthMeQueryKey,
   usePostV1AuthPasswordResetConfirm,
   usePostV1AuthPasswordResetValidate,
 } from '@/lib/api/hooks/auth/auth';
 import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
+import { signedOut } from '@/lib/auth/post-auth-nav';
 import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { toast } from '@/lib/toast';
@@ -93,18 +93,16 @@ export default function ResetScreen() {
         // survives the page reload — ToastRoot drains the queue on
         // mount on the destination /login page.
         //
-        // Native still uses router.replace + cache clear because
-        // there's no equivalent "full reload" (and the cold-start
-        // race that motivates this on web doesn't apply).
+        // Native still uses signedOut (cache clear + router.replace)
+        // because there's no full-reload equivalent and the cold-
+        // start race that motivates this on web doesn't apply.
         if (Platform.OS === 'web') {
           toast.queueForNextMount('success', 'Password reset', 'Sign in with your new password.');
           window.location.assign('/login');
           return;
         }
         toast.success('Password reset', 'Sign in with your new password.');
-        await qc.cancelQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        qc.setQueryData(getGetV1AuthMeQueryKey(), null);
-        router.replace('/login');
+        await signedOut(qc, router);
       },
       onError: (err) => {
         // Expired tokens are dead — no useful retry on this screen.

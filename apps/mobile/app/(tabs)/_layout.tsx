@@ -5,7 +5,9 @@ import { Pressable } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { Text } from '@/components/ui/text';
-import { getGetV1AuthMeQueryKey, usePostV1AuthLogout } from '@/lib/api/hooks/auth/auth';
+import { APIError } from '@/lib/api/client';
+import { usePostV1AuthLogout } from '@/lib/api/hooks/auth/auth';
+import { signedOut } from '@/lib/auth/post-auth-nav';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
 export default function TabLayout() {
@@ -15,33 +17,25 @@ export default function TabLayout() {
   // Temporary in-app logout for end-to-end testing of the auth +
   // onboarding flow. Real settings/logout UX lands in Phase 6.
   //
-  // `removeQueries` (not `invalidateQueries`) is required — the auth-
-  // gate hook trusts cached `me` over a transient error so a 401
-  // refetch alone wouldn't flip `isAuthenticated` to false. After the
-  // cache is cleared we route to /login imperatively; Stack.Protected
-  // wouldn't redirect reliably from inside (tabs) on its own.
+  // Only signedOut on definitive success or "already signed out"
+  // (401). A 5xx mid-logout would have hit `onSettled` and cleared
+  // the local cache — but the server session was still alive, so
+  // the user would have ended up with a stale "you're logged out"
+  // view that diverged from reality on the next page load. Now:
+  //   - 2xx → signedOut (clean path).
+  //   - 401 → signedOut (session was already gone server-side, so
+  //     local clear matches reality).
+  //   - everything else → mutationCache toast surfaces the failure
+  //     and the user stays signed in.
   const qc = useQueryClient();
   const router = useRouter();
   const logout = usePostV1AuthLogout({
     mutation: {
-      onSettled: async () => {
-        // setQueryData(null) instead of removeQueries — removeQueries
-        // signals every active observer of the me query that the data
-        // is GONE, which TanStack interprets as "refetch immediately."
-        // The refetch raced the cookie clear (URLSession sometimes
-        // hadn't dropped the session cookie yet) and resurrected the
-        // me cache before Stack.Protected could react. Setting null
-        // is a definitive "no me" signal that doesn't trigger any
-        // network activity. cancelQueries first pre-empts any in-
-        // flight refetch from the logout response itself.
-        await qc.cancelQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        qc.setQueryData(getGetV1AuthMeQueryKey(), null);
-        // Imperative replace as belt-and-braces: Stack.Protected
-        // SHOULD react to the cache flip and unmount (tabs) but the
-        // transition isn't always reliable on iOS, so we explicitly
-        // route to /login. Wrapped in setTimeout so React has
-        // rendered the new guard state before the replace lands.
-        setTimeout(() => router.replace('/(auth)/login'), 0);
+      onSuccess: () => signedOut(qc, router),
+      onError: (err) => {
+        if (err instanceof APIError && err.status === 401) {
+          void signedOut(qc, router);
+        }
       },
     },
   });

@@ -15,8 +15,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PasswordInput } from '@/components/ui/password-input';
 import { Text } from '@/components/ui/text';
-import { getGetV1AuthMeQueryKey, usePostV1AuthRegister } from '@/lib/api/hooks/auth/auth';
+import { usePostV1AuthRegister } from '@/lib/api/hooks/auth/auth';
 import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
+import { signedInAs } from '@/lib/auth/post-auth-nav';
 import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
@@ -31,19 +32,15 @@ export default function RegisterScreen() {
 
   const register = usePostV1AuthRegister({
     mutation: {
-      onSuccess: async (response) => {
+      onSuccess: (response) => {
         haptics.success();
-        // Register envelope is `{ user: MeResponse }`. Push the
-        // embedded user into the me-query cache up front so
-        // AuthGate routes from `onboarded_at: null` directly to
-        // /(onboarding) without first flashing /(tabs) while the
-        // me query refetches.
+        // Register envelope is `{ user: MeResponse }`. Fresh
+        // signups have `onboarded_at: null`, so signedInAs routes
+        // to /(onboarding); see lib/auth/post-auth-nav.ts.
         const body = response as unknown as { user?: { id?: string; onboarded_at?: string } };
         if (body?.user?.id) {
-          qc.setQueryData(getGetV1AuthMeQueryKey(), body.user);
+          signedInAs(qc, router, { id: body.user.id, onboarded_at: body.user.onboarded_at });
         }
-        await qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        router.replace('/(onboarding)');
       },
     },
   });
