@@ -252,6 +252,8 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Post("/v1/conversations/{id}/members", d.ConversationHandler.AddMembers)
 				r.Delete("/v1/conversations/{id}/members/{user_id}", d.ConversationHandler.RemoveMember)
 				r.Post("/v1/conversations/{id}/read", d.ConversationHandler.MarkRead)
+				r.Patch("/v1/conversations/{id}/mute", d.ConversationHandler.SetMute)
+				r.Patch("/v1/conversations/{id}/pin", d.ConversationHandler.SetPin)
 				r.Post("/v1/conversations/{id}/messages", d.MessageHandler.Send)
 				r.Patch("/v1/messages/{id}", d.MessageHandler.Edit)
 				r.Delete("/v1/messages/{id}", d.MessageHandler.Delete)
