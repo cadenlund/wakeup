@@ -2,15 +2,23 @@
 // bare `_layout.tsx` on the web bundle automatically; native still
 // gets the bottom-tab navigator from `_layout.tsx`.
 //
-// Animation: width tweens via reanimated; labels fade via a shared
-// opacity value. Icons stay pinned at a fixed left offset so they
-// don't slide / vanish during the tween — only the labels (which
-// are clipped by overflow-hidden on the sidebar) come and go.
+// Layout pattern (Linear / Notion style): each row is split into a
+// fixed-width icon column (width = COLLAPSED_WIDTH) and a label
+// area that fills the rest. The sidebar's outer width tweens
+// between COLLAPSED_WIDTH and EXPANDED_WIDTH while overflow-hidden
+// clips the label area off-screen when collapsed. The icons live
+// in their own column so they never shrink, slide, or vanish —
+// they sit at the same screen position in both states. This
+// matters specifically on web, where the CSS default of
+// `flex-shrink: 1` would otherwise let the icon collapse alongside
+// the label when its row overflowed; the icon column is
+// `shrink-0` so yoga / flexbox can't squeeze it.
 //
-// Toggle handle lives inside the header itself — no floating
-// off-edge button to get clipped. When collapsed, the brand mark
-// fades out and the toggle is the only thing left in the header,
-// sitting roughly centered in the now-narrow column.
+// Toggle handle lives inside the header itself, pinned to the
+// right edge of the sidebar — no floating off-edge button. When
+// collapsed, the brand fades to opacity 0 and the toggle is the
+// only visible chrome, sitting near-centered as the column
+// narrows.
 import { Link, Slot, usePathname, useRouter } from 'expo-router';
 import {
   ChevronLeft,
@@ -39,9 +47,13 @@ import { signedOut } from '@/lib/auth/post-auth-nav';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
 const COLLAPSED_KEY = 'wakeup:sidebar:collapsed';
-const COLLAPSED_WIDTH = 60;
+const COLLAPSED_WIDTH = 64;
 const EXPANDED_WIDTH = 240;
 const ANIM_DURATION = 220;
+// Match the icon column to the collapsed sidebar width so the
+// icon center sits at sidebar/2 in both states without ever
+// moving horizontally.
+const ICON_COL_WIDTH = COLLAPSED_WIDTH;
 
 type NavItem = { href: '/' | '/friends' | '/profile'; label: string; icon: LucideIcon };
 
@@ -83,9 +95,8 @@ export default function TabsWebLayout() {
     () => safeLocalGet(COLLAPSED_KEY) === 'true'
   );
 
-  // Honor the OS reduced-motion setting — when on, we skip the tween
-  // and snap to the new width/opacity. Same pattern as the onboarding
-  // carousel.
+  // Honor the OS reduced-motion setting — when on, snap rather
+  // than tween. Same pattern as the onboarding carousel.
   const [reduceMotion, setReduceMotion] = React.useState(false);
   React.useEffect(() => {
     let mounted = true;
@@ -117,9 +128,9 @@ export default function TabsWebLayout() {
         labelOpacitySv.value = targetOpacity;
       } else {
         widthSv.value = withTiming(targetWidth, { duration: ANIM_DURATION });
-        // Collapse: fade labels out faster than the width shrinks so the
-        // text isn't squashed into the icons mid-tween. Expand: fade in
-        // a touch slower so the labels appear once there's space.
+        // Collapse: fade labels out faster than the width shrinks
+        // so the text doesn't get squashed mid-tween. Expand: fade
+        // in slightly slower so labels appear once there's space.
         labelOpacitySv.value = withTiming(targetOpacity, {
           duration: next ? 120 : 180,
         });
@@ -149,16 +160,18 @@ export default function TabsWebLayout() {
       <Animated.View
         style={sidebarStyle}
         className="overflow-hidden border-r border-border bg-card">
-        {/* Header — brand on left fades with the labels; toggle is
-            pinned to the right and stays opaque the whole time. When
-            collapsed the brand goes to opacity 0 and only the toggle
-            is visible, naturally near-centered as the column narrows. */}
+        {/* HEADER. Brand sits in the icon column on the left;
+            wordmark fills remaining space and fades. Toggle is
+            pinned right with shrink-0 so it stays the same size at
+            both ends of the animation. */}
         <View className="h-12 flex-row items-center border-b border-border">
+          <View style={{ width: ICON_COL_WIDTH }} className="shrink-0 items-center justify-center">
+            <Moon size={20} color={primary} />
+          </View>
           <Animated.View
             style={labelStyle}
-            className="ml-[14px] flex-1 flex-row items-center gap-2"
+            className="flex-1 shrink overflow-hidden"
             pointerEvents="none">
-            <Moon size={18} color={primary} />
             <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
               Wakeup
             </Text>
@@ -169,7 +182,7 @@ export default function TabsWebLayout() {
             accessibilityLabel={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             testID="sidebar-toggle"
             hitSlop={6}
-            className="mr-[14px] h-8 w-8 items-center justify-center rounded-md active:bg-muted">
+            className="mr-3 h-8 w-8 shrink-0 items-center justify-center rounded-md active:bg-muted">
             {collapsed ? (
               <ChevronRight size={16} color={mutedFg} />
             ) : (
@@ -178,7 +191,7 @@ export default function TabsWebLayout() {
           </Pressable>
         </View>
 
-        <View className="gap-1 py-3">
+        <View className="py-3">
           {NAV_ITEMS.map((item) => (
             <SidebarRow
               key={item.href}
@@ -195,7 +208,7 @@ export default function TabsWebLayout() {
         <View className="flex-1" />
 
         <View className="border-t border-border py-3">
-          <SidebarButton
+          <SidebarActionRow
             icon={LogOut}
             label={logout.isPending ? 'Logging out…' : 'Log out'}
             onPress={() => logout.mutate()}
@@ -223,11 +236,23 @@ function isActive(pathname: string, href: string): boolean {
 
 type LabelStyle = AnimatedStyle<ViewStyle>;
 
-// Icon padding-left math: each row sits inside `mx-2` (8px each
-// side), so the inner row width is sidebarWidth - 16. Collapsed
-// inner width = 60 - 16 = 44; icon is 18 wide, so pl-[13px] puts
-// the icon center at 13+9 = 22 = 44/2 — exactly centered.
-const ROW_PL = 13;
+// Shared row chrome — a fixed-width icon column followed by a
+// flex-1 label. Matches the header's columnar split so icons land
+// in the same column whether you're looking at the brand mark, a
+// nav row, or the logout button.
+function RowShell({ active, children }: { active?: boolean; children: React.ReactNode }) {
+  return (
+    <View className="relative">
+      {active ? (
+        <View
+          pointerEvents="none"
+          className="absolute bottom-2 left-0 top-2 z-10 w-[3px] rounded-r-full bg-primary"
+        />
+      ) : null}
+      {children}
+    </View>
+  );
+}
 
 function SidebarRow({
   item,
@@ -247,37 +272,34 @@ function SidebarRow({
   const Icon = item.icon;
   const tint = active ? activeColor : inactiveColor;
   return (
-    <Link href={item.href} accessibilityRole="link" accessibilityLabel={item.label} asChild>
-      <Pressable
-        style={{ paddingLeft: ROW_PL }}
-        className={`relative mx-2 h-10 flex-row items-center rounded-lg active:bg-muted ${
-          active ? 'bg-muted' : ''
-        }`}>
-        {active ? (
-          <View
-            pointerEvents="none"
-            className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-full bg-primary"
-          />
-        ) : null}
-        <Icon size={18} color={tint} />
-        <Animated.View
-          style={labelStyle}
-          className="ml-3 flex-shrink"
-          pointerEvents={labelInteractive ? 'auto' : 'none'}>
-          <Text
-            numberOfLines={1}
-            className={`text-sm ${
-              active ? 'font-semibold text-primary' : 'text-muted-foreground'
-            }`}>
-            {item.label}
-          </Text>
-        </Animated.View>
-      </Pressable>
-    </Link>
+    <RowShell active={active}>
+      <Link href={item.href} accessibilityRole="link" accessibilityLabel={item.label} asChild>
+        <Pressable
+          className={`h-10 flex-row items-center overflow-hidden ${
+            active ? 'bg-muted' : 'active:bg-muted'
+          }`}>
+          <View style={{ width: ICON_COL_WIDTH }} className="shrink-0 items-center justify-center">
+            <Icon size={20} color={tint} />
+          </View>
+          <Animated.View
+            style={labelStyle}
+            className="flex-1 shrink overflow-hidden pr-3"
+            pointerEvents={labelInteractive ? 'auto' : 'none'}>
+            <Text
+              numberOfLines={1}
+              className={`text-sm ${
+                active ? 'font-semibold text-primary' : 'text-muted-foreground'
+              }`}>
+              {item.label}
+            </Text>
+          </Animated.View>
+        </Pressable>
+      </Link>
+    </RowShell>
   );
 }
 
-function SidebarButton({
+function SidebarActionRow({
   icon: Icon,
   label,
   onPress,
@@ -299,25 +321,28 @@ function SidebarButton({
   accessibilityLabel: string;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      testID={testID}
-      onPress={onPress}
-      disabled={disabled}
-      style={{ paddingLeft: ROW_PL }}
-      className={`mx-2 h-10 flex-row items-center rounded-lg active:bg-muted ${
-        disabled ? 'opacity-50' : ''
-      }`}>
-      <Icon size={18} color={color} />
-      <Animated.View
-        style={labelStyle}
-        className="ml-3 flex-shrink"
-        pointerEvents={labelInteractive ? 'auto' : 'none'}>
-        <Text numberOfLines={1} className="text-sm font-medium">
-          {label}
-        </Text>
-      </Animated.View>
-    </Pressable>
+    <RowShell>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        testID={testID}
+        onPress={onPress}
+        disabled={disabled}
+        className={`h-10 flex-row items-center overflow-hidden active:bg-muted ${
+          disabled ? 'opacity-50' : ''
+        }`}>
+        <View style={{ width: ICON_COL_WIDTH }} className="shrink-0 items-center justify-center">
+          <Icon size={20} color={color} />
+        </View>
+        <Animated.View
+          style={labelStyle}
+          className="flex-1 shrink overflow-hidden pr-3"
+          pointerEvents={labelInteractive ? 'auto' : 'none'}>
+          <Text numberOfLines={1} className="text-sm font-medium">
+            {label}
+          </Text>
+        </Animated.View>
+      </Pressable>
+    </RowShell>
   );
 }
