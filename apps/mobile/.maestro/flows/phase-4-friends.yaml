@@ -1,0 +1,72 @@
+# Phase 4 end-of-phase suite per WAKEUPEXPO §12.1 / §16 4.5.
+#
+# Walks the friends tab end-to-end on a freshly-registered account:
+#
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs).
+#   2. Switch to the Friends tab via the bottom tab bar (or, on
+#      web, the sidebar). The empty state is the welcome card with
+#      "No friends yet" — that's the thing we assert.
+#   3. Type into the search input. Below 2 chars is a no-op
+#      (sections still render); 2+ chars swaps in search results.
+#      Use a string the backend almost certainly won't match
+#      ("zzzzz") so we land on "No users matched."
+#   4. Clear the search via the X button — the empty-friends state
+#      should come back.
+#
+# Action paths (accept / decline / unfriend / block) need a second
+# user to coexist on the same backend run, which Maestro can't
+# orchestrate from a single flow. Phase 5+ multi-user fixtures
+# will exercise those — in the meantime, the unit-level mutation
+# wiring is covered by typecheck + manual sim run, and the action
+# sheet/buttons are reachable from a populated friends list which
+# this flow doesn't construct.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip the onboarding carousel — fastest path to (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on (tabs). The Chats placeholder ("The conversations list
+# lands in Phase 5.1") confirms we're past onboarding.
+- extendedWaitUntil:
+    visible: 'Chats'
+    timeout: 10000
+
+# Switch to Friends tab. Native uses bottom-tab bar with the label
+# "Friends"; web uses the sidebar with the same label. Both are
+# matchable by visible text.
+- tapOn: 'Friends'
+- extendedWaitUntil:
+    visible: 'No friends yet'
+    timeout: 6000
+- assertVisible: 'No friends yet'
+- takeScreenshot: friends-empty
+
+# --- Search -----------------------------------------------------
+- tapOn:
+    id: friend-search-input
+- inputText: 'zzzzz'
+# Debounce is 250ms; give the request room to land.
+- extendedWaitUntil:
+    visible: 'No users matched.'
+    timeout: 6000
+- assertVisible: 'No users matched.'
+- takeScreenshot: friends-search-empty
+
+# Clear via the X icon — empty-friends should come back.
+- tapOn:
+    id: friend-search-clear
+- extendedWaitUntil:
+    visible: 'No friends yet'
+    timeout: 6000
+- assertVisible: 'No friends yet'
+- takeScreenshot: friends-cleared
