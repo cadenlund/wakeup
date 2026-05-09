@@ -291,6 +291,7 @@ function RenderedConversationRow({
       lastMessageAt={conversation.last_message_at}
       isMuted={isMuted}
       isPinned={isPinned}
+      mutedUntil={conversation.muted_until}
       testID={`conversation-${conversation.id}`}
       onPress={() => {
         if (conversation.id) router.push(`/conversations/${conversation.id}`);
