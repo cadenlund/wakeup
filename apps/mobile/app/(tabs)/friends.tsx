@@ -31,7 +31,7 @@
 // every keystroke (debounced).
 import { Check, MoreHorizontal, Search, ShieldOff, UserMinus, Users, X } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Modal, Pressable, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, RefreshControl, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendRow } from '@/components/friend-row';
@@ -490,6 +490,20 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
+function useThemedRefreshControl(
+  refreshing: boolean,
+  onRefresh: () => void
+): React.ReactElement<React.ComponentProps<typeof RefreshControl>> {
+  // The default RefreshControl uses iOS system grey for the spinner —
+  // illegible against `bg-card` on dark mode. Both `tintColor` (iOS)
+  // and `colors` (Android) get the foreground token so it sits at
+  // ~80% contrast in both themes.
+  const fg = useThemeColor('foreground');
+  return (
+    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={fg} colors={[fg]} />
+  );
+}
+
 function SectionsPane({
   rows,
   pendingAction,
@@ -507,11 +521,13 @@ function SectionsPane({
   refreshing: boolean;
   onRefresh: () => void;
 }) {
+  const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
+
   // Empty / single-empty-header collapse to the welcoming empty
   // state; we still wrap that in a ScrollView so pull-to-refresh
   // works even when there's no data yet.
   if (rows.length === 0) {
-    return <PullableEmpty refreshing={refreshing} onRefresh={onRefresh} />;
+    return <PullableEmpty refreshControl={refreshControl} />;
   }
   const onlyEmptyHeader =
     rows.length === 2 &&
@@ -519,7 +535,7 @@ function SectionsPane({
     rows[0].key === 'h:friends' &&
     rows[1].kind === 'empty';
   if (onlyEmptyHeader) {
-    return <PullableEmpty refreshing={refreshing} onRefresh={onRefresh} />;
+    return <PullableEmpty refreshControl={refreshControl} />;
   }
 
   return (
@@ -535,13 +551,16 @@ function SectionsPane({
           onOpenMenu={onOpenMenu}
         />
       )}
-      refreshing={refreshing}
-      onRefresh={onRefresh}
+      refreshControl={refreshControl}
     />
   );
 }
 
-function PullableEmpty({ refreshing, onRefresh }: { refreshing: boolean; onRefresh: () => void }) {
+function PullableEmpty({
+  refreshControl,
+}: {
+  refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
+}) {
   // FlashList doesn't render its scroll surface when data is empty,
   // so a refresh-control wouldn't be reachable on the empty state.
   // Wrap a single-item list (the empty placeholder) in <List> so the
@@ -553,8 +572,7 @@ function PullableEmpty({ refreshing, onRefresh }: { refreshing: boolean; onRefre
       data={data}
       keyExtractor={(_, i) => `empty-${i}`}
       renderItem={() => <FriendsAllEmpty />}
-      refreshing={refreshing}
-      onRefresh={onRefresh}
+      refreshControl={refreshControl}
     />
   );
 }

@@ -19,6 +19,9 @@ export default function TabLayout() {
   const primary = useThemeColor('primary');
   const fg = useThemeColor('foreground');
   const mutedFg = useThemeColor('muted-foreground');
+  const bg = useThemeColor('background');
+  const card = useThemeColor('card');
+  const border = useThemeColor('border');
 
   // Temporary in-app logout for end-to-end testing of the auth +
   // onboarding flow. Real settings/logout UX lands in Phase 11.6.
@@ -51,6 +54,19 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: primary,
         tabBarInactiveTintColor: mutedFg,
+        // Header + tab bar pick up theme colours so dark mode doesn't
+        // leave the safe-area chrome glaring white. `card` is the
+        // slight elevation surface (one shade off background) — use
+        // it for both bars so the border-line between them and the
+        // screen body actually reads.
+        headerStyle: { backgroundColor: card },
+        headerTintColor: fg,
+        headerShadowVisible: false,
+        sceneStyle: { backgroundColor: bg },
+        tabBarStyle: {
+          backgroundColor: card,
+          borderTopColor: border,
+        },
         // Right-side logout pill on the global tabs header. Removed
         // when settings/account lands in Phase 11.6 — at that point
         // logout moves into the account screen.
