@@ -19,7 +19,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Check, MessageCircle, Search, WifiOff, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { Avatar } from '@/components/ui/avatar';
@@ -242,15 +241,8 @@ function ModalHeader({
 }) {
   const primary = useThemeColor('primary');
   const mutedFg = useThemeColor('muted-foreground');
-  // iOS pageSheet modals start the screen at the very top — under
-  // the status bar / Dynamic Island. Bake the safe-area inset into
-  // the header so its bg-card extends behind the status bar area
-  // cleanly instead of crowding into the rounded-corner zone.
-  const insets = useSafeAreaInsets();
   return (
-    <View
-      style={{ paddingTop: insets.top + 12 }}
-      className="flex-row items-center justify-between border-b border-border bg-card px-4 pb-3">
+    <View className="flex-row items-center justify-between border-b border-border bg-card px-4 py-3">
       <Pressable
         onPress={onCancel}
         accessibilityRole="button"
