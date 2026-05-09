@@ -32,7 +32,7 @@
 import {
   Check,
   ChevronDown,
-  ChevronRight,
+  ChevronUp,
   MoreHorizontal,
   Search,
   ShieldOff,
@@ -970,7 +970,10 @@ function SectionHeader({
   onToggle: () => void;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
-  const Caret = collapsed ? ChevronRight : ChevronDown;
+  // Caret points to where the next tap goes: ChevronDown when
+  // collapsed (tap = expand down), ChevronUp when expanded (tap =
+  // collapse up).
+  const Caret = collapsed ? ChevronDown : ChevronUp;
   return (
     <Pressable
       onPress={onToggle}
