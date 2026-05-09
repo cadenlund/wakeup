@@ -33,6 +33,18 @@ export function DrawerSheet({
   testID,
   children,
 }: Props) {
+  // Esc closes — RN Modal's onRequestClose only fires for the
+  // Android back button, not desktop keyboards, so we wire the
+  // listener ourselves on web. Native is a no-op (no DOM).
+  React.useEffect(() => {
+    if (!isWeb || !visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [visible, onClose]);
+
   return (
     <Modal
       visible={visible}

@@ -321,9 +321,11 @@ function SidebarSearchTrigger({
   labelStyle: LabelStyle;
   labelInteractive: boolean;
 }) {
-  // Collapsed: just the icon, centered. The pill chrome only
-  // appears once the sidebar is wide enough for the placeholder
-  // text to read.
+  // Collapsed: just the icon centered inside the same input-style
+  // pill so the affordance reads as a search box even when the
+  // sidebar is narrow — matches the chats/friends inline filter
+  // chrome (rounded border, muted background) so users recognise
+  // the icon as "this opens search" not "this is a nav row."
   if (collapsed) {
     return (
       <Pressable
@@ -331,7 +333,7 @@ function SidebarSearchTrigger({
         accessibilityRole="button"
         accessibilityLabel="Search people, chats, messages"
         testID="sidebar-search"
-        className="h-9 items-center justify-center rounded-md active:bg-muted">
+        className="h-9 items-center justify-center rounded-md border border-input bg-background active:bg-muted">
         <Search size={18} color={mutedFg} />
       </Pressable>
     );
@@ -346,15 +348,22 @@ function SidebarSearchTrigger({
       accessibilityRole="button"
       accessibilityLabel="Search people, chats, messages"
       testID="sidebar-search"
-      className="h-9 flex-row items-center gap-2 rounded-md border border-input bg-background px-3 active:bg-muted">
+      className="h-9 flex-row items-center gap-2 rounded-md border border-input bg-background pl-3 pr-1 active:bg-muted">
       <Search size={16} color={mutedFg} />
       <Animated.View
         style={labelStyle}
-        className="flex-1 flex-row items-center justify-between"
+        className="flex-1"
         pointerEvents={labelInteractive ? 'auto' : 'none'}>
         <Text numberOfLines={1} style={{ color: mutedFg }} className="text-sm">
           Search
         </Text>
+      </Animated.View>
+      {/* Shortcut chip pinned to the trailing edge of the pill. Lives
+          outside the label's animated wrapper so it stays anchored
+          to the input's right side regardless of placeholder width;
+          the collapsed state renders a different element entirely so
+          the chip never shows when there's no room for it. */}
+      <Animated.View style={labelStyle} pointerEvents="none">
         <View className="rounded border border-border bg-muted/50 px-1.5 py-0.5">
           <Text style={{ color: mutedFg }} className="text-[10px] font-medium tracking-wide">
             {isMac ? '⌘K' : 'Ctrl K'}
