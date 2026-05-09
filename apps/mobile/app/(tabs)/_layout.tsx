@@ -6,7 +6,7 @@
 import { Tabs, useRouter } from 'expo-router';
 import { LogOut, MessageCircle, Search, User, Users } from 'lucide-react-native';
 import * as React from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { Text } from '@/components/ui/text';
@@ -73,32 +73,29 @@ export default function TabLayout() {
         headerRight: () => (
           <LogoutPill onPress={() => logout.mutate()} pending={logout.isPending} fg={fg} />
         ),
+        // Header-left search icon present on every tab (Chats,
+        // Friends, Profile) so the global /search modal is one tap
+        // away regardless of where the user is. Visually distinct
+        // from the friends-tab inline search input (which is
+        // friend-discovery — a different flow that filters and
+        // adds people in place).
+        headerLeft: () => (
+          <Pressable
+            onPress={() => router.push('/search')}
+            accessibilityRole="button"
+            accessibilityLabel="Search people, chats, messages"
+            testID="header-search"
+            hitSlop={8}
+            className="ml-3 h-9 w-9 items-center justify-center rounded-full active:bg-muted">
+            <Search size={18} color={fg} />
+          </Pressable>
+        ),
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Chats',
           tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
-          // Chats tab gets a search icon next to the logout pill.
-          // Per §5.1 the global /search modal is "triggered by a
-          // header search icon on the conversations tab" — an icon,
-          // not a tappable input row, so it doesn't get visually
-          // confused with the friends-tab inline search input
-          // (which is friend-discovery, a different flow).
-          headerRight: () => (
-            <View className="flex-row items-center" style={{ gap: 4 }}>
-              <Pressable
-                onPress={() => router.push('/search')}
-                accessibilityRole="button"
-                accessibilityLabel="Search people, chats, messages"
-                testID="header-search"
-                hitSlop={8}
-                className="h-9 w-9 items-center justify-center rounded-full active:bg-muted">
-                <Search size={18} color={fg} />
-              </Pressable>
-              <LogoutPill onPress={() => logout.mutate()} pending={logout.isPending} fg={fg} />
-            </View>
-          ),
         }}
       />
       <Tabs.Screen

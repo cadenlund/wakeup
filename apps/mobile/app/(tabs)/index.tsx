@@ -16,13 +16,15 @@
 // Pull-to-refresh wraps everything per §5.4. Pin/mute long-press
 // menus + last-message preview land in 5.6 / 5.5 respectively. The
 // new-conversation flow lives at /conversations/new (Phase 5.2).
-import { MessageCircle, Plus } from 'lucide-react-native';
+import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, RefreshControl, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ConversationRow } from '@/components/conversation-row';
+import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import { Text } from '@/components/ui/text';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
@@ -58,6 +60,17 @@ export default function ChatsScreen() {
 
   const sorted = React.useMemo(() => sortConversations(data?.data ?? []), [data]);
 
+  // Inline filter input. Matches the friends-tab shape so the two
+  // tabs read the same. Filter narrows the existing list by name —
+  // global search (across users/chats/messages) lives behind the
+  // header icon, this is a local filter only.
+  const [query, setQuery] = React.useState('');
+  const visible = React.useMemo(
+    () => filterConversations(sorted, me?.id, query),
+    [sorted, me, query]
+  );
+  const filterActive = query.trim().length > 0;
+
   // Pull-to-refresh: refetch the list. Local refreshing flag is
   // independent of conversationsQ.isFetching so passive background
   // refetches (focus, mount) don't surface the spinner.
@@ -78,15 +91,26 @@ export default function ChatsScreen() {
 
   return (
     <View className="flex-1 bg-background">
+      <ChatsSearchBar value={query} onChange={setQuery} />
       {isInitialLoad ? (
         <ChatsLoading />
       ) : sorted.length === 0 ? (
         <PullableEmpty refreshing={refreshing} onRefresh={onRefresh} />
+      ) : visible.length === 0 ? (
+        <NoFilterMatches />
       ) : (
         <List
-          data={sorted}
+          data={visible}
           keyExtractor={(item, i) => item.id ?? `idx-${i}`}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={
+            // Skip pull-to-refresh while a filter is active — refetching
+            // would replace the visible subset with a fresh full list and
+            // re-filter, which feels right but the pull gesture conflicts
+            // with scrolling a short filtered result set.
+            filterActive ? undefined : (
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            )
+          }
           renderItem={({ item }) => (
             <RenderedConversationRow
               conversation={item}
@@ -100,6 +124,78 @@ export default function ChatsScreen() {
       <ComposeFab onPress={goCompose} />
     </View>
   );
+}
+
+function ChatsSearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <View className="border-b border-border bg-background px-4 pb-3 pt-3">
+      <View className="relative">
+        <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
+          <Search size={16} color={mutedFg} />
+        </View>
+        <Input
+          value={value}
+          onChangeText={onChange}
+          placeholder="Filter your chats"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="off"
+          returnKeyType="search"
+          testID="chats-filter-input"
+          accessibilityLabel="Filter your chats"
+          className="pl-9 pr-9"
+        />
+        {value.length > 0 ? (
+          <Pressable
+            onPress={() => onChange('')}
+            accessibilityRole="button"
+            accessibilityLabel="Clear filter"
+            testID="chats-filter-clear"
+            hitSlop={8}
+            className="absolute bottom-0 right-3 top-0 z-10 justify-center">
+            <X size={16} color={mutedFg} />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function NoFilterMatches() {
+  return (
+    <View className="px-6 py-12">
+      <Text variant="muted" className="text-center text-sm">
+        No conversations match that filter.
+      </Text>
+    </View>
+  );
+}
+
+function filterConversations(
+  rows: Conversation[],
+  myUserId: string | undefined,
+  rawQuery: string
+): Conversation[] {
+  const term = rawQuery.trim().toLowerCase();
+  if (!term) return rows;
+  return rows.filter((c) => {
+    if (c.type === 'direct') {
+      const others = (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId);
+      const other = others[0]?.user;
+      const dn = other?.display_name?.toLowerCase() ?? '';
+      const un = other?.username?.toLowerCase() ?? '';
+      return dn.includes(term) || un.includes(term);
+    }
+    // group: match on group name OR any member's display/username
+    const named = c.name?.toLowerCase() ?? '';
+    if (named.includes(term)) return true;
+    return (c.members ?? []).some((m) => {
+      const dn = m.user?.display_name?.toLowerCase() ?? '';
+      const un = m.user?.username?.toLowerCase() ?? '';
+      return dn.includes(term) || un.includes(term);
+    });
+  });
 }
 
 // Sort: pinned first (most recent pin first), then by last_message_at
