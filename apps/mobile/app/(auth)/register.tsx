@@ -38,8 +38,8 @@ export default function RegisterScreen() {
         // signups have `onboarded_at: null`, so signedInAs routes
         // to /(onboarding); see lib/auth/post-auth-nav.ts.
         const body = response as unknown as { user?: { id?: string; onboarded_at?: string } };
-        if (body?.user) {
-          signedInAs(qc, router, body.user);
+        if (body?.user?.id) {
+          signedInAs(qc, router, { id: body.user.id, onboarded_at: body.user.onboarded_at });
         }
       },
     },

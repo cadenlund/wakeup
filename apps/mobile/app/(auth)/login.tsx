@@ -42,8 +42,8 @@ export default function LoginScreen() {
         // the me-cache + navigates; see lib/auth/post-auth-nav.ts
         // for the cache + invalidate + setTimeout dance.
         const body = response as unknown as { user?: { id?: string; onboarded_at?: string } };
-        if (body?.user) {
-          signedInAs(qc, router, body.user);
+        if (body?.user?.id) {
+          signedInAs(qc, router, { id: body.user.id, onboarded_at: body.user.onboarded_at });
         }
       },
     },

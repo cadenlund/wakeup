@@ -166,8 +166,8 @@ export default function OnboardingScreen() {
         // apiFetch returns the unwrapped MeResponse body; orval types
         // it as `{data, status, headers}`. Cast to the runtime shape.
         const fresh = response as unknown as { id?: string; onboarded_at?: string } | undefined;
-        if (fresh) {
-          signedInAs(qc, router, fresh);
+        if (fresh?.id) {
+          signedInAs(qc, router, { id: fresh.id, onboarded_at: fresh.onboarded_at });
         }
       },
     },

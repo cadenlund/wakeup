@@ -41,8 +41,11 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { getGetV1AuthMeQueryKey } from '@/lib/api/hooks/auth/auth';
 
+// `id` is required — a partial user payload would silently skip the
+// cache prime and recreate the guard-race this helper exists to
+// prevent. Callers narrow before calling.
 export type AuthUser = {
-  id?: string;
+  id: string;
   onboarded_at?: string | null;
 };
 
@@ -58,9 +61,7 @@ function targetForUser(user: AuthUser): '/' | '/(onboarding)' {
 }
 
 export function signedInAs(qc: QueryClient, router: RouterReplace, user: AuthUser) {
-  if (user.id) {
-    qc.setQueryData(getGetV1AuthMeQueryKey(), user);
-  }
+  qc.setQueryData(getGetV1AuthMeQueryKey(), user);
   void qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
   const target = targetForUser(user);
   setTimeout(() => router.replace(target), 0);
