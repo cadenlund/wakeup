@@ -48,6 +48,7 @@ import { Text } from '@/components/ui/text';
 import { getGetV1AuthMeQueryKey, useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { usePatchV1UsersMe, usePostV1UsersMeOnboard } from '@/lib/api/hooks/users/users';
 import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
+import { signedInAs } from '@/lib/auth/post-auth-nav';
 import { haptics } from '@/lib/haptics';
 import { Sentry } from '@/lib/sentry';
 import { useThemeStore, type ModePreference } from '@/lib/theme/store';
@@ -154,28 +155,20 @@ export default function OnboardingScreen() {
   const setModePref = useThemeStore((s) => s.setModePreference);
 
   // --- finalisation -------------------------------------------------------
-  // The endpoint returns the updated MeResponse with `onboarded_at`
-  // populated. We push that into the query cache directly so AuthGate
-  // sees `onboardingDone === true` on its very next render — without
-  // waiting for an invalidate→refetch round-trip. Without this, the
-  // subsequent `router.replace('/')` ran while AuthGate still had a
-  // null `onboarded_at` in cache, so its effect bounced the user back
-  // to /(onboarding) and the carousel reset to slide 1.
+  // The onboard endpoint returns an updated MeResponse with
+  // `onboarded_at` populated. signedInAs primes that into the
+  // me-cache + navigates — Stack.Protected guards re-evaluate to
+  // (tabs) since onboarded_at is now set.
   const completeOnboarding = usePostV1UsersMeOnboard({
     mutation: {
-      onSuccess: async (response) => {
+      onSuccess: (response) => {
         haptics.success();
         // apiFetch returns the unwrapped MeResponse body; orval types
         // it as `{data, status, headers}`. Cast to the runtime shape.
         const fresh = response as unknown as { id?: string; onboarded_at?: string } | undefined;
-        if (fresh?.id) {
-          qc.setQueryData(getGetV1AuthMeQueryKey(), fresh);
+        if (fresh) {
+          signedInAs(qc, router, fresh);
         }
-        // Belt-and-braces: also invalidate so any other observer
-        // (AuthGate uses retry: false but no staleTime) refetches the
-        // canonical row before they next render.
-        await qc.invalidateQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        router.replace('/(tabs)');
       },
     },
   });

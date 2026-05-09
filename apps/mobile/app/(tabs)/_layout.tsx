@@ -5,7 +5,8 @@ import { Pressable } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { Text } from '@/components/ui/text';
-import { getGetV1AuthMeQueryKey, usePostV1AuthLogout } from '@/lib/api/hooks/auth/auth';
+import { usePostV1AuthLogout } from '@/lib/api/hooks/auth/auth';
+import { signedOut } from '@/lib/auth/post-auth-nav';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
 export default function TabLayout() {
@@ -14,35 +15,13 @@ export default function TabLayout() {
 
   // Temporary in-app logout for end-to-end testing of the auth +
   // onboarding flow. Real settings/logout UX lands in Phase 6.
-  //
-  // `removeQueries` (not `invalidateQueries`) is required — the auth-
-  // gate hook trusts cached `me` over a transient error so a 401
-  // refetch alone wouldn't flip `isAuthenticated` to false. After the
-  // cache is cleared we route to /login imperatively; Stack.Protected
-  // wouldn't redirect reliably from inside (tabs) on its own.
+  // signedOut handles the cache-clear + navigate; see
+  // lib/auth/post-auth-nav.ts.
   const qc = useQueryClient();
   const router = useRouter();
   const logout = usePostV1AuthLogout({
     mutation: {
-      onSettled: async () => {
-        // setQueryData(null) instead of removeQueries — removeQueries
-        // signals every active observer of the me query that the data
-        // is GONE, which TanStack interprets as "refetch immediately."
-        // The refetch raced the cookie clear (URLSession sometimes
-        // hadn't dropped the session cookie yet) and resurrected the
-        // me cache before Stack.Protected could react. Setting null
-        // is a definitive "no me" signal that doesn't trigger any
-        // network activity. cancelQueries first pre-empts any in-
-        // flight refetch from the logout response itself.
-        await qc.cancelQueries({ queryKey: getGetV1AuthMeQueryKey() });
-        qc.setQueryData(getGetV1AuthMeQueryKey(), null);
-        // Imperative replace as belt-and-braces: Stack.Protected
-        // SHOULD react to the cache flip and unmount (tabs) but the
-        // transition isn't always reliable on iOS, so we explicitly
-        // route to /login. Wrapped in setTimeout so React has
-        // rendered the new guard state before the replace lands.
-        setTimeout(() => router.replace('/(auth)/login'), 0);
-      },
+      onSettled: () => signedOut(qc, router),
     },
   });
 
