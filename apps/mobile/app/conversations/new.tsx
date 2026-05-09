@@ -16,7 +16,7 @@
 // 5.2 plan ("multi-select friends + group name"); broader user
 // search lives in the global /search modal (5.5).
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Check, MessageCircle, Search, X } from 'lucide-react-native';
+import { Check, MessageCircle, Search, WifiOff, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -97,7 +97,15 @@ export default function NewConversationScreen() {
   }, []);
 
   const onCancel = React.useCallback(() => {
-    router.back();
+    // Direct-open via deep link has no back history — router.back()
+    // in that case is a no-op on Android and closes the app on iOS.
+    // Fall back to the chats tab so the close affordance always
+    // lands somewhere coherent.
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
   }, [router]);
 
   const onCreate = React.useCallback(async () => {
@@ -114,8 +122,13 @@ export default function NewConversationScreen() {
       toast.success(isGroup ? 'Group created' : 'Conversation started');
       // replace, not push: back from the thread goes to the chats
       // list, not back to a stale modal.
-      if (res?.id) router.replace(`/conversations/${res.id}`);
-      else router.back();
+      if (res?.id) {
+        router.replace(`/conversations/${res.id}`);
+      } else if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/');
+      }
     } catch (err) {
       const msg =
         err instanceof APIError && err.message
@@ -141,6 +154,14 @@ export default function NewConversationScreen() {
 
   if (friendsQ.isLoading && !friendsQ.data) {
     return <FullPaneLoading />;
+  }
+  // Genuine empty list vs failed cold-load look identical without
+  // the isError gate — both just have data === undefined / []. Show
+  // an error state with a Retry CTA when the request actually
+  // failed; only fall through to "no friends yet" when we have a
+  // confirmed empty array.
+  if (friendsQ.isError && !friendsQ.data) {
+    return <FetchError onRetry={() => friendsQ.refetch()} onClose={onCancel} />;
   }
   if (friends.length === 0) {
     return <NoFriends onClose={onCancel} />;
@@ -394,6 +415,30 @@ function FullPaneLoading() {
   return (
     <View className="flex-1 items-center justify-center bg-background">
       <ActivityIndicator color={mutedFg} />
+    </View>
+  );
+}
+
+function FetchError({ onRetry, onClose }: { onRetry: () => void; onClose: () => void }) {
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <View className="flex-1 bg-background">
+      <ModalHeader
+        canCreate={false}
+        creating={false}
+        onCancel={onClose}
+        onCreate={() => {}}
+        ctaLabel="Start"
+      />
+      <EmptyState
+        icon={<WifiOff size={40} color={mutedFg} />}
+        title="Couldn't load your friends"
+        subtitle="Check your connection and try again."
+        cta={{
+          label: 'Retry',
+          onPress: onRetry,
+        }}
+      />
     </View>
   );
 }
