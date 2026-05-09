@@ -162,17 +162,18 @@ export default function TabsWebLayout() {
         className="overflow-hidden border-r border-border bg-card">
         {/* TOP — when expanded, Moon + Wakeup wordmark on the left
             and a chip-style toggle on the right. When collapsed, the
-            brand is unmounted entirely and the toggle centers itself
-            via mx-auto. Conditional render is deliberate: relying on
-            flex shrink + min-w-0 to keep the toggle visible while the
-            brand collapses turned out to be fragile across web flex
-            edge cases, and the sidebar's own width tween masks the
-            brand's snap-mount well enough. */}
-        <View className="h-12 flex-row items-center border-b border-border px-3">
+            brand is unmounted entirely and the toggle centers itself.
+            justify-between (or justify-center when alone) does the
+            spatial work explicitly — flex-1 + min-w-0 turned out to
+            be flaky across the NativeWind / reanimated boundary. */}
+        <View
+          className={`h-12 flex-row items-center border-b border-border px-3 ${
+            collapsed ? 'justify-center' : 'justify-between'
+          }`}>
           {!collapsed ? (
             <Animated.View
               style={labelStyle}
-              className="mr-3 flex-1 flex-row items-center gap-3 overflow-hidden"
+              className="flex-row items-center gap-3 overflow-hidden"
               pointerEvents="none">
               <Moon size={20} color={primary} />
               <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
@@ -186,9 +187,7 @@ export default function TabsWebLayout() {
             accessibilityLabel={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             testID="sidebar-toggle"
             hitSlop={6}
-            className={`h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 active:bg-muted ${
-              collapsed ? 'mx-auto' : ''
-            }`}>
+            className="h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 active:bg-muted">
             {collapsed ? (
               <ChevronRight size={16} color={mutedFg} />
             ) : (
