@@ -25,7 +25,6 @@ import {
   ChevronRight,
   LogOut,
   MessageCircle,
-  Moon,
   User,
   Users,
   type LucideIcon,
@@ -160,29 +159,19 @@ export default function TabsWebLayout() {
       <Animated.View
         style={sidebarStyle}
         className="overflow-hidden border-r border-border bg-card">
-        {/* HEADER. Brand sits in the icon column on the left;
-            wordmark fills remaining space and fades. Toggle is
-            pinned right with shrink-0 so it stays the same size at
-            both ends of the animation. */}
-        <View className="h-12 flex-row items-center border-b border-border">
-          <View style={{ width: ICON_COL_WIDTH }} className="shrink-0 items-center justify-center">
-            <Moon size={20} color={primary} />
-          </View>
-          <Animated.View
-            style={labelStyle}
-            className="flex-1 shrink overflow-hidden"
-            pointerEvents="none">
-            <Text numberOfLines={1} className="text-base font-semibold tracking-tight">
-              Wakeup
-            </Text>
-          </Animated.View>
+        {/* TOP — toggle alone in its own row so it can never be
+            displaced by a brand mark when the column narrows. The
+            row is right-aligned with a fixed inner padding; in the
+            collapsed state that puts the toggle a hair right of
+            center, which reads as intentional rather than off. */}
+        <View className="h-12 flex-row items-center justify-end border-b border-border px-3">
           <Pressable
             onPress={toggle}
             accessibilityRole="button"
             accessibilityLabel={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             testID="sidebar-toggle"
             hitSlop={6}
-            className="mr-3 h-8 w-8 shrink-0 items-center justify-center rounded-md active:bg-muted">
+            className="h-8 w-8 shrink-0 items-center justify-center rounded-md active:bg-muted">
             {collapsed ? (
               <ChevronRight size={16} color={mutedFg} />
             ) : (
