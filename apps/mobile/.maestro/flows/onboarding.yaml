@@ -69,9 +69,10 @@ appId: app.wakeup.client
 - tapOn:
     id: onboarding-finish
 
-# After finish, AuthGate routes to (tabs). Gallery is the placeholder
-# tab home until Phase 5 ships the conversations list. Either way,
-# the temporary header logout button proves we're past the carousel.
+# After finish, AuthGate routes to (tabs). The Chats / Friends /
+# Profile placeholders render until Phase 5.1+ ships the real
+# conversations list etc. The temporary header logout button proves
+# we're past the carousel regardless of which tab is active.
 - extendedWaitUntil:
     visible: 'Log out'
     timeout: 10000
