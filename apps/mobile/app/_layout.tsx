@@ -86,7 +86,10 @@ function ProtectedStack() {
         guard={auth.isLoading || (auth.isAuthenticated && auth.onboardingDone && !hasToken)}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="conversations/new" options={{ presentation: 'modal' }} />
+        <Stack.Screen
+          name="conversations/new"
+          options={{ presentation: 'modal', headerShown: false }}
+        />
         {/* `headerShown: false` lives here, not inside search.tsx —
             toggling it from inside the screen body triggers an
             infinite-remount loop on iOS modals (the screen re-mounts

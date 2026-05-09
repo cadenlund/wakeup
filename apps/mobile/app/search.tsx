@@ -23,6 +23,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { ConciergeBell, MessageCircle, Search, Users as UsersIcon, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { ConversationRow } from '@/components/conversation-row';
@@ -370,8 +371,17 @@ function ModalHeader({
   onCancel: () => void;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
+  // iOS pageSheet modals start the screen at the very top — under
+  // the status bar / Dynamic Island. Without this padding the
+  // header tries to render up into the rounded-corner zone and
+  // looks visually cropped on the sides. Bake the safe-area inset
+  // into the header so its `bg-card` extends behind the status bar
+  // area cleanly.
+  const insets = useSafeAreaInsets();
   return (
-    <View className="flex-row items-center gap-3 border-b border-border bg-card px-3 py-3">
+    <View
+      style={{ paddingTop: insets.top + 12 }}
+      className="flex-row items-center gap-3 border-b border-border bg-card px-3 pb-3">
       <View className="relative flex-1">
         <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
           <Search size={16} color={mutedFg} />
