@@ -112,7 +112,9 @@ func (s *Service) Search(ctx context.Context, p Params) (Result, error) {
 	for _, t := range types {
 		switch t {
 		case TypeUsers:
-			users, err := s.users.Search(ctx, usersvc.SearchParams{Query: q, Limit: PerTypeLimit})
+			users, err := s.users.Search(ctx, usersvc.SearchParams{
+				Query: q, Limit: PerTypeLimit, CallerID: &p.UserID,
+			})
 			if err != nil {
 				return Result{}, err
 			}

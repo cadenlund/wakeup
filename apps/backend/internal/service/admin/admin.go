@@ -108,9 +108,12 @@ type ListUsersResult struct {
 	HasMore    bool
 }
 
-// ListUsers delegates to the user repo's prefix search.
+// ListUsers delegates to the user repo's prefix search. callerID is
+// nil — admins see the full user catalog including users they (or
+// their target) blocked, so moderation surfaces aren't hidden by a
+// personal block.
 func (s *Service) ListUsers(ctx context.Context, p ListUsersParams) (ListUsersResult, error) {
-	overFetched, err := s.users.ListByPrefix(ctx, p.Query, p.Cursor, p.Limit)
+	overFetched, err := s.users.ListByPrefix(ctx, p.Query, nil, p.Cursor, p.Limit)
 	if err != nil {
 		return ListUsersResult{}, apierror.Internal("admin: list users").WithCause(err)
 	}

@@ -112,6 +112,11 @@ type SearchParams struct {
 	Query  string             // q query param; "" returns all users
 	Cursor *pagination.Cursor // nil for first page
 	Limit  int                // 0 → DefaultLimit; clamped to MaxLimit
+	// CallerID is the authenticated user. When non-nil, the search
+	// hides users on either side of a 'blocked' friendship row with
+	// the caller — symmetric block visibility so neither party finds
+	// the other. nil bypasses the filter (admin / internal paths).
+	CallerID *uuid.UUID
 }
 
 // SearchResult is the paginated payload returned by Search.
@@ -126,7 +131,7 @@ type SearchResult struct {
 // (created_at DESC, id DESC) order. The pagination envelope is the §6.4
 // keyset shape — never offset.
 func (s *Service) Search(ctx context.Context, p SearchParams) (SearchResult, error) {
-	overFetched, err := s.users.ListByPrefix(ctx, p.Query, p.Cursor, p.Limit)
+	overFetched, err := s.users.ListByPrefix(ctx, p.Query, p.CallerID, p.Cursor, p.Limit)
 	if err != nil {
 		return SearchResult{}, apierror.Internal("search users").WithCause(err)
 	}

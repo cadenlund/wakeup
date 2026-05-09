@@ -76,6 +76,12 @@ WHERE id = $1 AND last_message_at < $2`
 const deleteConversationSQL = `-- name: DeleteConversation :exec
 DELETE FROM conversations WHERE id = $1`
 
+// listConversationsByUserSQL hides direct conversations whose OTHER
+// member is in a 'blocked' friendship row with the caller — either
+// direction. Group conversations stay visible regardless of the
+// per-member block state (a group is a real shared space; the user
+// can still talk to the non-blocked members, and Phase 6's thread
+// surface hides the blocked sender's messages per-bubble).
 const listConversationsByUserSQL = `-- name: ListConversationsByUser :many
 SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
@@ -84,6 +90,21 @@ JOIN conversation_members m ON m.conversation_id = c.id
 WHERE m.user_id = $1
   AND ($2::timestamptz IS NULL
        OR (m.pinned_at IS NULL AND ($2::timestamptz, $3::uuid) > (c.last_message_at, c.id)))
+  AND (
+    c.type <> 'direct'
+    OR NOT EXISTS (
+      SELECT 1
+      FROM conversation_members other
+      WHERE other.conversation_id = c.id
+        AND other.user_id <> $1
+        AND EXISTS (
+          SELECT 1 FROM friendships f
+          WHERE f.status = 'blocked'
+            AND ((f.requester_id = $1 AND f.addressee_id = other.user_id)
+              OR (f.requester_id = other.user_id AND f.addressee_id = $1))
+        )
+    )
+  )
 ORDER BY (m.pinned_at IS NOT NULL) DESC,
          m.pinned_at DESC NULLS LAST,
          c.last_message_at DESC,

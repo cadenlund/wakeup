@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
+	"github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
@@ -260,6 +262,94 @@ func TestListConversations_Success(t *testing.T) {
 	data, _ := got["data"].([]any)
 	if len(data) != 1 {
 		t.Errorf("len = %d, want 1", len(data))
+	}
+}
+
+// TestListConversations_HidesDirectWithBlockedUser locks in the rule
+// that a direct conversation with a blocked user is filtered out of
+// /v1/conversations for the caller. Group conversations are unaffected
+// even when one member is blocked — that rule has its own assertion
+// below.
+func TestListConversations_HidesDirectWithBlockedUser(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	a, alice := h.AuthClient(t)
+	_, bob := h.AuthClient(t)
+	// Pre-block: Alice creates the DM, then blocks Bob. The DM row
+	// stays in the DB (history preserved); the LIST endpoint just
+	// stops returning it for Alice.
+	_ = requireCreateConversation(t, h, a, map[string]any{
+		"type": "direct", "member_ids": []uuid.UUID{bob.ID},
+	})
+	if _, err := h.FriendRepo.Create(context.Background(), friendship.CreateParams{
+		ID:          uuid.Must(uuid.NewV7()),
+		RequesterID: alice.ID,
+		AddresseeID: bob.ID,
+		Status:      domain.FriendshipBlocked,
+	}); err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	resp, err := a.Get(h.Server.URL + "/v1/conversations")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("list status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	data, _ := got["data"].([]any)
+	if len(data) != 0 {
+		t.Errorf("blocked DM still listed: len=%d", len(data))
+	}
+}
+
+// TestListConversations_GroupWithBlockedMemberStaysVisible documents
+// the deliberate split: blocking a friend hides their DM, but a group
+// you're both in stays visible (Phase 6's thread render hides the
+// blocked sender's bubbles per-message). The whole-group filter
+// would lock people out of work / family chats just because one
+// member was blocked, which isn't the intent.
+func TestListConversations_GroupWithBlockedMemberStaysVisible(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	a, alice := h.AuthClient(t)
+	_, bob := h.AuthClient(t)
+	_, carol := h.AuthClient(t)
+	groupName := "Roommates"
+	_ = requireCreateConversation(t, h, a, map[string]any{
+		"type":       "group",
+		"name":       groupName,
+		"member_ids": []uuid.UUID{bob.ID, carol.ID},
+	})
+	if _, err := h.FriendRepo.Create(context.Background(), friendship.CreateParams{
+		ID:          uuid.Must(uuid.NewV7()),
+		RequesterID: alice.ID,
+		AddresseeID: bob.ID,
+		Status:      domain.FriendshipBlocked,
+	}); err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	resp, err := a.Get(h.Server.URL + "/v1/conversations")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("list status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	data, _ := got["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("group not visible after blocking a member: len=%d", len(data))
+	}
+	row, _ := data[0].(map[string]any)
+	if row["name"] != groupName {
+		t.Errorf("name = %v, want %q", row["name"], groupName)
 	}
 }
 
