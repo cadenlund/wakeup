@@ -157,9 +157,7 @@ export default function TabsWebLayout() {
 
   return (
     <View className="flex-1 flex-row bg-background">
-      <Animated.View
-        style={sidebarStyle}
-        className="overflow-hidden border-r border-border bg-card">
+      <Animated.View style={sidebarStyle} className="overflow-hidden bg-card">
         {/* TOP — when expanded, Moon + Wakeup wordmark on the left
             and a chip-style toggle on the right. When collapsed, the
             brand is unmounted entirely and the toggle centers itself.
@@ -228,6 +226,12 @@ export default function TabsWebLayout() {
           />
         </View>
       </Animated.View>
+
+      {/* Explicit vertical divider on the right edge of the sidebar.
+          Lives outside the Animated.View so it sits flush against
+          the column at every animated width without participating in
+          the width tween or being clipped by overflow-hidden. */}
+      <View className="w-px bg-border" />
 
       <View className="flex-1">
         <Slot />
