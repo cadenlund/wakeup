@@ -117,6 +117,18 @@ export default function SearchModalScreen() {
     else router.replace('/');
   }, [router]);
 
+  // Tapping a result should land on the destination as a page in
+  // the main nav stack — not push a second pane inside this modal.
+  // Dismiss the modal first, then navigate; setTimeout(0) lets the
+  // dismiss animation register before the push fires.
+  const dismissThenGoToConversation = React.useCallback(
+    (conversationId: string) => {
+      if (router.canGoBack()) router.back();
+      setTimeout(() => router.push(`/conversations/${conversationId}`), 0);
+    },
+    [router]
+  );
+
   // Reset query on dismiss so re-opening the modal starts clean.
   useFocusEffect(
     React.useCallback(() => {
@@ -131,7 +143,7 @@ export default function SearchModalScreen() {
       setOpeningFor(userId);
       try {
         const { conversationId } = await ensureDM.ensure(userId);
-        router.replace(`/conversations/${conversationId}`);
+        dismissThenGoToConversation(conversationId);
       } catch (err) {
         const msg =
           err instanceof APIError && err.message
@@ -142,7 +154,7 @@ export default function SearchModalScreen() {
         setOpeningFor(null);
       }
     },
-    [ensureDM, router, openingFor]
+    [ensureDM, dismissThenGoToConversation, openingFor]
   );
 
   const rows = React.useMemo<Row[]>(() => buildRows(data), [data]);
@@ -171,6 +183,7 @@ export default function SearchModalScreen() {
               fullConversationById={fullConversationById}
               myUserId={me?.id}
               presenceByUser={presenceByUser}
+              onOpenConversation={dismissThenGoToConversation}
             />
           )}
         />
@@ -235,6 +248,7 @@ function RenderedRow({
   fullConversationById,
   myUserId,
   presenceByUser,
+  onOpenConversation,
 }: {
   row: Row;
   onTapUser: (u: InternalHandlerHttpUserResponse) => void;
@@ -242,8 +256,8 @@ function RenderedRow({
   fullConversationById: Map<string, InternalHandlerHttpConversationResponse>;
   myUserId: string | undefined;
   presenceByUser: Map<string, string>;
+  onOpenConversation: (conversationId: string) => void;
 }) {
-  const router = useRouter();
   switch (row.kind) {
     case 'header':
       return <SectionHeader title={row.title} count={row.count} />;
@@ -285,7 +299,7 @@ function RenderedRow({
             presence={display.presence}
             lastMessageAt={full.last_message_at}
             onPress={() => {
-              if (full.id) router.push(`/conversations/${full.id}`);
+              if (full.id) onOpenConversation(full.id);
             }}
             testID={`search-conversation-${full.id}`}
           />
@@ -301,7 +315,7 @@ function RenderedRow({
           fallbackInitial={c.name ?? 'C'}
           lastMessageAt={c.last_message_at}
           onPress={() => {
-            if (c.id) router.push(`/conversations/${c.id}`);
+            if (c.id) onOpenConversation(c.id);
           }}
           testID={`search-conversation-${c.id}`}
         />
@@ -309,13 +323,18 @@ function RenderedRow({
     }
     case 'message': {
       const m = row.message;
-      return <MessageHitRow message={m} />;
+      return <MessageHitRow message={m} onOpenConversation={onOpenConversation} />;
     }
   }
 }
 
-function MessageHitRow({ message }: { message: InternalHandlerHttpSearchMessageRow }) {
-  const router = useRouter();
+function MessageHitRow({
+  message,
+  onOpenConversation,
+}: {
+  message: InternalHandlerHttpSearchMessageRow;
+  onOpenConversation: (conversationId: string) => void;
+}) {
   const mutedFg = useThemeColor('muted-foreground');
   // Lightweight render until Phase 6 ships jump-to-message inside
   // the real thread surface. Tap routes to the conversation; we
@@ -325,7 +344,7 @@ function MessageHitRow({ message }: { message: InternalHandlerHttpSearchMessageR
     <Pressable
       onPress={() => {
         if (message.conversation_id) {
-          router.push(`/conversations/${message.conversation_id}`);
+          onOpenConversation(message.conversation_id);
         }
       }}
       accessibilityRole="button"
