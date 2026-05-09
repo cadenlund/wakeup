@@ -278,9 +278,9 @@ func TestListConversations_HidesDirectWithBlockedUser(t *testing.T) {
 	// Pre-block: Alice creates the DM, then blocks Bob. The DM row
 	// stays in the DB (history preserved); the LIST endpoint just
 	// stops returning it for Alice.
-	_ = post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	_ = requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{bob.ID},
-	}).Body.Close()
+	})
 	if _, err := h.FriendRepo.Create(context.Background(), friendship.CreateParams{
 		ID:          uuid.Must(uuid.NewV7()),
 		RequesterID: alice.ID,
@@ -295,6 +295,10 @@ func TestListConversations_HidesDirectWithBlockedUser(t *testing.T) {
 		t.Fatalf("GET: %v", err)
 	}
 	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("list status=%d body=%s", resp.StatusCode, body)
+	}
 	got := mustDecode(t, resp.Body)
 	data, _ := got["data"].([]any)
 	if len(data) != 0 {
@@ -315,11 +319,11 @@ func TestListConversations_GroupWithBlockedMemberStaysVisible(t *testing.T) {
 	_, bob := h.AuthClient(t)
 	_, carol := h.AuthClient(t)
 	groupName := "Roommates"
-	_ = post(t, a, h.Server.URL+"/v1/conversations", map[string]any{
+	_ = requireCreateConversation(t, h, a, map[string]any{
 		"type":       "group",
 		"name":       groupName,
 		"member_ids": []uuid.UUID{bob.ID, carol.ID},
-	}).Body.Close()
+	})
 	if _, err := h.FriendRepo.Create(context.Background(), friendship.CreateParams{
 		ID:          uuid.Must(uuid.NewV7()),
 		RequesterID: alice.ID,
@@ -334,6 +338,10 @@ func TestListConversations_GroupWithBlockedMemberStaysVisible(t *testing.T) {
 		t.Fatalf("GET: %v", err)
 	}
 	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("list status=%d body=%s", resp.StatusCode, body)
+	}
 	got := mustDecode(t, resp.Body)
 	data, _ := got["data"].([]any)
 	if len(data) != 1 {

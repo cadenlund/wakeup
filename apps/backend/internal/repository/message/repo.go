@@ -103,13 +103,37 @@ FROM message_reads
 WHERE message_id = $1
 ORDER BY read_at DESC, user_id`
 
+// searchInUserConversationsSQL: same direct-conv block-filter as
+// listConversationsByUserSQL — a message that lives in a direct
+// conversation whose other member is in a 'blocked' edge with the
+// caller is hidden from search results. Group conversations are
+// untouched (Phase 6's thread surface hides blocked-sender bubbles
+// per-message). Without this, /v1/search?types=messages leaked
+// blocked DM bodies even though the conversation itself was hidden
+// from /v1/conversations.
 const searchInUserConversationsSQL = `-- name: SearchInUserConversations :many
 SELECT m.id, m.conversation_id, m.sender_id, m.body, m.reply_to_message_id,
        m.created_at, m.edited_at, m.deleted_at
 FROM messages m
 JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = $1
+JOIN conversations c ON c.id = m.conversation_id
 WHERE m.deleted_at IS NULL
   AND m.body_tsv @@ plainto_tsquery('english', $2::text)
+  AND (
+    c.type <> 'direct'
+    OR NOT EXISTS (
+      SELECT 1
+      FROM conversation_members other
+      WHERE other.conversation_id = c.id
+        AND other.user_id <> $1
+        AND EXISTS (
+          SELECT 1 FROM friendships f
+          WHERE f.status = 'blocked'
+            AND ((f.requester_id = $1 AND f.addressee_id = other.user_id)
+              OR (f.requester_id = other.user_id AND f.addressee_id = $1))
+        )
+    )
+  )
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $3`
 
