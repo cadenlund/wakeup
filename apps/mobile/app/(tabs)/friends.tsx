@@ -1,5 +1,5 @@
-// Phase 4.2 + 4.3 — Friends tab. Three sections rendered through a
-// single FlashList:
+// Phase 4.2 + 4.3 + 4.4 — Friends tab. Three sections rendered through
+// a single FlashList:
 //   1. Accepted Friends — keyset-paginated by `accepted_at DESC`,
 //      enriched with presence so each row shows a status dot.
 //   2. Incoming Requests — pending friend requests addressed to me.
@@ -14,16 +14,21 @@
 // validator). Each result row carries an inline status — "Friend"
 // / "Pending" / "Accept" — derived from the same friends-list and
 // requests queries, so we don't make a third per-user lookup just
-// to render the right badge. Tap "Add" to fire usePostV1FriendsRequests;
-// the row flips to "Sent" optimistically and the outgoing-requests
-// query is invalidated so the section list updates next time the
-// search is cleared.
+// to render the right badge.
 //
-// Actions on existing requests (accept/decline/unfriend/block)
-// land in 4.4; pull-to-refresh in 4.5.
-import { Search, Users, X } from 'lucide-react-native';
+// Actions wired in 4.4:
+//   - Incoming requests: inline Accept / Decline buttons.
+//   - Accepted friends: long-press (or the trailing "…" button)
+//     opens a bottom-sheet menu with Unfriend / Block.
+// Confirmations live in the menu itself — tapping a destructive
+// item commits immediately and toasts the result. A separate
+// confirm dialog would just add a second tap and a worse web UX
+// (where window.alert is the only out-of-the-box option).
+//
+// Pull-to-refresh wraps everything in 4.5.
+import { Check, MoreHorizontal, Search, ShieldOff, UserMinus, Users, X } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendRow } from '@/components/friend-row';
@@ -35,12 +40,20 @@ import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import {
+  getGetV1FriendsQueryKey,
   getGetV1FriendsRequestsQueryKey,
+  useDeleteV1FriendsUserId,
   useGetV1Friends,
   useGetV1FriendsRequests,
   usePostV1FriendsRequests,
+  usePostV1FriendsRequestsIdAccept,
+  usePostV1FriendsRequestsIdDecline,
+  usePostV1FriendsUserIdBlock,
 } from '@/lib/api/hooks/friends/friends';
-import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
+import {
+  getGetV1PresenceFriendsQueryKey,
+  useGetV1PresenceFriends,
+} from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import type {
   InternalHandlerHttpFriendListResponse,
@@ -150,6 +163,45 @@ export default function FriendsScreen() {
 
   const qc = useQueryClient();
   const sendRequest = usePostV1FriendsRequests();
+  const acceptRequest = usePostV1FriendsRequestsIdAccept();
+  const declineRequest = usePostV1FriendsRequestsIdDecline();
+  const unfriend = useDeleteV1FriendsUserId();
+  const blockUser = usePostV1FriendsUserIdBlock();
+
+  // Pending action set keyed by friendship id (for accept/decline) or
+  // user id (for unfriend/block) so the row can show a disabled state
+  // while the request is in flight without mounting a per-row spinner.
+  const [pendingAction, setPendingAction] = React.useState<Set<string>>(new Set());
+  const markPending = React.useCallback((id: string) => {
+    setPendingAction((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+  const unmarkPending = React.useCallback((id: string) => {
+    setPendingAction((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  // Bottom-sheet state for the per-friend action menu.
+  const [menuTarget, setMenuTarget] = React.useState<UserRow | null>(null);
+
+  const invalidateRelationships = React.useCallback(async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() }),
+      qc.invalidateQueries({ queryKey: getGetV1FriendsQueryKey() }),
+      qc.invalidateQueries({ queryKey: getGetV1PresenceFriendsQueryKey() }),
+    ]);
+  }, [qc]);
+
+  const surfaceError = React.useCallback((err: unknown, fallback: string) => {
+    const msg = err instanceof APIError && err.message ? err.message : fallback;
+    toast.error(msg);
+  }, []);
 
   const onAddFriend = React.useCallback(
     async (user: UserRow) => {
@@ -169,11 +221,7 @@ export default function FriendsScreen() {
         await qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() });
         toast.success('Request sent', `Waiting on @${user.username}`);
       } catch (err) {
-        const msg =
-          err instanceof APIError && err.message
-            ? err.message
-            : "Couldn't send the request — try again in a sec.";
-        toast.error(msg);
+        surfaceError(err, "Couldn't send the request — try again in a sec.");
       } finally {
         setPendingSend((prev) => {
           const next = new Set(prev);
@@ -182,7 +230,84 @@ export default function FriendsScreen() {
         });
       }
     },
-    [sendRequest, qc]
+    [sendRequest, qc, surfaceError]
+  );
+
+  const onAcceptRequest = React.useCallback(
+    async (friendship: Friendship) => {
+      const id = friendship.id;
+      if (!id) return;
+      markPending(id);
+      try {
+        await acceptRequest.mutateAsync({ id });
+        await invalidateRelationships();
+        const handle = friendship.user?.username ? `@${friendship.user.username}` : 'them';
+        toast.success("You're now friends", `Say hi to ${handle}.`);
+      } catch (err) {
+        surfaceError(err, "Couldn't accept this request right now.");
+      } finally {
+        unmarkPending(id);
+      }
+    },
+    [acceptRequest, invalidateRelationships, markPending, unmarkPending, surfaceError]
+  );
+
+  const onDeclineRequest = React.useCallback(
+    async (friendship: Friendship) => {
+      const id = friendship.id;
+      if (!id) return;
+      markPending(id);
+      try {
+        await declineRequest.mutateAsync({ id });
+        await invalidateRelationships();
+        toast.info('Request declined');
+      } catch (err) {
+        surfaceError(err, "Couldn't decline this request right now.");
+      } finally {
+        unmarkPending(id);
+      }
+    },
+    [declineRequest, invalidateRelationships, markPending, unmarkPending, surfaceError]
+  );
+
+  const onUnfriend = React.useCallback(
+    async (user: UserRow) => {
+      const userId = user.id;
+      if (!userId) return;
+      markPending(userId);
+      setMenuTarget(null);
+      try {
+        await unfriend.mutateAsync({ userId });
+        await invalidateRelationships();
+        const handle = user.username ? `@${user.username}` : 'this user';
+        toast.info('Unfriended', `${handle} is no longer in your friends.`);
+      } catch (err) {
+        surfaceError(err, "Couldn't unfriend right now.");
+      } finally {
+        unmarkPending(userId);
+      }
+    },
+    [unfriend, invalidateRelationships, markPending, unmarkPending, surfaceError]
+  );
+
+  const onBlock = React.useCallback(
+    async (user: UserRow) => {
+      const userId = user.id;
+      if (!userId) return;
+      markPending(userId);
+      setMenuTarget(null);
+      try {
+        await blockUser.mutateAsync({ userId });
+        await invalidateRelationships();
+        const handle = user.username ? `@${user.username}` : 'this user';
+        toast.info('Blocked', `${handle} can't message or add you.`);
+      } catch (err) {
+        surfaceError(err, "Couldn't block right now.");
+      } finally {
+        unmarkPending(userId);
+      }
+    },
+    [blockUser, invalidateRelationships, markPending, unmarkPending, surfaceError]
   );
 
   const sectionRows = React.useMemo<Row[]>(() => {
@@ -290,8 +415,22 @@ export default function FriendsScreen() {
       ) : isInitialLoad ? (
         <FriendsLoading />
       ) : (
-        <SectionsPane rows={sectionRows} />
+        <SectionsPane
+          rows={sectionRows}
+          pendingAction={pendingAction}
+          onAccept={onAcceptRequest}
+          onDecline={onDeclineRequest}
+          onOpenMenu={setMenuTarget}
+        />
       )}
+
+      <FriendActionMenu
+        target={menuTarget}
+        pendingAction={pendingAction}
+        onClose={() => setMenuTarget(null)}
+        onUnfriend={onUnfriend}
+        onBlock={onBlock}
+      />
     </View>
   );
 }
@@ -332,7 +471,19 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-function SectionsPane({ rows }: { rows: Row[] }) {
+function SectionsPane({
+  rows,
+  pendingAction,
+  onAccept,
+  onDecline,
+  onOpenMenu,
+}: {
+  rows: Row[];
+  pendingAction: Set<string>;
+  onAccept: (f: Friendship) => void;
+  onDecline: (f: Friendship) => void;
+  onOpenMenu: (u: UserRow) => void;
+}) {
   if (rows.length === 0) return <FriendsAllEmpty />;
   // No friends, no requests — show the welcoming empty state instead
   // of a lone "Friends (0)" header.
@@ -347,7 +498,15 @@ function SectionsPane({ rows }: { rows: Row[] }) {
     <List
       data={rows}
       keyExtractor={(item) => item.key}
-      renderItem={({ item }) => <RenderedRow row={item} />}
+      renderItem={({ item }) => (
+        <RenderedRow
+          row={item}
+          pendingAction={pendingAction}
+          onAccept={onAccept}
+          onDecline={onDecline}
+          onOpenMenu={onOpenMenu}
+        />
+      )}
     />
   );
 }
@@ -452,7 +611,19 @@ function SearchResultRow({ row, onAdd }: { row: SearchRow; onAdd: (user: UserRow
   );
 }
 
-function RenderedRow({ row }: { row: Row }) {
+function RenderedRow({
+  row,
+  pendingAction,
+  onAccept,
+  onDecline,
+  onOpenMenu,
+}: {
+  row: Row;
+  pendingAction: Set<string>;
+  onAccept: (f: Friendship) => void;
+  onDecline: (f: Friendship) => void;
+  onOpenMenu: (u: UserRow) => void;
+}) {
   switch (row.kind) {
     case 'header':
       return <SectionHeader title={row.title} count={row.count} />;
@@ -460,6 +631,8 @@ function RenderedRow({ row }: { row: Row }) {
       return <SectionEmpty subtitle={row.subtitle} />;
     case 'friend': {
       const u = row.friendship.user;
+      const userId = u?.id;
+      const inFlight = userId ? pendingAction.has(userId) : false;
       return (
         <FriendRow
           displayName={u?.display_name}
@@ -467,19 +640,24 @@ function RenderedRow({ row }: { row: Row }) {
           avatarUrl={u?.avatar_url}
           statusEmoji={u?.status_emoji}
           presence={row.presence}
+          onLongPress={u ? () => onOpenMenu(u) : undefined}
+          trailing={
+            u ? <RowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} /> : undefined
+          }
         />
       );
     }
     case 'request': {
       const u = row.friendship.user;
-      // Phase 4.4 swaps the trailing slot for accept/decline buttons
-      // (incoming) and a "Pending" indicator (outgoing). For 4.2 we
-      // surface intent through a muted text marker.
-      const marker =
+      const fid = row.friendship.id;
+      const inFlight = fid ? pendingAction.has(fid) : false;
+      const trailing =
         row.direction === 'incoming' ? (
-          <Text variant="muted" className="text-xs">
-            wants to be friends
-          </Text>
+          <RequestActions
+            disabled={inFlight}
+            onAccept={() => onAccept(row.friendship)}
+            onDecline={() => onDecline(row.friendship)}
+          />
         ) : (
           <Text variant="muted" className="text-xs">
             Pending
@@ -491,11 +669,142 @@ function RenderedRow({ row }: { row: Row }) {
           username={u?.username}
           avatarUrl={u?.avatar_url}
           hidePresence
-          trailing={marker}
+          trailing={trailing}
         />
       );
     }
   }
+}
+
+function RequestActions({
+  disabled,
+  onAccept,
+  onDecline,
+}: {
+  disabled: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const fg = useThemeColor('foreground');
+  return (
+    <>
+      <Button
+        size="icon"
+        variant="outline"
+        disabled={disabled}
+        onPress={onDecline}
+        accessibilityLabel="Decline friend request"
+        testID="friend-request-decline">
+        <X size={16} color={fg} />
+      </Button>
+      <Button
+        size="icon"
+        variant="default"
+        disabled={disabled}
+        onPress={onAccept}
+        accessibilityLabel="Accept friend request"
+        testID="friend-request-accept">
+        <Check size={16} color="#fff" />
+      </Button>
+    </>
+  );
+}
+
+function RowMenuButton({ disabled, onPress }: { disabled: boolean; onPress: () => void }) {
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel="More actions"
+      testID="friend-row-menu"
+      hitSlop={6}
+      className="h-8 w-8 items-center justify-center rounded-md active:bg-muted">
+      <MoreHorizontal size={18} color={mutedFg} />
+    </Pressable>
+  );
+}
+
+function FriendActionMenu({
+  target,
+  pendingAction,
+  onClose,
+  onUnfriend,
+  onBlock,
+}: {
+  target: UserRow | null;
+  pendingAction: Set<string>;
+  onClose: () => void;
+  onUnfriend: (u: UserRow) => void;
+  onBlock: (u: UserRow) => void;
+}) {
+  const fg = useThemeColor('foreground');
+  const destructive = useThemeColor('destructive');
+  const mutedFg = useThemeColor('muted-foreground');
+  const handle = target?.username ? `@${target.username}` : (target?.display_name ?? '');
+  const inFlight = target?.id ? pendingAction.has(target.id) : false;
+  return (
+    <Modal
+      visible={!!target}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      // Stop scrolling underneath while the sheet is up.
+      statusBarTranslucent>
+      <Pressable
+        accessibilityLabel="Dismiss"
+        onPress={onClose}
+        className="flex-1 justify-end bg-black/40">
+        {/* Inner Pressable absorbs touches on the sheet itself so taps
+            inside don't bubble to the dimmer and dismiss it. */}
+        <Pressable onPress={() => {}} className="rounded-t-3xl bg-card">
+          <View className="items-center pt-3">
+            <View className="h-1 w-12 rounded-full bg-muted-foreground/30" />
+          </View>
+          <View className="px-4 pb-2 pt-3">
+            <Text variant="muted" className="text-center text-sm">
+              {handle}
+            </Text>
+          </View>
+          <View className="px-2 pb-6">
+            <Pressable
+              onPress={() => target && onUnfriend(target)}
+              disabled={inFlight}
+              accessibilityRole="button"
+              accessibilityLabel="Unfriend"
+              testID="friend-menu-unfriend"
+              className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
+              <UserMinus size={18} color={fg} />
+              <Text className="text-base">Unfriend</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => target && onBlock(target)}
+              disabled={inFlight}
+              accessibilityRole="button"
+              accessibilityLabel="Block"
+              testID="friend-menu-block"
+              className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
+              <ShieldOff size={18} color={destructive} />
+              <Text style={{ color: destructive }} className="text-base font-medium">
+                Block
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={onClose}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              testID="friend-menu-cancel"
+              className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
+              <Text style={{ color: mutedFg }} className="text-sm">
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
 }
 
 function SectionHeader({ title, count }: { title: string; count: number }) {
