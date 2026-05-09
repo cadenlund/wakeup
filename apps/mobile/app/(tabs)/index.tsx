@@ -25,9 +25,11 @@ import { ConversationRow } from '@/components/conversation-row';
 import { List } from '@/components/ui/list';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
+import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
+  InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -40,6 +42,19 @@ export default function ChatsScreen() {
 
   const conversationsQ = useGetV1Conversations({ limit: 100 }, { query: { staleTime: 30_000 } });
   const data = conversationsQ.data as InternalHandlerHttpConversationListResponse | undefined;
+
+  // Presence is keyed by user_id. Cache it once per render so each
+  // row's display can look up O(1) without re-deriving the map per
+  // row. Stale 15s tracks the friends-tab choice.
+  const presenceQ = useGetV1PresenceFriends({ query: { staleTime: 15_000 } });
+  const presenceData = presenceQ.data as InternalHandlerHttpPresenceListResponse | undefined;
+  const presenceByUser = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of presenceData?.data ?? []) {
+      if (p.user_id && p.status) m.set(p.user_id, p.status);
+    }
+    return m;
+  }, [presenceData]);
 
   const sorted = React.useMemo(() => sortConversations(data?.data ?? []), [data]);
 
@@ -73,7 +88,11 @@ export default function ChatsScreen() {
           keyExtractor={(item, i) => item.id ?? `idx-${i}`}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           renderItem={({ item }) => (
-            <RenderedConversationRow conversation={item} myUserId={me?.id} />
+            <RenderedConversationRow
+              conversation={item}
+              myUserId={me?.id}
+              presenceByUser={presenceByUser}
+            />
           )}
         />
       )}
@@ -103,12 +122,14 @@ function sortConversations(rows: Conversation[]): Conversation[] {
 function RenderedConversationRow({
   conversation,
   myUserId,
+  presenceByUser,
 }: {
   conversation: Conversation;
   myUserId: string | undefined;
+  presenceByUser: Map<string, string>;
 }) {
   const router = useRouter();
-  const display = conversationDisplay(conversation, myUserId);
+  const display = conversationDisplay(conversation, myUserId, presenceByUser);
   const isMuted = isCurrentlyMuted(conversation.muted_until);
   const isPinned = !!conversation.pinned_at;
   return (
@@ -117,6 +138,8 @@ function RenderedConversationRow({
       subtitle={display.subtitle}
       avatarUrl={display.avatarUrl}
       fallbackInitial={display.fallbackInitial}
+      stackedMembers={display.stackedMembers}
+      presence={display.presence}
       lastMessageAt={conversation.last_message_at}
       isMuted={isMuted}
       isPinned={isPinned}
@@ -128,10 +151,30 @@ function RenderedConversationRow({
   );
 }
 
+type ConversationDisplay = {
+  title: string;
+  subtitle?: string;
+  avatarUrl?: string | null;
+  fallbackInitial?: string;
+  // Two member avatars to render in a stacked cluster when the
+  // group has no avatar_url. Each carries its own presence so the
+  // cluster can show two dots. Empty / undefined for direct convos.
+  stackedMembers?: {
+    avatarUrl?: string | null;
+    fallbackName?: string | null;
+    presence?: string | null;
+  }[];
+  // Presence to overlay on the (single) avatar. Set for direct DMs
+  // where there's a clear "the other person"; unset for groups
+  // where per-member dots ride on stackedMembers instead.
+  presence?: string | null;
+};
+
 function conversationDisplay(
   c: Conversation,
-  myUserId: string | undefined
-): { title: string; subtitle?: string; avatarUrl?: string | null; fallbackInitial?: string } {
+  myUserId: string | undefined,
+  presenceByUser: Map<string, string>
+): ConversationDisplay {
   if (c.type === 'direct') {
     // For a 1:1 conversation, we want the *other* member. Server may
     // include the caller as a member; filter them out so a self-DM
@@ -143,29 +186,56 @@ function conversationDisplay(
       title,
       avatarUrl: other?.avatar_url,
       fallbackInitial: title,
+      presence: other?.id ? (presenceByUser.get(other.id) ?? null) : null,
     };
   }
   // group
+  const others = (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId);
+  const memberCount = (c.members ?? []).length;
+  const stackedMembers = others.slice(0, 2).map((m) => ({
+    avatarUrl: m.user?.avatar_url,
+    fallbackName: m.user?.display_name ?? m.user?.username ?? null,
+    presence: m.user?.id ? (presenceByUser.get(m.user.id) ?? null) : null,
+  }));
+
   const named = c.name?.trim();
   if (named) {
+    // Named group → subtitle is "N members" so the avatar / name +
+    // count read as a complete identity even before any messages.
+    const subtitle = memberCount > 0 ? membersLabel(memberCount) : undefined;
     return {
       title: named,
+      subtitle,
       avatarUrl: c.avatar_url,
       fallbackInitial: named,
+      stackedMembers,
     };
   }
   // Unnamed group — fall back to a comma-joined preview of up to
   // three member names so the row isn't empty.
-  const preview = (c.members ?? [])
+  const previewNames = others
     .map((m) => m.user?.display_name?.trim() || m.user?.username?.trim())
-    .filter((s): s is string => !!s)
-    .filter((_s, i) => i < 3)
-    .join(', ');
+    .filter((s): s is string => !!s);
+  const previewShown = previewNames.slice(0, 3).join(', ');
+  const remaining = previewNames.length - 3;
+  // "Caden, Test, Alice +2" when there's overflow; bare list when
+  // it all fits.
+  const subtitle = previewShown
+    ? remaining > 0
+      ? `${previewShown} +${remaining}`
+      : previewShown
+    : undefined;
   return {
-    title: preview || 'Group',
+    title: previewShown || 'Group',
+    subtitle,
     avatarUrl: c.avatar_url,
-    fallbackInitial: preview || 'G',
+    fallbackInitial: previewShown || 'G',
+    stackedMembers,
   };
+}
+
+function membersLabel(n: number): string {
+  return n === 1 ? '1 member' : `${n} members`;
 }
 
 function isCurrentlyMuted(mutedUntil: string | null | undefined): boolean {

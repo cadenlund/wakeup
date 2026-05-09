@@ -5,10 +5,12 @@
 //
 // Direct vs group rendering:
 //   - direct: avatar + display_name of the OTHER member.
-//   - group:  conversation.avatar_url + conversation.name. If
-//     name is missing we fall back to a comma-joined preview of
-//     up to three member names so an unnamed group still has
-//     something to read.
+//   - group with avatar_url: conversation.avatar_url + name (or
+//     comma-joined member preview for unnamed groups).
+//   - group without avatar_url: stacked-avatars cluster of two
+//     member avatars overlapping diagonally so the cell still
+//     reads as "this is a group" without showing a placeholder
+//     "G" chip.
 //
 // Pin / mute icons are surfaced inline when the caller's
 // membership has those flags set — the conversation list endpoint
@@ -18,7 +20,8 @@ import { BellOff, Pin } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, View } from 'react-native';
 
-import { Avatar } from '@/components/ui/avatar';
+import { PresenceDot } from '@/components/presence-dot';
+import { Avatar, StackedAvatars, type StackedMember } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import { formatRelative } from '@/lib/relative-time';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
@@ -29,6 +32,14 @@ type ConversationRowProps = {
   subtitle?: string | null;
   avatarUrl?: string | null;
   fallbackInitial?: string | null;
+  // Group fallback: when avatarUrl is empty and stackedMembers has
+  // at least one entry, the row renders <StackedAvatars> instead of
+  // the single-initial fallback chip.
+  stackedMembers?: StackedMember[];
+  // Presence to overlay on the (single) avatar — direct DMs use the
+  // other member's status. Group rows pass presence down per
+  // stackedMember instead and leave this undefined.
+  presence?: string | null;
   lastMessageAt?: string | null;
   isMuted?: boolean;
   isPinned?: boolean;
@@ -42,6 +53,8 @@ function ConversationRow({
   subtitle,
   avatarUrl,
   fallbackInitial,
+  stackedMembers,
+  presence,
   lastMessageAt,
   isMuted,
   isPinned,
@@ -61,6 +74,12 @@ function ConversationRow({
         }
       : {};
   const stamp = formatRelative(lastMessageAt);
+  // Avatar branch:
+  //   1. avatarUrl present → single image (most precise — the user
+  //      uploaded a deliberate group photo or it's a DM).
+  //   2. no avatarUrl, stackedMembers given → cluster fallback.
+  //   3. neither → single initial chip via Avatar's own fallback.
+  const showStacked = !avatarUrl && (stackedMembers?.length ?? 0) > 0;
   return (
     <Container
       {...containerProps}
@@ -69,7 +88,18 @@ function ConversationRow({
         'flex-row items-center gap-3 px-4 py-3',
         (onPress || onLongPress) && 'active:bg-muted'
       )}>
-      <Avatar source={avatarUrl} fallbackName={fallbackInitial ?? title} size={48} />
+      {showStacked ? (
+        <StackedAvatars members={stackedMembers!} size={48} />
+      ) : (
+        <View className="relative">
+          <Avatar source={avatarUrl} fallbackName={fallbackInitial ?? title} size={48} />
+          {presence ? (
+            <View className="absolute -bottom-0.5 -right-0.5">
+              <PresenceDot status={presence} size={11} />
+            </View>
+          ) : null}
+        </View>
+      )}
       <View className="min-w-0 flex-1">
         <View className="flex-row items-center gap-1.5">
           {isPinned ? <Pin size={12} color={mutedFg} /> : null}
