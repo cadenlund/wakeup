@@ -23,7 +23,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import * as React from 'react';
-import { Pressable, View, type ViewStyle } from 'react-native';
+import { AccessibilityInfo, Pressable, View, type ViewStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -83,6 +83,24 @@ export default function TabsWebLayout() {
     () => safeLocalGet(COLLAPSED_KEY) === 'true'
   );
 
+  // Honor the OS reduced-motion setting — when on, we skip the tween
+  // and snap to the new width/opacity. Same pattern as the onboarding
+  // carousel.
+  const [reduceMotion, setReduceMotion] = React.useState(false);
+  React.useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((v) => {
+      if (mounted) setReduceMotion(v);
+    });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', (v) =>
+      setReduceMotion(v)
+    );
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
+
   const widthSv = useSharedValue(collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH);
   const labelOpacitySv = useSharedValue(collapsed ? 0 : 1);
 
@@ -92,20 +110,24 @@ export default function TabsWebLayout() {
   const toggle = React.useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
-      widthSv.value = withTiming(next ? COLLAPSED_WIDTH : EXPANDED_WIDTH, {
-        duration: ANIM_DURATION,
-      });
-      // Collapse: fade labels out faster than the width shrinks so the
-      // text isn't squashed into the icons mid-tween. Expand: fade in
-      // a touch slower than the width grows so the labels appear once
-      // there's space for them.
-      labelOpacitySv.value = withTiming(next ? 0 : 1, {
-        duration: next ? 120 : 180,
-      });
+      const targetWidth = next ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
+      const targetOpacity = next ? 0 : 1;
+      if (reduceMotion) {
+        widthSv.value = targetWidth;
+        labelOpacitySv.value = targetOpacity;
+      } else {
+        widthSv.value = withTiming(targetWidth, { duration: ANIM_DURATION });
+        // Collapse: fade labels out faster than the width shrinks so the
+        // text isn't squashed into the icons mid-tween. Expand: fade in
+        // a touch slower so the labels appear once there's space.
+        labelOpacitySv.value = withTiming(targetOpacity, {
+          duration: next ? 120 : 180,
+        });
+      }
       safeLocalSet(COLLAPSED_KEY, String(next));
       return next;
     });
-  }, [widthSv, labelOpacitySv]);
+  }, [widthSv, labelOpacitySv, reduceMotion]);
 
   // Same logout logic as the native tab bar header. Real settings/
   // logout UX lands in Phase 11.6; this is the temporary surface.
