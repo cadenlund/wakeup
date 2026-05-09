@@ -44,9 +44,9 @@ import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { usePostV1AuthLogout } from '@/lib/api/hooks/auth/auth';
 import { signedOut } from '@/lib/auth/post-auth-nav';
+import { STORAGE_KEYS } from '@/lib/storage-keys';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
-const COLLAPSED_KEY = 'wakeup:sidebar:collapsed';
 const COLLAPSED_WIDTH = 64;
 const EXPANDED_WIDTH = 240;
 const ANIM_DURATION = 220;
@@ -92,7 +92,7 @@ export default function TabsWebLayout() {
 
   // Lazy initial read keeps the localStorage hit on mount only.
   const [collapsed, setCollapsed] = React.useState<boolean>(
-    () => safeLocalGet(COLLAPSED_KEY) === 'true'
+    () => safeLocalGet(STORAGE_KEYS.uiSidebarCollapsed) === 'true'
   );
 
   // Honor the OS reduced-motion setting — when on, snap rather
@@ -135,7 +135,7 @@ export default function TabsWebLayout() {
           duration: next ? 120 : 180,
         });
       }
-      safeLocalSet(COLLAPSED_KEY, String(next));
+      safeLocalSet(STORAGE_KEYS.uiSidebarCollapsed, String(next));
       return next;
     });
   }, [widthSv, labelOpacitySv, reduceMotion]);

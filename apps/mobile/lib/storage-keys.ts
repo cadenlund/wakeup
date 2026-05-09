@@ -24,6 +24,10 @@ export const STORAGE_KEYS = {
   // TanStack Query persistence — see lib/api/query-client.ts
   queryCache: 'query-cache:v1',
   mutationCache: 'mutation-cache:v1',
+
+  // UI state — see app/(tabs)/_layout.web.tsx (web sidebar collapsed
+  // pref, persisted via window.localStorage on web only).
+  uiSidebarCollapsed: 'ui:sidebar_collapsed',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
