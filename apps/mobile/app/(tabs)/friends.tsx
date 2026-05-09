@@ -40,6 +40,7 @@ import {
   Users,
   X,
 } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import * as React from 'react';
 import { ActivityIndicator, Modal, Pressable, RefreshControl, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -68,6 +69,7 @@ import {
   useGetV1PresenceFriends,
 } from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
+import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
 import type {
   InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendRequestsResponse,
@@ -224,6 +226,29 @@ export default function FriendsScreen() {
     const msg = err instanceof APIError && err.message ? err.message : fallback;
     toast.error(msg);
   }, []);
+
+  // Phase 5.3 — tap a friend row to open (or lazily create) the
+  // direct conversation with them. Cache hits are instant, cache
+  // misses POST a new conversation. Either way we route to the
+  // thread.
+  const router = useRouter();
+  const ensureDM = useEnsureDirectConversation();
+  const [openingDmFor, setOpeningDmFor] = React.useState<string | null>(null);
+  const onOpenDMWithFriend = React.useCallback(
+    async (friendUserId: string) => {
+      if (openingDmFor) return; // ignore double-tap
+      setOpeningDmFor(friendUserId);
+      try {
+        const { conversationId } = await ensureDM.ensure(friendUserId);
+        router.push(`/conversations/${conversationId}`);
+      } catch (err) {
+        surfaceError(err, "Couldn't open the conversation right now.");
+      } finally {
+        setOpeningDmFor(null);
+      }
+    },
+    [openingDmFor, ensureDM, router, surfaceError]
+  );
 
   const onAddFriend = React.useCallback(
     async (user: UserRow) => {
@@ -504,6 +529,8 @@ export default function FriendsScreen() {
           onAccept={onAcceptRequest}
           onDecline={onDeclineRequest}
           onOpenMenu={setMenuTarget}
+          onOpenDM={onOpenDMWithFriend}
+          menuOpen={!!menuTarget}
           onToggleSection={toggleSection}
           refreshing={refreshing}
           onRefresh={onRefresh}
@@ -576,6 +603,8 @@ function SectionsPane({
   onAccept,
   onDecline,
   onOpenMenu,
+  onOpenDM,
+  menuOpen,
   onToggleSection,
   refreshing,
   onRefresh,
@@ -586,6 +615,11 @@ function SectionsPane({
   onAccept: (f: Friendship) => void;
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
+  onOpenDM: (friendUserId: string) => void;
+  // True while the bottom-sheet action menu is open. Threaded
+  // through to RenderedRow so a Pressable's onPress can't race the
+  // long-press → menu transition (CR #134).
+  menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
   refreshing: boolean;
   onRefresh: () => void;
@@ -646,6 +680,8 @@ function SectionsPane({
           onAccept={onAccept}
           onDecline={onDecline}
           onOpenMenu={onOpenMenu}
+          onOpenDM={onOpenDM}
+          menuOpen={menuOpen}
           onToggleSection={onToggleSection}
         />
       )}
@@ -794,6 +830,8 @@ function RenderedRow({
   onAccept,
   onDecline,
   onOpenMenu,
+  onOpenDM,
+  menuOpen,
   onToggleSection,
 }: {
   row: Row;
@@ -801,6 +839,8 @@ function RenderedRow({
   onAccept: (f: Friendship) => void;
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
+  onOpenDM: (friendUserId: string) => void;
+  menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
 }) {
   switch (row.kind) {
@@ -826,6 +866,7 @@ function RenderedRow({
           avatarUrl={u?.avatar_url}
           statusEmoji={u?.status_emoji}
           presence={row.presence}
+          onPress={userId && !inFlight && !menuOpen ? () => onOpenDM(userId) : undefined}
           onLongPress={u ? () => onOpenMenu(u) : undefined}
           trailing={
             u ? <RowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} /> : undefined

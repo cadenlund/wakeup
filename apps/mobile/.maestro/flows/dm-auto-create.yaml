@@ -1,0 +1,42 @@
+# Phase 5.3 — friends-tab tap → DM auto-create.
+#
+# A friend's DM is created lazily when the user taps the row. With
+# only one fresh account in the flow we can't validate the actual
+# create-and-route round trip (that needs a second user that's
+# already an accepted friend), so this flow walks the structural
+# path:
+#
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs) Chats tab.
+#   2. Switch to the Friends tab. Empty state confirms we're on
+#      the right screen and there are no accepted friends to tap.
+#   3. The friend-row tap handler is structurally present
+#      (sectionRows pass onPress through to <FriendRow>); the
+#      populated happy path needs a second-account fixture, which
+#      Phase 5+ multi-user flows will exercise.
+#
+# Asserting the empty state alone keeps this flow green on any
+# backend without requiring seeded fixtures.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+- extendedWaitUntil:
+    visible: 'Chats'
+    timeout: 10000
+
+- tapOn: 'Friends'
+- extendedWaitUntil:
+    visible: 'No friends yet'
+    timeout: 6000
+- assertVisible: 'No friends yet'
+- takeScreenshot: dm-auto-create-empty
