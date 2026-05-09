@@ -141,7 +141,7 @@ export default function ChatsScreen() {
               conversation={item}
               myUserId={me?.id}
               presenceByUser={presenceByUser}
-              onLongPress={(row) => {
+              onMorePress={(row) => {
                 haptics.tap();
                 setActiveAction({
                   id: row.id,
@@ -269,12 +269,12 @@ function RenderedConversationRow({
   conversation,
   myUserId,
   presenceByUser,
-  onLongPress,
+  onMorePress,
 }: {
   conversation: Conversation;
   myUserId: string | undefined;
   presenceByUser: Map<string, string>;
-  onLongPress?: (row: { id: string; title: string; isPinned: boolean; isMuted: boolean }) => void;
+  onMorePress?: (row: { id: string; title: string; isPinned: boolean; isMuted: boolean }) => void;
 }) {
   const router = useRouter();
   const display = conversationDisplay(conversation, myUserId, presenceByUser);
@@ -295,10 +295,10 @@ function RenderedConversationRow({
       onPress={() => {
         if (conversation.id) router.push(`/conversations/${conversation.id}`);
       }}
-      onLongPress={
-        conversation.id && onLongPress
+      onMorePress={
+        conversation.id && onMorePress
           ? () =>
-              onLongPress({
+              onMorePress({
                 id: conversation.id!,
                 title: display.title,
                 isPinned,

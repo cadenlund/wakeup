@@ -1,31 +1,27 @@
-// Mute-options bottom sheet for a conversation. Six rows: 15
-// minutes, 1 hour, 8 hours, 24 hours, "Until I turn it back on"
-// (= 2099-01-01 per backend convention), and Unmute (only when
-// currently muted). Tapping an option resolves the parent's
-// mute mutation with the right `until` timestamp and closes.
+// Mute-options bottom drawer for a conversation. Five durations
+// (15 min · 1 hr · 8 hr · 24 hr · "Until I turn it back on" =
+// 2099-01-01) plus an Unmute row when currently muted.
 //
-// Triggered from the conversation row's long-press menu (Phase
-// 5.6) and — later — from the conversation header overflow menu
-// (Phase 5.7+). The visual shape mirrors `status-emoji-picker`
-// so the two custom sheets in the app feel like the same
-// vocabulary.
+// Triggered from the conversation row's three-dots overflow menu
+// (Phase 5.6) and — later — from the conversation header overflow
+// (Phase 5.7+). Visual matches the friends-tab Unfriend/Block
+// drawer so the two sheets read as one pattern.
 import * as React from 'react';
 import { Modal, Pressable, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BellOff, Check } from 'lucide-react-native';
+import { BellOff, Clock } from 'lucide-react-native';
 
 import { Text } from '@/components/ui/text';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
-// "Until I turn it back on" — far-future stamp. Server treats
-// any far-future timestamp as forever and the row label drops
-// the relative time when `muted_until > 1y from now` (per §4.12).
+// Far-future stamp. Server treats any far-future timestamp as
+// forever and the row label drops the relative time when
+// `muted_until > 1y from now` (per §4.12).
 const FOREVER = '2099-01-01T00:00:00Z';
 
 type Option = {
   label: string;
-  // Resolver runs at tap time so the offsets are computed against
-  // a fresh `Date.now()` rather than baked in at render time —
+  // Resolver runs at tap time so offsets are computed against a
+  // fresh `Date.now()` rather than baked in at render time —
   // matters when the sheet stays mounted across long sessions.
   resolveUntil: () => string;
 };
@@ -52,37 +48,31 @@ type Props = {
 };
 
 export function MuteSheet({ visible, isMuted, onPickUntil, onUnmute, onClose, testID }: Props) {
-  const insets = useSafeAreaInsets();
+  const fg = useThemeColor('foreground');
   const mutedFg = useThemeColor('muted-foreground');
   const destructive = useThemeColor('destructive');
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View
-        className="flex-1 bg-black/50"
-        style={{
-          paddingBottom: insets.bottom + 16,
-          paddingTop: insets.top + 32,
-          paddingHorizontal: 16,
-        }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss mute options"
-          onPress={onClose}
-          className="absolute inset-0"
-        />
-        <View className="flex-1 justify-end">
-          <View
-            testID={testID}
-            className="overflow-hidden rounded-3xl bg-card shadow-2xl shadow-black/40">
-            <View className="flex-row items-center gap-2 px-5 pb-2 pt-4">
-              <BellOff size={16} color={mutedFg} />
-              <Text className="text-base font-semibold text-card-foreground">
-                Mute conversation
-              </Text>
-            </View>
-            <Text variant="muted" className="px-5 pb-3 text-xs">
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent>
+      <Pressable
+        accessibilityLabel="Dismiss mute options"
+        onPress={onClose}
+        className="flex-1 justify-end bg-black/40">
+        <Pressable onPress={() => {}} className="rounded-t-3xl bg-card" testID={testID}>
+          <View className="items-center pt-3">
+            <View className="h-1 w-12 rounded-full bg-muted-foreground/30" />
+          </View>
+          <View className="px-4 pb-1 pt-3">
+            <Text className="text-center text-base font-semibold">Mute conversation</Text>
+            <Text variant="muted" className="pt-1 text-center text-xs">
               You&apos;ll still see new messages. We just won&apos;t ping you about them.
             </Text>
+          </View>
+          <View className="px-2 pb-6">
             {OPTIONS.map((opt) => (
               <Pressable
                 key={opt.label}
@@ -90,9 +80,9 @@ export function MuteSheet({ visible, isMuted, onPickUntil, onUnmute, onClose, te
                 accessibilityLabel={`Mute for ${opt.label}`}
                 testID={`mute-option-${opt.label.toLowerCase().replace(/\s+/g, '-')}`}
                 onPress={() => onPickUntil(opt.resolveUntil())}
-                className="flex-row items-center justify-between border-t border-border px-5 py-4 active:bg-muted">
+                className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
+                <Clock size={18} color={fg} />
                 <Text className="text-base">{opt.label}</Text>
-                <Check size={16} color="transparent" />
               </Pressable>
             ))}
             {isMuted ? (
@@ -101,7 +91,8 @@ export function MuteSheet({ visible, isMuted, onPickUntil, onUnmute, onClose, te
                 accessibilityLabel="Unmute conversation"
                 testID="mute-option-unmute"
                 onPress={onUnmute}
-                className="flex-row items-center gap-2 border-t border-border px-5 py-4 active:bg-muted">
+                className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
+                <BellOff size={18} color={destructive} />
                 <Text style={{ color: destructive }} className="text-base font-medium">
                   Unmute
                 </Text>
@@ -112,12 +103,14 @@ export function MuteSheet({ visible, isMuted, onPickUntil, onUnmute, onClose, te
               accessibilityLabel="Cancel"
               testID="mute-option-cancel"
               onPress={onClose}
-              className="border-t border-border px-5 py-4 active:bg-muted">
-              <Text className="text-center text-base text-muted-foreground">Cancel</Text>
+              className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
+              <Text style={{ color: mutedFg }} className="text-sm">
+                Cancel
+              </Text>
             </Pressable>
           </View>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }

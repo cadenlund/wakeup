@@ -16,7 +16,11 @@
 // membership has those flags set — the conversation list endpoint
 // already returns the caller's pinned_at / muted_until on each
 // row, so we don't need a side query.
-import { BellOff, Pin } from 'lucide-react-native';
+//
+// Trailing column also hosts the three-dots overflow trigger
+// that opens <ConversationActionMenu> (Phase 5.6). Discoverable
+// affordance > long-press: most users won't know to long-press.
+import { BellOff, MoreVertical, Pin } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, View } from 'react-native';
 
@@ -44,7 +48,10 @@ type ConversationRowProps = {
   isMuted?: boolean;
   isPinned?: boolean;
   onPress?: () => void;
-  onLongPress?: () => void;
+  // When provided, renders a three-dots overflow button on the
+  // trailing edge that fires this. Phase 5.6 wires it to the
+  // conversation action menu (pin / mute).
+  onMorePress?: () => void;
   testID?: string;
 };
 
@@ -59,20 +66,18 @@ function ConversationRow({
   isMuted,
   isPinned,
   onPress,
-  onLongPress,
+  onMorePress,
   testID,
 }: ConversationRowProps) {
   const mutedFg = useThemeColor('muted-foreground');
-  const Container = onPress || onLongPress ? Pressable : View;
-  const containerProps =
-    onPress || onLongPress
-      ? {
-          onPress,
-          onLongPress,
-          accessibilityRole: 'button' as const,
-          accessibilityLabel: title,
-        }
-      : {};
+  const Container = onPress ? Pressable : View;
+  const containerProps = onPress
+    ? {
+        onPress,
+        accessibilityRole: 'button' as const,
+        accessibilityLabel: title,
+      }
+    : {};
   const stamp = formatRelative(lastMessageAt);
   // Avatar branch:
   //   1. avatarUrl present → single image (most precise — the user
@@ -84,10 +89,7 @@ function ConversationRow({
     <Container
       {...containerProps}
       testID={testID}
-      className={cn(
-        'flex-row items-center gap-3 px-4 py-3',
-        (onPress || onLongPress) && 'active:bg-muted'
-      )}>
+      className={cn('flex-row items-center gap-3 px-4 py-3', onPress && 'active:bg-muted')}>
       {showStacked ? (
         <StackedAvatars members={stackedMembers!} size={40} />
       ) : (
@@ -114,11 +116,24 @@ function ConversationRow({
           </Text>
         ) : null}
       </View>
-      {stamp ? (
-        <Text variant="muted" className="shrink-0 text-xs">
-          {stamp}
-        </Text>
-      ) : null}
+      <View className="shrink-0 flex-row items-center gap-1.5">
+        {stamp ? (
+          <Text variant="muted" className="text-xs">
+            {stamp}
+          </Text>
+        ) : null}
+        {onMorePress ? (
+          <Pressable
+            onPress={onMorePress}
+            accessibilityRole="button"
+            accessibilityLabel={`More options for ${title}`}
+            testID={testID ? `${testID}-more` : undefined}
+            hitSlop={10}
+            className="rounded-full p-1 active:bg-muted">
+            <MoreVertical size={18} color={mutedFg} />
+          </Pressable>
+        ) : null}
+      </View>
     </Container>
   );
 }
