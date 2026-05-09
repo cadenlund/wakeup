@@ -22,14 +22,14 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ConciergeBell, MessageCircle, Search, Users as UsersIcon, X } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { ConversationRow } from '@/components/conversation-row';
 import { FriendRow } from '@/components/friend-row';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
-import { List } from '@/components/ui/list';
+import { List, type ListRef } from '@/components/ui/list';
 import { ModalScreenShell } from '@/components/ui/modal-screen-shell';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
@@ -54,11 +54,21 @@ import { toast } from '@/lib/toast';
 const DEBOUNCE_MS = 200;
 const MIN_CHARS = 2;
 
+type SectionId = 'users' | 'conversations' | 'messages';
+
 type Row =
   | { kind: 'header'; key: string; title: string; count: number }
   | { kind: 'user'; key: string; user: InternalHandlerHttpUserResponse }
   | { kind: 'conversation'; key: string; conversation: InternalHandlerHttpSearchConversationRow }
-  | { kind: 'message'; key: string; message: InternalHandlerHttpSearchMessageRow };
+  | { kind: 'message'; key: string; message: InternalHandlerHttpSearchMessageRow }
+  | { kind: 'show-all'; key: string; section: SectionId; label: string };
+
+// Top-N each section truncates to before showing a "Show all" row.
+// Backend caps the unified-search response at 10 per section, so
+// expanding the section reveals at most 10 — true drill-downs into
+// the per-section endpoints (>10 results) are out of scope until
+// the user actually has that many friends/groups/messages to find.
+const VISIBLE_PER_SECTION = 5;
 
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = React.useState(value);
@@ -158,7 +168,100 @@ export default function SearchModalScreen() {
     [ensureDM, dismissThenGoToConversation, openingFor]
   );
 
-  const rows = React.useMemo<Row[]>(() => buildRows(data), [data]);
+  // Per-section expansion state. Default = collapsed (top
+  // VISIBLE_PER_SECTION shown). Tapping a "Show all N" row promotes
+  // its section here and the row recomputes to render the rest.
+  // Reset on every new query so a section that was expanded for
+  // one search doesn't carry over to the next.
+  const [expandedSections, setExpandedSections] = React.useState<Set<SectionId>>(new Set());
+  React.useEffect(() => {
+    setExpandedSections(new Set());
+  }, [debouncedQuery]);
+  const expandSection = React.useCallback((section: SectionId) => {
+    setExpandedSections((prev) => {
+      if (prev.has(section)) return prev;
+      const next = new Set(prev);
+      next.add(section);
+      return next;
+    });
+  }, []);
+
+  const rows = React.useMemo<Row[]>(
+    () => buildRows(data, expandedSections),
+    [data, expandedSections]
+  );
+
+  // Indices of tappable rows (skip headers — they're not actions).
+  // Keyboard nav cycles only through these, but the visual focus
+  // index is into `rows` so the highlighted row matches what the
+  // user sees on screen.
+  const tappableRowIndices = React.useMemo(() => {
+    const out: number[] = [];
+    rows.forEach((r, i) => {
+      if (isTappableRow(r)) out.push(i);
+    });
+    return out;
+  }, [rows]);
+
+  const [focusedRowIdx, setFocusedRowIdx] = React.useState<number | null>(null);
+  // Whenever results change, snap focus to the first tappable row
+  // so Enter immediately activates the most relevant hit.
+  React.useEffect(() => {
+    setFocusedRowIdx(tappableRowIndices[0] ?? null);
+  }, [tappableRowIndices]);
+
+  // Activate the row at a given index (Enter, or programmatic).
+  // Different row kinds have different tap callbacks; this routes
+  // each kind to its own handler so we don't duplicate the
+  // "ensure DM / open thread" logic that already lives there.
+  const activateRow = React.useCallback(
+    (rowIdx: number | null) => {
+      if (rowIdx == null) return;
+      const row = rows[rowIdx];
+      if (!row) return;
+      if (row.kind === 'user' && row.user.id) {
+        void onTapUser(row.user);
+      } else if (row.kind === 'conversation' && row.conversation.id) {
+        dismissThenGoToConversation(row.conversation.id);
+      } else if (row.kind === 'message' && row.message.conversation_id) {
+        dismissThenGoToConversation(row.message.conversation_id);
+      } else if (row.kind === 'show-all') {
+        expandSection(row.section);
+      }
+    },
+    [rows, onTapUser, dismissThenGoToConversation, expandSection]
+  );
+
+  // Web-only keyboard nav: ↑/↓ cycles tappable rows, Enter activates.
+  // Listener is on capture phase so a focused TextInput in the
+  // header can't swallow the events. Native gets nothing — touch
+  // UX uses tap-to-select directly.
+  const listRef = React.useRef<ListRef<Row>>(null);
+  React.useEffect(() => {
+    if (Platform.OS !== 'web' || tappableRowIndices.length === 0) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFocusedRowIdx((prev) => stepFocus(prev, tappableRowIndices, 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFocusedRowIdx((prev) => stepFocus(prev, tappableRowIndices, -1));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        activateRow(focusedRowIdx);
+      }
+    };
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => window.removeEventListener('keydown', handler, { capture: true });
+  }, [tappableRowIndices, focusedRowIdx, activateRow]);
+
+  // Keep the focused row in view as the user arrows around — without
+  // this, ArrowDown past the last visible row leaves the highlight
+  // off-screen.
+  React.useEffect(() => {
+    if (focusedRowIdx == null) return;
+    listRef.current?.scrollToIndex({ index: focusedRowIdx, viewPosition: 0.5 });
+  }, [focusedRowIdx]);
 
   return (
     <ModalScreenShell onClose={goCancel} testID="search-modal-shell">
@@ -175,17 +278,20 @@ export default function SearchModalScreen() {
           <SearchNoResults />
         ) : (
           <List
+            ref={listRef}
             data={rows}
             keyExtractor={(item) => item.key}
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <RenderedRow
                 row={item}
+                isFocused={index === focusedRowIdx}
                 onTapUser={onTapUser}
                 openingForUserId={openingFor}
                 fullConversationById={fullConversationById}
                 myUserId={me?.id}
                 presenceByUser={presenceByUser}
                 onOpenConversation={dismissThenGoToConversation}
+                onExpandSection={expandSection}
               />
             )}
           />
@@ -195,50 +301,106 @@ export default function SearchModalScreen() {
   );
 }
 
-function buildRows(data: InternalHandlerHttpSearchResponse | undefined): Row[] {
+function isTappableRow(r: Row): boolean {
+  if (r.kind === 'user') return !!r.user.id;
+  if (r.kind === 'conversation') return !!r.conversation.id;
+  if (r.kind === 'message') return !!r.message.conversation_id;
+  if (r.kind === 'show-all') return true;
+  return false;
+}
+
+function stepFocus(
+  current: number | null,
+  tappableIndices: number[],
+  delta: 1 | -1
+): number | null {
+  if (tappableIndices.length === 0) return null;
+  // Find where `current` sits inside tappableIndices; if not on a
+  // tappable row (e.g. a header was focused — shouldn't happen
+  // post-effect, but defensive), step from the nearest one.
+  const cursor = current == null ? -1 : tappableIndices.indexOf(current);
+  if (cursor < 0) return tappableIndices[delta > 0 ? 0 : tappableIndices.length - 1];
+  const next = Math.max(0, Math.min(tappableIndices.length - 1, cursor + delta));
+  return tappableIndices[next];
+}
+
+function buildRows(
+  data: InternalHandlerHttpSearchResponse | undefined,
+  expanded: Set<SectionId>
+): Row[] {
   if (!data) return [];
   const out: Row[] = [];
 
   const users = data.users ?? [];
   if (users.length > 0) {
+    const showAll = expanded.has('users');
+    const visible = showAll ? users : users.slice(0, VISIBLE_PER_SECTION);
     out.push({ kind: 'header', key: 'h:users', title: 'People', count: users.length });
-    users.forEach((u, i) => {
+    visible.forEach((u, i) => {
       out.push({ kind: 'user', key: `user:${u.id ?? `idx-${i}`}`, user: u });
     });
+    if (!showAll && users.length > VISIBLE_PER_SECTION) {
+      out.push({
+        kind: 'show-all',
+        key: 'show-all:users',
+        section: 'users',
+        label: `Show all ${users.length} people`,
+      });
+    }
   }
 
   const conversations = data.conversations ?? [];
   if (conversations.length > 0) {
+    const showAll = expanded.has('conversations');
+    const visible = showAll ? conversations : conversations.slice(0, VISIBLE_PER_SECTION);
     out.push({
       kind: 'header',
       key: 'h:conversations',
       title: 'Chats',
       count: conversations.length,
     });
-    conversations.forEach((c, i) => {
+    visible.forEach((c, i) => {
       out.push({
         kind: 'conversation',
         key: `conv:${c.id ?? `idx-${i}`}`,
         conversation: c,
       });
     });
+    if (!showAll && conversations.length > VISIBLE_PER_SECTION) {
+      out.push({
+        kind: 'show-all',
+        key: 'show-all:conversations',
+        section: 'conversations',
+        label: `Show all ${conversations.length} chats`,
+      });
+    }
   }
 
   const messages = data.messages ?? [];
   if (messages.length > 0) {
+    const showAll = expanded.has('messages');
+    const visible = showAll ? messages : messages.slice(0, VISIBLE_PER_SECTION);
     out.push({
       kind: 'header',
       key: 'h:messages',
       title: 'Messages',
       count: messages.length,
     });
-    messages.forEach((m, i) => {
+    visible.forEach((m, i) => {
       out.push({
         kind: 'message',
         key: `msg:${m.id ?? `idx-${i}`}`,
         message: m,
       });
     });
+    if (!showAll && messages.length > VISIBLE_PER_SECTION) {
+      out.push({
+        kind: 'show-all',
+        key: 'show-all:messages',
+        section: 'messages',
+        label: `Show all ${messages.length} messages`,
+      });
+    }
   }
 
   return out;
@@ -246,89 +408,107 @@ function buildRows(data: InternalHandlerHttpSearchResponse | undefined): Row[] {
 
 function RenderedRow({
   row,
+  isFocused,
   onTapUser,
   openingForUserId,
   fullConversationById,
   myUserId,
   presenceByUser,
   onOpenConversation,
+  onExpandSection,
 }: {
   row: Row;
+  isFocused: boolean;
   onTapUser: (u: InternalHandlerHttpUserResponse) => void;
   openingForUserId: string | null;
   fullConversationById: Map<string, InternalHandlerHttpConversationResponse>;
   myUserId: string | undefined;
   presenceByUser: Map<string, string>;
   onOpenConversation: (conversationId: string) => void;
+  onExpandSection: (section: SectionId) => void;
 }) {
-  switch (row.kind) {
-    case 'header':
-      return <SectionHeader title={row.title} count={row.count} />;
-    case 'user': {
-      const u = row.user;
-      const opening = u.id != null && u.id === openingForUserId;
-      return (
-        <FriendRow
-          displayName={u.display_name}
-          username={u.username}
-          avatarUrl={u.avatar_url}
-          hidePresence
-          onPress={!opening && u.id ? () => onTapUser(u) : undefined}
-          trailing={
-            opening ? (
-              <Text variant="muted" className="text-xs">
-                Opening…
-              </Text>
-            ) : undefined
-          }
-        />
-      );
-    }
-    case 'conversation': {
-      const c = row.conversation;
-      // Hot-swap to the cached full conversation if we have it —
-      // search response carries no members, so without this the row
-      // can't render stacked avatars / presence dots.
-      const full = c.id ? fullConversationById.get(c.id) : undefined;
-      if (full) {
-        const display = conversationDisplay(full, myUserId, presenceByUser);
+  // Headers don't get the keyboard-focus highlight — only tappable
+  // rows do, otherwise arrowing past a section title would land
+  // the focus ring on a non-actionable strip.
+  if (row.kind === 'header') {
+    return <SectionHeader title={row.title} count={row.count} />;
+  }
+  if (row.kind === 'show-all') {
+    return (
+      <ShowAllRow
+        label={row.label}
+        isFocused={isFocused}
+        onPress={() => onExpandSection(row.section)}
+      />
+    );
+  }
+  // Wrap each tappable row in a focusable shell that paints a
+  // primary tint behind it when the keyboard cursor is here.
+  // ConversationRow already handles its own pinned-tint background
+  // — overlaying primary/10 on top reads fine in both states.
+  const inner = (() => {
+    switch (row.kind) {
+      case 'user': {
+        const u = row.user;
+        const opening = u.id != null && u.id === openingForUserId;
         return (
-          <ConversationRow
-            title={display.title}
-            subtitle={display.subtitle}
-            avatarUrl={display.avatarUrl}
-            fallbackInitial={display.fallbackInitial}
-            stackedMembers={display.stackedMembers}
-            presence={display.presence}
-            lastMessageAt={full.last_message_at}
-            onPress={() => {
-              if (full.id) onOpenConversation(full.id);
-            }}
-            testID={`search-conversation-${full.id}`}
+          <FriendRow
+            displayName={u.display_name}
+            username={u.username}
+            avatarUrl={u.avatar_url}
+            hidePresence
+            onPress={!opening && u.id ? () => onTapUser(u) : undefined}
+            trailing={
+              opening ? (
+                <Text variant="muted" className="text-xs">
+                  Opening…
+                </Text>
+              ) : undefined
+            }
           />
         );
       }
-      // Fall-through render for conversations the user isn't a
-      // member of (search hits across the wider system) — slim
-      // shape because we only have name / avatar_url / type.
-      return (
-        <ConversationRow
-          title={c.name?.trim() || 'Conversation'}
-          avatarUrl={c.avatar_url}
-          fallbackInitial={c.name ?? 'C'}
-          lastMessageAt={c.last_message_at}
-          onPress={() => {
-            if (c.id) onOpenConversation(c.id);
-          }}
-          testID={`search-conversation-${c.id}`}
-        />
-      );
+      case 'conversation': {
+        const c = row.conversation;
+        const full = c.id ? fullConversationById.get(c.id) : undefined;
+        if (full) {
+          const display = conversationDisplay(full, myUserId, presenceByUser);
+          return (
+            <ConversationRow
+              title={display.title}
+              subtitle={display.subtitle}
+              avatarUrl={display.avatarUrl}
+              fallbackInitial={display.fallbackInitial}
+              stackedMembers={display.stackedMembers}
+              presence={display.presence}
+              lastMessageAt={full.last_message_at}
+              onPress={() => {
+                if (full.id) onOpenConversation(full.id);
+              }}
+              testID={`search-conversation-${full.id}`}
+            />
+          );
+        }
+        return (
+          <ConversationRow
+            title={c.name?.trim() || 'Conversation'}
+            avatarUrl={c.avatar_url}
+            fallbackInitial={c.name ?? 'C'}
+            lastMessageAt={c.last_message_at}
+            onPress={() => {
+              if (c.id) onOpenConversation(c.id);
+            }}
+            testID={`search-conversation-${c.id}`}
+          />
+        );
+      }
+      case 'message': {
+        const m = row.message;
+        return <MessageHitRow message={m} onOpenConversation={onOpenConversation} />;
+      }
     }
-    case 'message': {
-      const m = row.message;
-      return <MessageHitRow message={m} onOpenConversation={onOpenConversation} />;
-    }
-  }
+  })();
+  return <View className={isFocused ? 'bg-primary/10' : ''}>{inner}</View>;
 }
 
 function MessageHitRow({
@@ -365,6 +545,29 @@ function MessageHitRow({
           Tap to open the conversation
         </Text>
       </View>
+    </Pressable>
+  );
+}
+
+// Tap target appended to a section that has more results than
+// VISIBLE_PER_SECTION shows. Click promotes the section into the
+// expanded set and the rest of the hits render in place.
+function ShowAllRow({
+  label,
+  isFocused,
+  onPress,
+}: {
+  label: string;
+  isFocused: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      className={`px-4 py-3 active:bg-muted ${isFocused ? 'bg-primary/10' : ''}`}>
+      <Text className="text-sm font-medium text-primary">{label}</Text>
     </Pressable>
   );
 }

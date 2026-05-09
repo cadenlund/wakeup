@@ -90,6 +90,37 @@ func TestSearch_FindsConversationByName(t *testing.T) {
 	}
 }
 
+// TestSearch_FindsConversationByMemberName regresses the §5.1
+// "search a person → also surface groups containing them" path.
+// Without the fallback, a search for "BobZebra" returns Bob in the
+// users section but no group hits even when Bob is in three groups.
+func TestSearch_FindsConversationByMemberName(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	c, alice := h.AuthClient(t)
+	_, bob := h.AuthClient(t, testutil.WithDisplayName("BobZebra"))
+	groupID := seedGroup(context.Background(), t, h, "Hike crew", alice, bob)
+
+	resp, err := c.Get(h.Server.URL + "/v1/search?q=BobZebra&types=conversations")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	convs, _ := got["conversations"].([]any)
+	if len(convs) != 1 {
+		t.Fatalf("expected 1 conv hit by member name, got %d", len(convs))
+	}
+	row := convs[0].(map[string]any)
+	if row["id"] != groupID.String() {
+		t.Errorf("id = %v, want %v", row["id"], groupID)
+	}
+}
+
 func TestSearch_FindsMessageByBody(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
