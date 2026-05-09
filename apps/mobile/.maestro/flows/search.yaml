@@ -31,7 +31,7 @@ appId: app.wakeup.client
 
 # --- Open the search modal ----------------------------------------
 - tapOn:
-    id: chats-search-trigger
+    id: header-search
 - extendedWaitUntil:
     visible: 'Search'
     timeout: 6000

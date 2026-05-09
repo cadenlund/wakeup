@@ -4,9 +4,9 @@
 // header tint) and the Phase-3 temporary logout button on the
 // global header.
 import { Tabs, useRouter } from 'expo-router';
-import { LogOut, MessageCircle, User, Users } from 'lucide-react-native';
+import { LogOut, MessageCircle, Search, User, Users } from 'lucide-react-native';
 import * as React from 'react';
-import { Pressable } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { Text } from '@/components/ui/text';
@@ -71,25 +71,7 @@ export default function TabLayout() {
         // when settings/account lands in Phase 11.6 — at that point
         // logout moves into the account screen.
         headerRight: () => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Log out"
-            testID="header-logout"
-            onPress={() => logout.mutate()}
-            disabled={logout.isPending}
-            hitSlop={8}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              marginRight: 14,
-              opacity: logout.isPending ? 0.5 : 1,
-            }}>
-            <LogOut size={16} color={fg} />
-            <Text className="text-sm font-medium">
-              {logout.isPending ? 'Logging out…' : 'Log out'}
-            </Text>
-          </Pressable>
+          <LogoutPill onPress={() => logout.mutate()} pending={logout.isPending} fg={fg} />
         ),
       }}>
       <Tabs.Screen
@@ -97,6 +79,26 @@ export default function TabLayout() {
         options={{
           title: 'Chats',
           tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
+          // Chats tab gets a search icon next to the logout pill.
+          // Per §5.1 the global /search modal is "triggered by a
+          // header search icon on the conversations tab" — an icon,
+          // not a tappable input row, so it doesn't get visually
+          // confused with the friends-tab inline search input
+          // (which is friend-discovery, a different flow).
+          headerRight: () => (
+            <View className="flex-row items-center" style={{ gap: 4 }}>
+              <Pressable
+                onPress={() => router.push('/search')}
+                accessibilityRole="button"
+                accessibilityLabel="Search people, chats, messages"
+                testID="header-search"
+                hitSlop={8}
+                className="h-9 w-9 items-center justify-center rounded-full active:bg-muted">
+                <Search size={18} color={fg} />
+              </Pressable>
+              <LogoutPill onPress={() => logout.mutate()} pending={logout.isPending} fg={fg} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
@@ -114,5 +116,35 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+  );
+}
+
+function LogoutPill({
+  onPress,
+  pending,
+  fg,
+}: {
+  onPress: () => void;
+  pending: boolean;
+  fg: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Log out"
+      testID="header-logout"
+      onPress={onPress}
+      disabled={pending}
+      hitSlop={8}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginRight: 14,
+        opacity: pending ? 0.5 : 1,
+      }}>
+      <LogOut size={16} color={fg} />
+      <Text className="text-sm font-medium">{pending ? 'Logging out…' : 'Log out'}</Text>
+    </Pressable>
   );
 }
