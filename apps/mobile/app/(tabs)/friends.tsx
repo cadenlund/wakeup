@@ -1,5 +1,5 @@
-// Phase 4.2 + 4.3 + 4.4 — Friends tab. Three sections rendered through
-// a single FlashList:
+// Phase 4.2 + 4.3 + 4.4 + 4.5 — Friends tab. Three sections rendered
+// through a single FlashList:
 //   1. Accepted Friends — keyset-paginated by `accepted_at DESC`,
 //      enriched with presence so each row shows a status dot.
 //   2. Incoming Requests — pending friend requests addressed to me.
@@ -25,7 +25,10 @@
 // confirm dialog would just add a second tap and a worse web UX
 // (where window.alert is the only out-of-the-box option).
 //
-// Pull-to-refresh wraps everything in 4.5.
+// Pull-to-refresh: tugging down on the sections list refetches all
+// three relationship queries at once. Search mode doesn't expose a
+// pull-to-refresh because the search query already runs live off
+// every keystroke (debounced).
 import { Check, MoreHorizontal, Search, ShieldOff, UserMinus, Users, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Modal, Pressable, View } from 'react-native';
@@ -401,6 +404,20 @@ export default function FriendsScreen() {
     !isSearchMode &&
     ((friendsQ.isLoading && !friendsQ.data) || (requestsQ.isLoading && !requestsQ.data));
 
+  // Pull-to-refresh: refetch all three relationship queries in
+  // parallel. Local refreshing flag lives independently of the
+  // queries' isFetching so a passive background refetch doesn't show
+  // the spinner.
+  const [refreshing, setRefreshing] = React.useState(false);
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([friendsQ.refetch(), requestsQ.refetch(), presenceQ.refetch()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [friendsQ, requestsQ, presenceQ]);
+
   return (
     <View className="flex-1 bg-background">
       <SearchBar value={rawQuery} onChange={setRawQuery} />
@@ -421,6 +438,8 @@ export default function FriendsScreen() {
           onAccept={onAcceptRequest}
           onDecline={onDeclineRequest}
           onOpenMenu={setMenuTarget}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
         />
       )}
 
@@ -477,22 +496,31 @@ function SectionsPane({
   onAccept,
   onDecline,
   onOpenMenu,
+  refreshing,
+  onRefresh,
 }: {
   rows: Row[];
   pendingAction: Set<string>;
   onAccept: (f: Friendship) => void;
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
-  if (rows.length === 0) return <FriendsAllEmpty />;
-  // No friends, no requests — show the welcoming empty state instead
-  // of a lone "Friends (0)" header.
+  // Empty / single-empty-header collapse to the welcoming empty
+  // state; we still wrap that in a ScrollView so pull-to-refresh
+  // works even when there's no data yet.
+  if (rows.length === 0) {
+    return <PullableEmpty refreshing={refreshing} onRefresh={onRefresh} />;
+  }
   const onlyEmptyHeader =
     rows.length === 2 &&
     rows[0].kind === 'header' &&
     rows[0].key === 'h:friends' &&
     rows[1].kind === 'empty';
-  if (onlyEmptyHeader) return <FriendsAllEmpty />;
+  if (onlyEmptyHeader) {
+    return <PullableEmpty refreshing={refreshing} onRefresh={onRefresh} />;
+  }
 
   return (
     <List
@@ -507,6 +535,26 @@ function SectionsPane({
           onOpenMenu={onOpenMenu}
         />
       )}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+    />
+  );
+}
+
+function PullableEmpty({ refreshing, onRefresh }: { refreshing: boolean; onRefresh: () => void }) {
+  // FlashList doesn't render its scroll surface when data is empty,
+  // so a refresh-control wouldn't be reachable on the empty state.
+  // Wrap a single-item list (the empty placeholder) in <List> so the
+  // pull-to-refresh affordance is still available.
+  type EmptyItem = { kind: 'empty-screen' };
+  const data: EmptyItem[] = [{ kind: 'empty-screen' }];
+  return (
+    <List
+      data={data}
+      keyExtractor={(_, i) => `empty-${i}`}
+      renderItem={() => <FriendsAllEmpty />}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
     />
   );
 }
