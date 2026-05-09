@@ -21,7 +21,9 @@ import * as React from 'react';
 import { Pressable, RefreshControl, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
+import { ConversationActionMenu } from '@/components/conversation-action-menu';
 import { ConversationRow } from '@/components/conversation-row';
+import { MuteSheet } from '@/components/mute-sheet';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
 import {
@@ -32,12 +34,14 @@ import {
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
+import { haptics } from '@/lib/haptics';
 import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
   InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { useConversationPinMute } from '@/lib/use-conversation-pin-mute';
 import { EmptyState } from '@/components/ui/empty-state';
 
 type Conversation = InternalHandlerHttpConversationResponse;
@@ -88,6 +92,26 @@ export default function ChatsScreen() {
   const router = useRouter();
   const goCompose = React.useCallback(() => router.push('/conversations/new'), [router]);
 
+  // Long-press menu state machine: 'menu' shows pin + mute
+  // entry; 'mute' is the duration sheet. The active conversation
+  // ID stays in state across the transition so the mute sheet
+  // resolves against the same row even after the menu closes.
+  // null = nothing open.
+  const [activeAction, setActiveAction] = React.useState<{
+    id: string;
+    title: string;
+    isPinned: boolean;
+    isMuted: boolean;
+    screen: 'menu' | 'mute';
+  } | null>(null);
+  const closeMenu = React.useCallback(() => setActiveAction(null), []);
+  const openMuteSheet = React.useCallback(
+    () => setActiveAction((s) => (s ? { ...s, screen: 'mute' } : s)),
+    []
+  );
+
+  const { togglePin, setMute, unmute } = useConversationPinMute();
+
   const isInitialLoad = conversationsQ.isLoading && !conversationsQ.data;
 
   return (
@@ -117,12 +141,58 @@ export default function ChatsScreen() {
               conversation={item}
               myUserId={me?.id}
               presenceByUser={presenceByUser}
+              onLongPress={(row) => {
+                haptics.tap();
+                setActiveAction({
+                  id: row.id,
+                  title: row.title,
+                  isPinned: row.isPinned,
+                  isMuted: row.isMuted,
+                  screen: 'menu',
+                });
+              }}
             />
           )}
         />
       )}
 
       <ComposeFab onPress={goCompose} />
+
+      <ConversationActionMenu
+        visible={activeAction?.screen === 'menu'}
+        title={activeAction?.title ?? ''}
+        isPinned={activeAction?.isPinned ?? false}
+        isMuted={activeAction?.isMuted ?? false}
+        onTogglePin={() => {
+          if (!activeAction) return;
+          togglePin(activeAction.id, activeAction.isPinned);
+          closeMenu();
+        }}
+        onMutePress={openMuteSheet}
+        onUnmute={() => {
+          if (!activeAction) return;
+          unmute(activeAction.id);
+          closeMenu();
+        }}
+        onClose={closeMenu}
+        testID="conversation-action-menu"
+      />
+      <MuteSheet
+        visible={activeAction?.screen === 'mute'}
+        isMuted={activeAction?.isMuted ?? false}
+        onPickUntil={(until) => {
+          if (!activeAction) return;
+          setMute(activeAction.id, until);
+          closeMenu();
+        }}
+        onUnmute={() => {
+          if (!activeAction) return;
+          unmute(activeAction.id);
+          closeMenu();
+        }}
+        onClose={closeMenu}
+        testID="mute-sheet"
+      />
     </View>
   );
 }
@@ -199,10 +269,12 @@ function RenderedConversationRow({
   conversation,
   myUserId,
   presenceByUser,
+  onLongPress,
 }: {
   conversation: Conversation;
   myUserId: string | undefined;
   presenceByUser: Map<string, string>;
+  onLongPress?: (row: { id: string; title: string; isPinned: boolean; isMuted: boolean }) => void;
 }) {
   const router = useRouter();
   const display = conversationDisplay(conversation, myUserId, presenceByUser);
@@ -223,6 +295,17 @@ function RenderedConversationRow({
       onPress={() => {
         if (conversation.id) router.push(`/conversations/${conversation.id}`);
       }}
+      onLongPress={
+        conversation.id && onLongPress
+          ? () =>
+              onLongPress({
+                id: conversation.id!,
+                title: display.title,
+                isPinned,
+                isMuted,
+              })
+          : undefined
+      }
     />
   );
 }

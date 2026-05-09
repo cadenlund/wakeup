@@ -1437,32 +1437,32 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 ### Phase 0 — Repository setup
 
 - [ ] **0.0** Operator one-time setup per §14.1 complete: Expo Go on phone, Maestro CLI installed, Maestro MCP wired into Claude Code, simulators ready. (No commit; this is operator state, not repo state.)
-- [ ] **0.1** `bunx create-expo-app@latest apps/mobile --template tabs`. Move files to match §2 layout. Confirm `bun install && bunx expo start --tunnel` boots the default screens on iOS Simulator AND on the operator's phone via Expo Go (operator scans the QR; reviews; approves).
+- [x] **0.1** `bunx create-expo-app@latest apps/mobile --template tabs`. Move files to match §2 layout. Confirm `bun install && bunx expo start --tunnel` boots the default screens on iOS Simulator AND on the operator's phone via Expo Go (operator scans the QR; reviews; approves).
   - Commit: `feat(mobile): bootstrap expo app`
-- [ ] **0.2** Install all dependencies from §3 in `package.json`. Pin major versions. `bun install` clean.
+- [x] **0.2** Install all dependencies from §3 in `package.json`. Pin major versions. `bun install` clean.
   - Commit: `chore(mobile): lock dependency stack`
-- [ ] **0.3** `tsconfig.json` strict, `@/*` path alias, `expo/tsconfig.base` extended.
+- [x] **0.3** `tsconfig.json` strict, `@/*` path alias, `expo/tsconfig.base` extended.
   - Commit: `chore(mobile): configure typescript strict + path alias`
-- [ ] **0.4** `eslint-config-expo` + `prettier` configured. `bunx eslint . --max-warnings 0` clean on the boilerplate.
+- [x] **0.4** `eslint-config-expo` + `prettier` configured. `bunx eslint . --max-warnings 0` clean on the boilerplate.
   - Commit: `chore(mobile): add eslint and prettier configs`
-- [ ] **0.5** `.maestro/` directory with `README.md` describing the operator-review loop and a sample `flows/login.yaml` sub-flow stub. Verify `maestro test .maestro/` runs on an empty flow set.
+- [x] **0.5** `.maestro/` directory with `README.md` describing the operator-review loop and a sample `flows/login.yaml` sub-flow stub. Verify `maestro test .maestro/` runs on an empty flow set.
   - Commit: `chore(mobile): add maestro scaffolding`
-- [ ] **0.6** `app.json` per §13.1 — bundle ids, scheme, plugins (`expo-router`, `expo-notifications`, `expo-local-authentication`, LiveKit, `react-native-android-widget`, `@expo/ui/swift-ui`), permissions, background modes.
+- [x] **0.6** `app.json` per §13.1 — bundle ids, scheme, plugins (`expo-router`, `expo-notifications`, `expo-local-authentication`, LiveKit, `react-native-android-widget`, `@expo/ui/swift-ui`), permissions, background modes.
   - Commit: `chore(mobile): configure app.json with permissions and plugins`
-- [ ] **0.7** `eas.json` with three profiles per §13.2.
+- [x] **0.7** `eas.json` with three profiles per §13.2.
   - Commit: `chore(mobile): add eas.json with three build profiles`
-- [ ] **0.8** GitHub Actions workflow per §13.7. Consult the `expo:expo-cicd-workflows` skill for EAS-aware steps. Initial run green on the boilerplate.
+- [x] **0.8** GitHub Actions workflow per §13.7. Consult the `expo:expo-cicd-workflows` skill for EAS-aware steps. Initial run green on the boilerplate.
   - Commit: `ci(mobile): add type-check + lint workflow`
 
 ### Phase 1 — Theming + foundation
 
-- [ ] **1.1** Mobile app scaffolded via `npx rn-new --nativewind` (NW v4 + Tailwind v3); generated configs in place.
+- [x] **1.1** Mobile app scaffolded via `npx rn-new --nativewind` (NW v4 + Tailwind v3); generated configs in place.
   - Commit: `feat(mobile): wire nativewind v5`
-- [ ] **1.2** Add the 10 sleep-cycle schemes from §4.5 to `tailwind.config.ts`. Each scheme has its `@theme` block. Smoke-test by switching the root via a debug keystroke.
+- [x] **1.2** Add the 10 sleep-cycle schemes from §4.5 to `tailwind.config.ts`. Each scheme has its `@theme` block. Smoke-test by switching the root via a debug keystroke.
   - Commit: `feat(mobile): add ten sleep-cycle color schemes`
-- [ ] **1.3** Theme store (`lib/theme/store.ts`) + provider (`lib/theme/provider.tsx`). AsyncStorage persistence. `system` follows `Appearance.getColorScheme()`.
+- [x] **1.3** Theme store (`lib/theme/store.ts`) + provider (`lib/theme/provider.tsx`). AsyncStorage persistence. `system` follows `Appearance.getColorScheme()`.
   - Commit: `feat(mobile): add theme store with async-storage persistence`
-- [ ] **1.4** Install **all** RNR components and auth blocks per §3.1 in one batch (~30 components + 5 auth blocks). The set is intentionally complete because RNR is copy-in, not a runtime dependency. Verify a `<Button>`, `<Card>`, and the `<SignInForm>` block render with theme tokens applied. Operator scans the QR and reviews the gallery.
+- [x] **1.4** Install **all** RNR components and auth blocks per §3.1 in one batch (~30 components + 5 auth blocks). The set is intentionally complete because RNR is copy-in, not a runtime dependency. Verify a `<Button>`, `<Card>`, and the `<SignInForm>` block render with theme tokens applied. Operator scans the QR and reviews the gallery.
   - Commit: `feat(mobile): install react-native-reusables foundation`
 - [x] **1.5** `<EmptyState>` + `<Skeleton>` wrappers in `components/ui/`.
   - Commit: `feat(mobile): add empty-state and skeleton primitives`
@@ -1515,30 +1515,30 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
 
 ### Phase 4 — Tabs + Friends
 
-- [ ] **4.1** `(tabs)/_layout.tsx` with three tabs + lucide icons.
+- [x] **4.1** `(tabs)/_layout.tsx` with three tabs + lucide icons.
   - Commit: `feat(mobile): scaffold tab navigator`
-- [ ] **4.2** `(tabs)/friends.tsx` rendering accepted friends + incoming/outgoing requests. `<FriendRow>` + `<PresenceDot>`. Maestro flow `friends-list.yaml`.
+- [x] **4.2** `(tabs)/friends.tsx` rendering accepted friends + incoming/outgoing requests. `<FriendRow>` + `<PresenceDot>`. Maestro flow `friends-list.yaml`.
   - Commit: `feat(mobile): build friends tab`
-- [ ] **4.3** Add-friend flow: search by username (debounced `GET /v1/users?q=`), `useSendFriendRequest`. Maestro flow `friends-add.yaml`.
+- [x] **4.3** Add-friend flow: search by username (debounced `GET /v1/users?q=`), `useSendFriendRequest`. Maestro flow `friends-add.yaml`.
   - Commit: `feat(mobile): add friend search and request flow`
-- [ ] **4.4** Accept / decline / unfriend / block / unblock actions wired. Maestro flows for each. Friend-accept triggers `haptics.success()`.
+- [x] **4.4** Accept / decline / unfriend / block / unblock actions wired. Maestro flows for each. Friend-accept triggers `haptics.success()`.
   - Commit: `feat(mobile): wire friend request actions`
-- [ ] **4.5** Pull-to-refresh on the friends tab (`<PullToRefresh>` wrapper). Past-threshold tap fires `haptics.tap()`.
+- [x] **4.5** Pull-to-refresh on the friends tab (`<PullToRefresh>` wrapper). Past-threshold tap fires `haptics.tap()`.
   - Commit: `feat(mobile): add pull-to-refresh on friends tab`
 
 ### Phase 5 — Conversations list
 
-- [ ] **5.1** `(tabs)/index.tsx` rendering the conversations list, sorted by `last_message_at`. Empty state. Maestro flow `conversations-empty.yaml`.
+- [x] **5.1** `(tabs)/index.tsx` rendering the conversations list, sorted by `last_message_at`. Empty state. Maestro flow `conversations-empty.yaml`.
   - Commit: `feat(mobile): build conversations list screen`
-- [ ] **5.2** "+" button on the conversations tab → `conversation/new.tsx` modal. Multi-select friends + group name. `useCreateConversation`. Maestro flow `conversation-create.yaml`.
+- [x] **5.2** "+" button on the conversations tab → `conversation/new.tsx` modal. Multi-select friends + group name. `useCreateConversation`. Maestro flow `conversation-create.yaml`.
   - Commit: `feat(mobile): add new-conversation flow`
-- [ ] **5.3** Tap a friend in `(tabs)/friends` → DM auto-create on first message. Helper: `useEnsureDirectConversation(friendId)`.
+- [x] **5.3** Tap a friend in `(tabs)/friends` → DM auto-create on first message. Helper: `useEnsureDirectConversation(friendId)`.
   - Commit: `feat(mobile): auto-create dm on first message`
-- [ ] **5.4** Pull-to-refresh on the conversations list. Past-threshold tap fires `haptics.tap()`.
+- [x] **5.4** Pull-to-refresh on the conversations list. Past-threshold tap fires `haptics.tap()`.
   - Commit: `feat(mobile): add pull-to-refresh on conversations list`
-- [ ] **5.5** Global search modal (`search` route) — debounced 200ms across friends + conversations + (later) messages. Maestro flow `search.yaml`.
+- [x] **5.5** Global search modal (`search` route) — debounced 200ms across friends + conversations + (later) messages. Maestro flow `search.yaml`.
   - Commit: `feat(mobile): add global search`
-- [ ] **5.6** Pin / mute long-press menu on conversation rows. `<PinToggle>` + `<MuteSheet>` per §5.2. Optimistic resort on pin. Maestro flow `conv-pin-mute.yaml`.
+- [x] **5.6** Pin / mute long-press menu on conversation rows. `<PinToggle>` + `<MuteSheet>` per §5.2. Optimistic resort on pin. Maestro flow `conv-pin-mute.yaml`.
   - Commit: `feat(mobile): add pin and mute on conversations`
 - [ ] **5.7** `conversation/[id]/info.tsx` — group info / DM profile. Tappable conversation header opens it. Group admins get Add Member (`POST /v1/conversations/{id}/members`) + Remove Member (`DELETE /v1/conversations/{id}/members/{user_id}`); every member gets Leave Group (`DELETE /v1/conversations/{id}`). DM variant renders the peer's profile only (no member list, no leave). Maestro flows: `group-info.yaml`, `group-add-member.yaml`, `group-leave.yaml`.
   - Commit: `feat(mobile): add group info screen with add member and leave`
