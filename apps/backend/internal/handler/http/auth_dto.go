@@ -8,35 +8,23 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 )
 
-// avatarURLPresigner is the package-wide hook the MeResponse /
-// UserResponse mappers call to turn the stored S3 object key (e.g.
-// "avatars/<uid>/<obj>.png") into a short-lived signed URL the
-// client can drop into <Image>. Wired once from cmd/server/main.go
-// after the user service is constructed; tests + early-boot paths
-// leave it nil and the mappers pass the raw key through unchanged.
-//
-// We deliberately use a free-function pointer rather than threading
-// a presigner through 19 call sites or sticking a context onto every
-// DTO mapper — presigning is sync HMAC work, not I/O, and the value
-// is the same per-key for the duration of the TTL.
-var avatarURLPresigner func(key string) (string, error)
-
-// SetAvatarURLPresigner configures the package-wide presigner. Calling
-// with nil restores the no-op behaviour (used by unit tests that don't
-// boot a storage layer).
-func SetAvatarURLPresigner(p func(key string) (string, error)) {
-	avatarURLPresigner = p
-}
+// Presigner turns a stored S3 object key (e.g. "avatars/<uid>/<obj>.png")
+// into a short-lived signed URL the client can drop into <Image>.
+// Injected through handler constructors; nil is the safe default for
+// tests that don't boot a storage layer (mappers pass the raw key
+// through unchanged). Presigning is sync HMAC work, not I/O — no
+// context needed for cancellation.
+type Presigner func(key string) (string, error)
 
 // presignAvatarKey upgrades a stored avatar key to a signed URL
 // in-place. Returns the input untouched when the presigner isn't set
-// or when the key is already a full URL — the helper is shaped this
-// way so callers can chain it inline without nil-checking the *string.
-func presignAvatarKey(key *string) *string {
-	if key == nil || *key == "" || avatarURLPresigner == nil {
+// or when presign fails — the helper is shaped this way so callers
+// can chain it inline without nil-checking the *string.
+func presignAvatarKey(p Presigner, key *string) *string {
+	if key == nil || *key == "" || p == nil {
 		return key
 	}
-	url, err := avatarURLPresigner(*key)
+	url, err := p(*key)
 	if err != nil || url == "" {
 		return key
 	}
@@ -99,10 +87,10 @@ type ImpersonatorInfo struct {
 // During §8.7 admin impersonation, u is the IMPERSONATED user and
 // impersonator is the admin owning the session — the resulting response
 // renders the target's profile with `impersonated_by` populated.
-func toMeResponse(u domain.User, impersonator *domain.User) MeResponse {
+func toMeResponse(u domain.User, impersonator *domain.User, p Presigner) MeResponse {
 	resp := MeResponse{
 		ID: u.ID, Username: u.Username, DisplayName: u.DisplayName,
-		Email: u.Email, AvatarURL: presignAvatarKey(u.AvatarURL),
+		Email: u.Email, AvatarURL: presignAvatarKey(p, u.AvatarURL),
 		Bio: u.Bio, StatusEmoji: u.StatusEmoji,
 		ColorScheme: u.ColorScheme,
 		Role:        u.Role,

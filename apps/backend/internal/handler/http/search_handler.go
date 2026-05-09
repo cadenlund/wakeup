@@ -14,13 +14,14 @@ import (
 
 // SearchHandler hosts GET /v1/search.
 type SearchHandler struct {
-	search *searchsvc.Service
-	auth   *auth.Service
-	v      *validator.Validate
+	search  *searchsvc.Service
+	auth    *auth.Service
+	v       *validator.Validate
+	presign Presigner // optional; nil → raw avatar keys
 }
 
 // NewSearchHandler wires up the handler.
-func NewSearchHandler(s *searchsvc.Service, a *auth.Service, v *validator.Validate) (*SearchHandler, error) {
+func NewSearchHandler(s *searchsvc.Service, a *auth.Service, v *validator.Validate, presign Presigner) (*SearchHandler, error) {
 	if s == nil {
 		return nil, errors.New("httpapi: SearchHandler requires non-nil search service")
 	}
@@ -30,7 +31,7 @@ func NewSearchHandler(s *searchsvc.Service, a *auth.Service, v *validator.Valida
 	if v == nil {
 		return nil, errors.New("httpapi: SearchHandler requires non-nil validator")
 	}
-	return &SearchHandler{search: s, auth: a, v: v}, nil
+	return &SearchHandler{search: s, auth: a, v: v, presign: presign}, nil
 }
 
 // Mount attaches /v1/search onto r.
@@ -130,7 +131,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if requested[searchsvc.TypeUsers] {
 		users := make([]UserResponse, 0, len(res.Users))
 		for _, u := range res.Users {
-			users = append(users, toUserResponse(u))
+			users = append(users, toUserResponse(u, h.presign))
 		}
 		out.Users = &users
 	}

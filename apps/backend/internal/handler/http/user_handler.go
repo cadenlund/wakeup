@@ -27,10 +27,11 @@ const maxAvatarMultipartBytes = usersvc.MaxAvatarBytes + (256 << 10) // 5 MiB + 
 // caller via auth.CurrentUser — the handler-side cookie middleware
 // (LoadAndSave) supplies the context.
 type UserHandler struct {
-	users *usersvc.Service
-	auth  *auth.Service
-	prefs *notifprefsvc.Service
-	v     *validator.Validate
+	users   *usersvc.Service
+	auth    *auth.Service
+	prefs   *notifprefsvc.Service
+	v       *validator.Validate
+	presign Presigner // optional; nil → raw avatar keys
 }
 
 // NewUserHandler wires up the handler. Returns an error when any
@@ -40,6 +41,7 @@ func NewUserHandler(
 	a *auth.Service,
 	prefs *notifprefsvc.Service,
 	v *validator.Validate,
+	presign Presigner,
 ) (*UserHandler, error) {
 	if users == nil {
 		return nil, errors.New("httpapi: UserHandler requires non-nil user service")
@@ -53,7 +55,7 @@ func NewUserHandler(
 	if v == nil {
 		return nil, errors.New("httpapi: UserHandler requires non-nil validator")
 	}
-	return &UserHandler{users: users, auth: a, prefs: prefs, v: v}, nil
+	return &UserHandler{users: users, auth: a, prefs: prefs, v: v, presign: presign}, nil
 }
 
 // Mount attaches every /v1/users/* route onto r.
@@ -118,7 +120,7 @@ func (h *UserHandler) Search(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toUserListResponse(res.Users, res.NextCursor, res.HasMore))
+	WriteJSON(w, http.StatusOK, toUserListResponse(res.Users, res.NextCursor, res.HasMore, h.presign))
 }
 
 // GetByID returns the public profile for the given user id.
@@ -152,7 +154,7 @@ func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toUserResponse(u))
+	WriteJSON(w, http.StatusOK, toUserResponse(u, h.presign))
 }
 
 // UpdateMe patches writable fields on the authenticated user.
@@ -196,7 +198,7 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toMeResponse(updated, nil))
+	WriteJSON(w, http.StatusOK, toMeResponse(updated, nil, h.presign))
 }
 
 // CompleteOnboarding stamps the per-account onboarding-completed
@@ -233,7 +235,7 @@ func (h *UserHandler) CompleteOnboarding(w http.ResponseWriter, r *http.Request)
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toMeResponse(u, nil))
+	WriteJSON(w, http.StatusOK, toMeResponse(u, nil, h.presign))
 }
 
 // DeleteMe soft-deletes the authenticated user. Per §4.6 their content
@@ -320,7 +322,7 @@ func (h *UserHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, AvatarUploadResponse{User: toMeResponse(updated, nil)})
+	WriteJSON(w, http.StatusOK, AvatarUploadResponse{User: toMeResponse(updated, nil, h.presign)})
 }
 
 // DeleteAvatar clears the authenticated user's avatar_url and best-
@@ -351,7 +353,7 @@ func (h *UserHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, AvatarUploadResponse{User: toMeResponse(updated, nil)})
+	WriteJSON(w, http.StatusOK, AvatarUploadResponse{User: toMeResponse(updated, nil, h.presign)})
 }
 
 // GetNotifications returns the authenticated user's notification toggles.

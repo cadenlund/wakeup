@@ -54,10 +54,10 @@ func newValidator() *validator.Validate {
 func TestNewAuthHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	v := newValidator()
-	if _, err := httpapi.NewAuthHandler(nil, nil, v); err == nil {
+	if _, err := httpapi.NewAuthHandler(nil, nil, v, nil); err == nil {
 		t.Error("nil svc: expected error")
 	}
-	if _, err := httpapi.NewAuthHandler(stubAuth, nil, nil); err == nil {
+	if _, err := httpapi.NewAuthHandler(stubAuth, nil, nil, nil); err == nil {
 		t.Error("nil validator: expected error")
 	}
 }
@@ -66,16 +66,16 @@ func TestNewAdminHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	sess := newSession()
 	v := newValidator()
-	if _, err := httpapi.NewAdminHandler(nil, stubAuth, sess, v); err == nil {
+	if _, err := httpapi.NewAdminHandler(nil, stubAuth, sess, v, nil); err == nil {
 		t.Error("nil admin: expected error")
 	}
-	if _, err := httpapi.NewAdminHandler(stubAdmin, nil, sess, v); err == nil {
+	if _, err := httpapi.NewAdminHandler(stubAdmin, nil, sess, v, nil); err == nil {
 		t.Error("nil auth: expected error")
 	}
-	if _, err := httpapi.NewAdminHandler(stubAdmin, stubAuth, nil, v); err == nil {
+	if _, err := httpapi.NewAdminHandler(stubAdmin, stubAuth, nil, v, nil); err == nil {
 		t.Error("nil sessions: expected error")
 	}
-	if _, err := httpapi.NewAdminHandler(stubAdmin, stubAuth, sess, nil); err == nil {
+	if _, err := httpapi.NewAdminHandler(stubAdmin, stubAuth, sess, nil, nil); err == nil {
 		t.Error("nil validator: expected error")
 	}
 }
@@ -93,16 +93,16 @@ func TestNewAttachmentHandler_RejectsNilDeps(t *testing.T) {
 func TestNewConversationHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	v := newValidator()
-	if _, err := httpapi.NewConversationHandler(nil, stubUsers, stubAuth, v); err == nil {
+	if _, err := httpapi.NewConversationHandler(nil, stubUsers, stubAuth, v, nil); err == nil {
 		t.Error("nil convs: expected error")
 	}
-	if _, err := httpapi.NewConversationHandler(stubConvs, nil, stubAuth, v); err == nil {
+	if _, err := httpapi.NewConversationHandler(stubConvs, nil, stubAuth, v, nil); err == nil {
 		t.Error("nil users: expected error")
 	}
-	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, nil, v); err == nil {
+	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, nil, v, nil); err == nil {
 		t.Error("nil auth: expected error")
 	}
-	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, stubAuth, nil); err == nil {
+	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, stubAuth, nil, nil); err == nil {
 		t.Error("nil validator: expected error")
 	}
 }
@@ -124,16 +124,16 @@ func TestNewDeviceHandler_RejectsNilDeps(t *testing.T) {
 func TestNewFriendHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	v := newValidator()
-	if _, err := httpapi.NewFriendHandler(nil, stubUsers, stubAuth, v); err == nil {
+	if _, err := httpapi.NewFriendHandler(nil, stubUsers, stubAuth, v, nil); err == nil {
 		t.Error("nil friends: expected error")
 	}
-	if _, err := httpapi.NewFriendHandler(stubFriends, nil, stubAuth, v); err == nil {
+	if _, err := httpapi.NewFriendHandler(stubFriends, nil, stubAuth, v, nil); err == nil {
 		t.Error("nil users: expected error")
 	}
-	if _, err := httpapi.NewFriendHandler(stubFriends, stubUsers, nil, v); err == nil {
+	if _, err := httpapi.NewFriendHandler(stubFriends, stubUsers, nil, v, nil); err == nil {
 		t.Error("nil auth: expected error")
 	}
-	if _, err := httpapi.NewFriendHandler(stubFriends, stubUsers, stubAuth, nil); err == nil {
+	if _, err := httpapi.NewFriendHandler(stubFriends, stubUsers, stubAuth, nil, nil); err == nil {
 		t.Error("nil validator: expected error")
 	}
 }
@@ -155,16 +155,16 @@ func TestNewMessageHandler_RejectsNilDeps(t *testing.T) {
 func TestNewPresenceHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	v := newValidator()
-	if _, err := httpapi.NewPresenceHandler(nil, stubUsers, stubAuth, v); err == nil {
+	if _, err := httpapi.NewPresenceHandler(nil, stubUsers, stubAuth, v, nil); err == nil {
 		t.Error("nil presence: expected error")
 	}
-	if _, err := httpapi.NewPresenceHandler(stubPresence, nil, stubAuth, v); err == nil {
+	if _, err := httpapi.NewPresenceHandler(stubPresence, nil, stubAuth, v, nil); err == nil {
 		t.Error("nil users: expected error")
 	}
-	if _, err := httpapi.NewPresenceHandler(stubPresence, stubUsers, nil, v); err == nil {
+	if _, err := httpapi.NewPresenceHandler(stubPresence, stubUsers, nil, v, nil); err == nil {
 		t.Error("nil auth: expected error")
 	}
-	if _, err := httpapi.NewPresenceHandler(stubPresence, stubUsers, stubAuth, nil); err == nil {
+	if _, err := httpapi.NewPresenceHandler(stubPresence, stubUsers, stubAuth, nil, nil); err == nil {
 		t.Error("nil validator: expected error")
 	}
 }
@@ -186,16 +186,16 @@ func TestNewRoomHandler_RejectsNilDeps(t *testing.T) {
 func TestNewUserHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	v := newValidator()
-	if _, err := httpapi.NewUserHandler(nil, stubAuth, stubNotifPref, v); err == nil {
+	if _, err := httpapi.NewUserHandler(nil, stubAuth, stubNotifPref, v, nil); err == nil {
 		t.Error("nil users: expected error")
 	}
-	if _, err := httpapi.NewUserHandler(stubUsers, nil, stubNotifPref, v); err == nil {
+	if _, err := httpapi.NewUserHandler(stubUsers, nil, stubNotifPref, v, nil); err == nil {
 		t.Error("nil auth: expected error")
 	}
-	if _, err := httpapi.NewUserHandler(stubUsers, stubAuth, nil, v); err == nil {
+	if _, err := httpapi.NewUserHandler(stubUsers, stubAuth, nil, v, nil); err == nil {
 		t.Error("nil prefs: expected error")
 	}
-	if _, err := httpapi.NewUserHandler(stubUsers, stubAuth, stubNotifPref, nil); err == nil {
+	if _, err := httpapi.NewUserHandler(stubUsers, stubAuth, stubNotifPref, nil, nil); err == nil {
 		t.Error("nil validator: expected error")
 	}
 }
