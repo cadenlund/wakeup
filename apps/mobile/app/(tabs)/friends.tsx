@@ -29,7 +29,17 @@
 // three relationship queries at once. Search mode doesn't expose a
 // pull-to-refresh because the search query already runs live off
 // every keystroke (debounced).
-import { Check, MoreHorizontal, Search, ShieldOff, UserMinus, Users, X } from 'lucide-react-native';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  MoreHorizontal,
+  Search,
+  ShieldOff,
+  UserMinus,
+  Users,
+  X,
+} from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Modal, Pressable, RefreshControl, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -73,8 +83,17 @@ type Friendship = InternalHandlerHttpFriendshipResponse;
 type UserRow = InternalHandlerHttpUserResponse;
 
 // Discriminated row union — FlashList's renderItem switches on `kind`.
+type SectionId = 'incoming' | 'outgoing' | 'friends';
+
 type Row =
-  | { kind: 'header'; key: string; title: string; count: number }
+  | {
+      kind: 'header';
+      key: string;
+      sectionId: SectionId;
+      title: string;
+      count: number;
+      collapsed: boolean;
+    }
   | { kind: 'friend'; key: string; friendship: Friendship; presence?: string }
   | { kind: 'request'; key: string; friendship: Friendship; direction: 'incoming' | 'outgoing' }
   | { kind: 'empty'; key: string; subtitle: string };
@@ -313,6 +332,20 @@ export default function FriendsScreen() {
     [blockUser, invalidateRelationships, markPending, unmarkPending, surfaceError]
   );
 
+  // Per-section collapsed state. Tap a header chevron to fold its
+  // rows out of view without losing the count. Lives in memory only
+  // — fine for now; persistence under STORAGE_KEYS lands when there
+  // are more user-prefs to keep with it.
+  const [collapsedSections, setCollapsedSections] = React.useState<Set<SectionId>>(new Set());
+  const toggleSection = React.useCallback((id: SectionId) => {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const sectionRows = React.useMemo<Row[]>(() => {
     const friends = friendsData?.data ?? [];
     const incoming = requestsData?.incoming ?? [];
@@ -321,64 +354,79 @@ export default function FriendsScreen() {
     const out: Row[] = [];
 
     if (incoming.length > 0) {
+      const collapsed = collapsedSections.has('incoming');
       out.push({
         kind: 'header',
         key: 'h:incoming',
+        sectionId: 'incoming',
         title: 'Incoming requests',
         count: incoming.length,
+        collapsed,
       });
-      incoming.forEach((f, i) => {
-        out.push({
-          kind: 'request',
-          key: `req:in:${f.id ?? f.user?.id ?? `idx-${i}`}`,
-          friendship: f,
-          direction: 'incoming',
+      if (!collapsed) {
+        incoming.forEach((f, i) => {
+          out.push({
+            kind: 'request',
+            key: `req:in:${f.id ?? f.user?.id ?? `idx-${i}`}`,
+            friendship: f,
+            direction: 'incoming',
+          });
         });
-      });
+      }
     }
 
     if (outgoing.length > 0) {
+      const collapsed = collapsedSections.has('outgoing');
       out.push({
         kind: 'header',
         key: 'h:outgoing',
+        sectionId: 'outgoing',
         title: 'Sent requests',
         count: outgoing.length,
+        collapsed,
       });
-      outgoing.forEach((f, i) => {
-        out.push({
-          kind: 'request',
-          key: `req:out:${f.id ?? f.user?.id ?? `idx-${i}`}`,
-          friendship: f,
-          direction: 'outgoing',
+      if (!collapsed) {
+        outgoing.forEach((f, i) => {
+          out.push({
+            kind: 'request',
+            key: `req:out:${f.id ?? f.user?.id ?? `idx-${i}`}`,
+            friendship: f,
+            direction: 'outgoing',
+          });
         });
-      });
+      }
     }
 
+    const friendsCollapsed = collapsedSections.has('friends');
     out.push({
       kind: 'header',
       key: 'h:friends',
+      sectionId: 'friends',
       title: 'Friends',
       count: friends.length,
+      collapsed: friendsCollapsed,
     });
-    if (friends.length === 0) {
-      out.push({
-        kind: 'empty',
-        key: 'empty:friends',
-        subtitle: 'Search above to find someone to add.',
-      });
-    } else {
-      friends.forEach((f, i) => {
+    if (!friendsCollapsed) {
+      if (friends.length === 0) {
         out.push({
-          kind: 'friend',
-          key: `friend:${f.id ?? f.user?.id ?? `idx-${i}`}`,
-          friendship: f,
-          presence: f.user?.id ? presenceByUser.get(f.user.id) : undefined,
+          kind: 'empty',
+          key: 'empty:friends',
+          subtitle: 'Search above to find someone to add.',
         });
-      });
+      } else {
+        friends.forEach((f, i) => {
+          out.push({
+            kind: 'friend',
+            key: `friend:${f.id ?? f.user?.id ?? `idx-${i}`}`,
+            friendship: f,
+            presence: f.user?.id ? presenceByUser.get(f.user.id) : undefined,
+          });
+        });
+      }
     }
 
     return out;
-  }, [friendsData, requestsData, presenceByUser]);
+  }, [friendsData, requestsData, presenceByUser, collapsedSections]);
 
   const searchRows = React.useMemo<SearchRow[]>(() => {
     const users = searchData?.users ?? [];
@@ -446,6 +494,7 @@ export default function FriendsScreen() {
           onAccept={onAcceptRequest}
           onDecline={onDeclineRequest}
           onOpenMenu={setMenuTarget}
+          onToggleSection={toggleSection}
           refreshing={refreshing}
           onRefresh={onRefresh}
         />
@@ -516,6 +565,7 @@ function SectionsPane({
   onAccept,
   onDecline,
   onOpenMenu,
+  onToggleSection,
   refreshing,
   onRefresh,
 }: {
@@ -524,6 +574,7 @@ function SectionsPane({
   onAccept: (f: Friendship) => void;
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
+  onToggleSection: (id: SectionId) => void;
   refreshing: boolean;
   onRefresh: () => void;
 }) {
@@ -535,10 +586,15 @@ function SectionsPane({
   if (rows.length === 0) {
     return <PullableEmpty refreshControl={refreshControl} />;
   }
+  // Friends section is the only one that's always rendered. If it's
+  // the lone header AND empty AND not collapsed, fall through to the
+  // welcoming empty state. (When collapsed-by-tap the user has
+  // explicitly hidden it, so still show the toggleable header.)
   const onlyEmptyHeader =
     rows.length === 2 &&
     rows[0].kind === 'header' &&
     rows[0].key === 'h:friends' &&
+    rows[0].collapsed === false &&
     rows[1].kind === 'empty';
   if (onlyEmptyHeader) {
     return <PullableEmpty refreshControl={refreshControl} />;
@@ -555,6 +611,7 @@ function SectionsPane({
           onAccept={onAccept}
           onDecline={onDecline}
           onOpenMenu={onOpenMenu}
+          onToggleSection={onToggleSection}
         />
       )}
       refreshControl={refreshControl}
@@ -702,16 +759,25 @@ function RenderedRow({
   onAccept,
   onDecline,
   onOpenMenu,
+  onToggleSection,
 }: {
   row: Row;
   pendingAction: Set<string>;
   onAccept: (f: Friendship) => void;
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
+  onToggleSection: (id: SectionId) => void;
 }) {
   switch (row.kind) {
     case 'header':
-      return <SectionHeader title={row.title} count={row.count} />;
+      return (
+        <SectionHeader
+          title={row.title}
+          count={row.count}
+          collapsed={row.collapsed}
+          onToggle={() => onToggleSection(row.sectionId)}
+        />
+      );
     case 'empty':
       return <SectionEmpty subtitle={row.subtitle} />;
     case 'friend': {
@@ -892,16 +958,35 @@ function FriendActionMenu({
   );
 }
 
-function SectionHeader({ title, count }: { title: string; count: number }) {
+function SectionHeader({
+  title,
+  count,
+  collapsed,
+  onToggle,
+}: {
+  title: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const mutedFg = useThemeColor('muted-foreground');
+  const Caret = collapsed ? ChevronRight : ChevronDown;
   return (
-    <View className="flex-row items-baseline justify-between border-b border-border bg-muted/30 px-4 py-2">
-      <Text variant="muted" className="text-xs font-semibold uppercase tracking-wider">
+    <Pressable
+      onPress={onToggle}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}, tap to ${collapsed ? 'expand' : 'collapse'}`}
+      accessibilityState={{ expanded: !collapsed }}
+      testID={`friend-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
+      className="flex-row items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 active:bg-muted">
+      <Caret size={14} color={mutedFg} />
+      <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}
       </Text>
       <Text variant="muted" className="text-xs">
         {count}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 
