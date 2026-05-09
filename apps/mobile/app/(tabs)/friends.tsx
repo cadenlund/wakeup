@@ -1013,7 +1013,11 @@ function SectionHeader({
     <Pressable
       onPress={onToggle}
       accessibilityRole="button"
-      accessibilityLabel={`${title}, tap to ${collapsed ? 'expand' : 'collapse'}`}
+      // Stable label that announces the section title + count.
+      // expanded/collapsed state is conveyed via accessibilityState
+      // so VoiceOver and TalkBack can phrase it idiomatically
+      // ("Friends, 3 items, expanded").
+      accessibilityLabel={`${title}, ${count} ${count === 1 ? 'item' : 'items'}`}
       accessibilityState={{ expanded: !collapsed }}
       testID={`friend-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
       className="flex-row items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 active:bg-muted">
