@@ -388,13 +388,20 @@ export default function FriendsScreen() {
         if (me?.id && u.id === me.id) {
           return { user: u, relation: 'self' };
         }
+        // Server-derived relation wins over the optimistic "sent"
+        // state — once requests refetches (or a 4.6 WS update flips
+        // them to friend / incoming), we stop pinning the row to
+        // "Pending". Optimistic state is only a fallback for the
+        // window between mutate and refetch settling.
+        const rel = u.id ? relationByUserId.get(u.id) : undefined;
+        if (rel) {
+          return { user: u, relation: rel };
+        }
         if (u.id && optimisticSent.has(u.id)) {
           return { user: u, relation: 'sent' };
         }
-        const rel = u.id ? relationByUserId.get(u.id) : undefined;
         return {
           user: u,
-          relation: rel,
           pending: u.id ? pendingSend.has(u.id) : false,
         };
       });
@@ -426,6 +433,7 @@ export default function FriendsScreen() {
         <SearchPane
           searchEnabled={searchEnabled}
           isFetching={searchQ.isFetching}
+          isError={searchQ.isError}
           rows={searchRows}
           onAdd={onAddFriend}
         />
@@ -578,11 +586,13 @@ function PullableEmpty({
 function SearchPane({
   searchEnabled,
   isFetching,
+  isError,
   rows,
   onAdd,
 }: {
   searchEnabled: boolean;
   isFetching: boolean;
+  isError: boolean;
   rows: SearchRow[];
   onAdd: (user: UserRow) => void;
 }) {
@@ -597,6 +607,17 @@ function SearchPane({
     return (
       <View className="flex-1 items-center justify-center py-12">
         <ActivityIndicator color={fg} />
+      </View>
+    );
+  }
+  // Distinguish "server failed" from "no matches" — the former needs
+  // to read as recoverable, not as an empty success.
+  if (isError && rows.length === 0) {
+    return (
+      <View className="px-6 py-12">
+        <Text variant="muted" className="text-center">
+          Search couldn&apos;t reach the server. Check your connection and try again.
+        </Text>
       </View>
     );
   }
