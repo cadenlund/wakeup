@@ -416,6 +416,8 @@ export default function SearchModalScreen() {
         drilledUsers: usersExpanded ? drilledUsers : undefined,
         expanded: expandedSections,
         collapsed: collapsedSections,
+        friendStatusByUser,
+        myUserId: me?.id,
       }),
     [
       data,
@@ -426,6 +428,8 @@ export default function SearchModalScreen() {
       drilledUsers,
       expandedSections,
       collapsedSections,
+      friendStatusByUser,
+      me?.id,
     ]
   );
 
@@ -671,6 +675,40 @@ function stepFocus(
   return tappableIndices[next];
 }
 
+// userTier orders search hits Instagram-style: friends first, then
+// people you've already requested (or who've requested you), then
+// strangers, then self at the very bottom. Stable-sort within each
+// tier preserves whatever ranking the backend returned (trigram
+// score / created_at DESC).
+function userTier(
+  u: InternalHandlerHttpUserResponse,
+  friendStatusByUser: Map<string, FriendStatus>,
+  myUserId: string | undefined
+): number {
+  if (!u.id) return 3;
+  if (myUserId && u.id === myUserId) return 4;
+  const status = friendStatusByUser.get(u.id);
+  if (status?.kind === 'friend') return 0;
+  if (status?.kind === 'incoming' || status?.kind === 'outgoing') return 1;
+  return 2;
+}
+
+function sortByFriendTier(
+  users: InternalHandlerHttpUserResponse[],
+  friendStatusByUser: Map<string, FriendStatus>,
+  myUserId: string | undefined
+): InternalHandlerHttpUserResponse[] {
+  return users
+    .map((u, idx) => ({ u, idx }))
+    .sort((a, b) => {
+      const t =
+        userTier(a.u, friendStatusByUser, myUserId) - userTier(b.u, friendStatusByUser, myUserId);
+      if (t !== 0) return t;
+      return a.idx - b.idx;
+    })
+    .map(({ u }) => u);
+}
+
 function buildRows({
   data,
   usersTotal,
@@ -679,6 +717,8 @@ function buildRows({
   drilledUsers,
   expanded,
   collapsed,
+  friendStatusByUser,
+  myUserId,
 }: {
   data: InternalHandlerHttpSearchResponse | undefined;
   usersTotal: number;
@@ -690,6 +730,10 @@ function buildRows({
   drilledUsers: InternalHandlerHttpUserResponse[] | undefined;
   expanded: Set<SectionId>;
   collapsed: Set<SectionId>;
+  // Sort context — friends first, pending requests second, strangers
+  // last, self at the bottom.
+  friendStatusByUser: Map<string, FriendStatus>;
+  myUserId: string | undefined;
 }): Row[] {
   if (!data) return [];
   const out: Row[] = [];
@@ -698,10 +742,11 @@ function buildRows({
   const usersExpanded = expanded.has('users');
   // When expanded, render the drill-down pages (full set, infinite
   // scroll). Otherwise show the top VISIBLE_PER_SECTION of the
-  // unified-search slice.
-  const renderedUsers = usersExpanded
-    ? (drilledUsers ?? usersSlice)
-    : usersSlice.slice(0, VISIBLE_PER_SECTION);
+  // unified-search slice. Sort by friend-tier so the user always
+  // sees their own people first.
+  const sourceUsers = usersExpanded ? (drilledUsers ?? usersSlice) : usersSlice;
+  const sortedUsers = sortByFriendTier(sourceUsers, friendStatusByUser, myUserId);
+  const renderedUsers = usersExpanded ? sortedUsers : sortedUsers.slice(0, VISIBLE_PER_SECTION);
   if (usersTotal > 0 || usersSlice.length > 0) {
     const isCollapsed = collapsed.has('users');
     out.push({
@@ -917,12 +962,21 @@ function RenderedRow({
             />
           );
         }
+        // Presence is friends-only (§7.2). Show the dot for friend
+        // rows so the search hit reads with the same online/offline
+        // glance the friends-list section gives; strangers /
+        // pending rows still hide it since their presence isn't
+        // subscribed. Status emoji intentionally omitted — search
+        // results stay clean visually (the user only wanted the
+        // presence dot).
+        const presence = isFriend && u.id ? presenceByUser.get(u.id) : undefined;
         return (
           <FriendRow
             displayName={u.display_name}
             username={u.username}
             avatarUrl={u.avatar_url}
-            hidePresence
+            presence={presence}
+            hidePresence={!isFriend}
             onPress={onTap}
             trailing={trailing}
           />

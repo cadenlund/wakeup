@@ -105,6 +105,10 @@ type SearchRow = {
   user: UserRow;
   status?: FriendStatus;
   isSelf?: boolean;
+  // Presence is friends-only (§7.2), so only friend rows carry a
+  // value here. Non-friend search hits leave it undefined and the
+  // FriendRow hides the presence dot.
+  presence?: string;
 };
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -503,6 +507,12 @@ export default function FriendsScreen() {
           return { user: u, isSelf: true };
         }
         const status = u.id ? friendStatusByUserId.get(u.id) : undefined;
+        if (status?.kind === 'friend') {
+          // Friends carry presence so the search-result row reads
+          // with the same online/offline glance the section list
+          // gives. presenceByUser is keyed by user_id.
+          return { user: u, status, presence: u.id ? presenceByUser.get(u.id) : undefined };
+        }
         if (status) return { user: u, status };
         return { user: u };
       });
@@ -526,7 +536,7 @@ export default function FriendsScreen() {
         return a.idx - b.idx;
       })
       .map(({ r }) => r);
-  }, [searchUsers, me, friendStatusByUserId]);
+  }, [searchUsers, me, friendStatusByUserId, presenceByUser]);
 
   const isInitialLoad =
     !isSearchMode &&
@@ -970,12 +980,17 @@ function SearchResultRow({
       />
     );
   }
+  // Presence is friends-only — show the dot for friend rows so a
+  // search hit reads like the section list. Strangers / pending /
+  // self leave it hidden because their presence isn't subscribed.
+  const showPresence = row.status?.kind === 'friend';
   return (
     <FriendRow
       displayName={u.display_name}
       username={u.username}
       avatarUrl={u.avatar_url}
-      hidePresence
+      presence={showPresence ? row.presence : undefined}
+      hidePresence={!showPresence}
       trailing={trailing}
     />
   );
