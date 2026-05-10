@@ -3119,20 +3119,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_handler_http.ErrorResponse"
                         }
                     },
-                    "403": {
-                        "description": "Caller is not the requester",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Friend request not found",
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_http.ErrorResponse"
-                        }
-                    },
                     "409": {
-                        "description": "Friend request is not pending",
+                        "description": "Friend request is no longer cancelable (already accepted/declined, never existed, or owned by someone else)",
                         "schema": {
                             "$ref": "#/definitions/internal_handler_http.ErrorResponse"
                         }

@@ -583,16 +583,6 @@ export type deleteV1FriendsRequestsIdResponse401 = {
   status: 401
 }
 
-export type deleteV1FriendsRequestsIdResponse403 = {
-  data: InternalHandlerHttpErrorResponse
-  status: 403
-}
-
-export type deleteV1FriendsRequestsIdResponse404 = {
-  data: InternalHandlerHttpErrorResponse
-  status: 404
-}
-
 export type deleteV1FriendsRequestsIdResponse409 = {
   data: InternalHandlerHttpErrorResponse
   status: 409
@@ -611,7 +601,7 @@ export type deleteV1FriendsRequestsIdResponse500 = {
 export type deleteV1FriendsRequestsIdResponseSuccess = (deleteV1FriendsRequestsIdResponse204) & {
   headers: Headers;
 };
-export type deleteV1FriendsRequestsIdResponseError = (deleteV1FriendsRequestsIdResponse400 | deleteV1FriendsRequestsIdResponse401 | deleteV1FriendsRequestsIdResponse403 | deleteV1FriendsRequestsIdResponse404 | deleteV1FriendsRequestsIdResponse409 | deleteV1FriendsRequestsIdResponse429 | deleteV1FriendsRequestsIdResponse500) & {
+export type deleteV1FriendsRequestsIdResponseError = (deleteV1FriendsRequestsIdResponse400 | deleteV1FriendsRequestsIdResponse401 | deleteV1FriendsRequestsIdResponse409 | deleteV1FriendsRequestsIdResponse429 | deleteV1FriendsRequestsIdResponse500) & {
   headers: Headers;
 };
 

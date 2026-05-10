@@ -3913,25 +3913,7 @@ export interface paths {
                         "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
                     };
                 };
-                /** @description Caller is not the requester */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
-                    };
-                };
-                /** @description Friend request not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["internal_handler_http.ErrorResponse"];
-                    };
-                };
-                /** @description Friend request is not pending */
+                /** @description Friend request is no longer cancelable (already accepted/declined, never existed, or owned by someone else) */
                 409: {
                     headers: {
                         [name: string]: unknown;

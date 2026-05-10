@@ -260,9 +260,7 @@ func (h *FriendHandler) AcceptRequest(w http.ResponseWriter, r *http.Request) {
 // @Header       204  {string}  X-Request-ID  "Echoed request id"
 // @Failure      400  {object}  ErrorResponse "Malformed friendship id"
 // @Failure      401  {object}  ErrorResponse "Not authenticated"
-// @Failure      403  {object}  ErrorResponse "Caller is not the requester"
-// @Failure      404  {object}  ErrorResponse "Friend request not found"
-// @Failure      409  {object}  ErrorResponse "Friend request is not pending"
+// @Failure      409  {object}  ErrorResponse "Friend request is no longer cancelable (already accepted/declined, never existed, or owned by someone else)"
 // @Failure      429  {object}  ErrorResponse "Rate limited"
 // @Failure      500  {object}  ErrorResponse "Internal error"
 // @Router       /v1/friends/requests/{id} [delete]
