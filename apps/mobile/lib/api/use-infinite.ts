@@ -248,7 +248,13 @@ export function useInfiniteMessages(
       )) as unknown as MsgsResp,
     initialPageParam: undefined,
     getNextPageParam: (last) => nextCursorOf(last),
-    enabled: Boolean(conversationId),
     ...opts?.query,
+    // `enabled` is computed AFTER the spread so a caller can't
+    // override the conversationId guard (passing { enabled: true }
+    // with an empty id would otherwise fire a request that 400s
+    // immediately). The caller's enabled is still respected as an
+    // upper bound — if they passed false, we honour that
+    // (CodeRabbit on PR #138).
+    enabled: Boolean(conversationId) && (opts?.query?.enabled ?? true),
   });
 }

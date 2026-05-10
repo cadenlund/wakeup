@@ -85,11 +85,16 @@ LIMIT $4`
 // keyset cursor + LIMIT — returns the absolute number of
 // messages in the conversation that match an optional body
 // substring filter. Drives the thread-screen scroll-to hints.
+//
+// Includes soft-deleted rows so the total matches the list slice
+// (which renders deleted rows as the §4.6 placeholder). Otherwise
+// "Showing N of M" would lie when the conversation has any
+// tombstones — the slice would have N visible rows but `total`
+// would only count the survivors (CodeRabbit on PR #138).
 const countByConversationSQL = `-- name: CountByConversation :one
 SELECT COUNT(*)
 FROM messages
 WHERE conversation_id = $1
-  AND deleted_at IS NULL
   AND ($2::text = '' OR body ILIKE '%' || $2::text || '%')`
 
 const addAttachmentSQL = `-- name: AddAttachment :exec

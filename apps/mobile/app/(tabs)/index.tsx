@@ -436,7 +436,11 @@ function ConversationsFooter({
   // wrong (it'd compare filtered visible to global total). Filter
   // is local only; pagination drives the un-filtered shape.
   if (filterActive) return null;
-  if (total <= loaded) return null;
+  // Render the footer even after the last page lands so the user
+  // sees "Showing 1000 of 1000" — the previous `total <= loaded`
+  // guard hid it exactly when the count first became authoritative
+  // (CodeRabbit on PR #138).
+  if (total <= 0) return null;
   return (
     <View className="items-center py-3">
       <Text variant="muted" className="text-xs">

@@ -365,8 +365,10 @@ type ListParams struct {
 // ListResult is the paginated payload returned by List.
 // Total is the absolute count of matching messages across every page so
 // the UI can render "showing N of M" hints without paginating through
-// every cursor. Soft-deleted rows are excluded from Total — the §4.6
-// placeholder rendering is for the message slice only, not the count.
+// every cursor. Soft-deleted rows are INCLUDED in Total so the count
+// matches the list slice (which renders deleted rows as the §4.6
+// placeholder); if we excluded tombstones from Total, "Showing N of M"
+// would read N > M whenever the conversation had any deletions.
 type ListResult struct {
 	Messages   []domain.Message
 	Total      int

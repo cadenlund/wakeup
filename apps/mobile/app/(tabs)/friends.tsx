@@ -882,7 +882,9 @@ function SearchListFooter({
       </View>
     );
   }
-  if (total <= loaded) return null;
+  // Keep the "Showing N of M" footer rendered even when N === M so
+  // the user sees the final count (CodeRabbit on PR #138).
+  if (total <= 0) return null;
   return (
     <View className="items-center py-3">
       <Text variant="muted" className="text-xs">
