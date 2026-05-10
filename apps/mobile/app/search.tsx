@@ -513,22 +513,25 @@ export default function SearchModalScreen() {
 
   const mutedFg = useThemeColor('muted-foreground');
 
-  // FlashList fires onEndReached as soon as the last item is inside
-  // (threshold * viewport) of the bottom — when the rendered list
-  // is shorter than the viewport that's true on EVERY render. With
-  // 100 matching users, tapping "Show all" expanded the list to
-  // ~25 rows, fired onEndReached on the same frame, fetched page 2,
-  // re-rendered, fired again, fetched page 3, and so on until every
-  // page was loaded. Gate fetchNextPage on a flag set by the user's
-  // first scroll-drag — turns the runaway into normal "scroll to
-  // load more" pagination.
-  const userScrolledRef = React.useRef(false);
-  // Reset the flag on a new query or expand toggle so a fresh
-  // session starts paused (the first page that lands shouldn't
-  // trigger another fetch).
-  React.useEffect(() => {
-    userScrolledRef.current = false;
-  }, [debouncedQuery, usersExpanded]);
+  // Pagination is driven off `onMomentumScrollEnd`, NOT
+  // `onEndReached`. FlashList fires onEndReached on render
+  // whenever the last item is inside (threshold * viewport) of the
+  // bottom — when 100 matches expand into ~25 rows that all fit on
+  // screen, it fires on EVERY render and chains through every
+  // page on the same frame ("scrolls to the bottom" auto-load
+  // bug). Momentum-scroll-end only fires when the user actively
+  // flings the list and it comes to rest, so a single drag = at
+  // most one fetch.
+  const fetchMoreUsersIfNearBottom = React.useCallback(
+    (offsetY: number, contentH: number, viewportH: number) => {
+      if (!usersExpanded) return;
+      if (!usersDrillQ.hasNextPage || usersDrillQ.isFetchingNextPage) return;
+      const distanceFromBottom = contentH - (offsetY + viewportH);
+      if (distanceFromBottom > viewportH * 0.5) return;
+      void usersDrillQ.fetchNextPage();
+    },
+    [usersExpanded, usersDrillQ]
+  );
 
   // Header rows stick to the top of the viewport while their
   // section is in view so a long expanded People section can be
@@ -538,6 +541,21 @@ export default function SearchModalScreen() {
     () => rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0),
     [rows]
   );
+
+  // Snap the People header to the top of the viewport whenever
+  // the user expands it. Without this, FlashList preserved the
+  // pre-expand scroll offset and the user landed on the bottom
+  // half of the now-much-longer list.
+  const prevUsersExpandedRef = React.useRef(usersExpanded);
+  React.useEffect(() => {
+    if (usersExpanded && !prevUsersExpandedRef.current) {
+      const idx = rows.findIndex((r) => r.kind === 'header' && r.section === 'users');
+      if (idx >= 0) {
+        listRef.current?.scrollToIndex({ index: idx, animated: false });
+      }
+    }
+    prevUsersExpandedRef.current = usersExpanded;
+  }, [usersExpanded, rows]);
 
   return (
     <ModalScreenShell onClose={goCancel} testID="search-modal-shell">
@@ -563,23 +581,18 @@ export default function SearchModalScreen() {
             data={rows}
             keyExtractor={(item) => item.key}
             stickyHeaderIndices={stickyHeaderIndices}
-            onScrollBeginDrag={() => {
-              userScrolledRef.current = true;
-            }}
-            // When People is expanded the modal becomes an
-            // infinite-scroll surface for /v1/users; fire the next
-            // page once we get within half a viewport of the end.
-            // Gated on the user actually scrolling (see ref above)
-            // so a render that fits in the viewport doesn't chain
-            // through every page on the same frame. Other sections
-            // (chats / messages) don't paginate so onEndReached is
-            // a no-op for them.
-            onEndReachedThreshold={0.5}
-            onEndReached={() => {
-              if (!userScrolledRef.current) return;
-              if (usersExpanded && usersDrillQ.hasNextPage && !usersDrillQ.isFetchingNextPage) {
-                void usersDrillQ.fetchNextPage();
-              }
+            // Momentum-scroll-end only fires when the user has
+            // flung or dragged the list and it comes to rest, so
+            // a render that fits in the viewport doesn't trigger
+            // a fetch (the show-all auto-load runaway). One drag
+            // gesture ⇒ at most one fetch.
+            onMomentumScrollEnd={(e) => {
+              const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+              fetchMoreUsersIfNearBottom(
+                contentOffset.y,
+                contentSize.height,
+                layoutMeasurement.height
+              );
             }}
             ListFooterComponent={
               usersExpanded && usersDrillQ.isFetchingNextPage ? (
@@ -1193,7 +1206,11 @@ function SectionHeader({
       accessibilityLabel={`${title}, ${count} ${count === 1 ? 'item' : 'items'}`}
       accessibilityState={{ expanded: !collapsed }}
       testID={`search-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
-      className="flex-row items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 active:bg-muted">
+      // Opaque background — sticky-header bleed-through let the
+      // user see rows underneath the chevron strip while
+      // scrolling. `bg-card` matches the modal chrome and keeps
+      // the slight elevation read.
+      className="flex-row items-center gap-2 border-b border-border bg-card px-4 py-2 active:bg-muted">
       <Caret size={14} color={mutedFg} />
       <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}

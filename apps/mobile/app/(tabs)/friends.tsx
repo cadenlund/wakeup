@@ -725,11 +725,17 @@ function SectionsPane({
 
   const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
 
-  // Same runaway-fetch guard as the search modal: gate
-  // fetchNextPage on the user actually scrolling so a list shorter
-  // than the viewport doesn't keep firing onEndReached on every
-  // re-render and drain the cursor.
-  const userScrolledRef = React.useRef(false);
+  // Pagination is driven off onMomentumScrollEnd so a sub-viewport
+  // list never chains through every page on render. Same pattern
+  // the search modal uses.
+  const onMomentumScrollEnd = React.useCallback(
+    (offsetY: number, contentH: number, viewportH: number) => {
+      const distanceFromBottom = contentH - (offsetY + viewportH);
+      if (distanceFromBottom > viewportH * 0.5) return;
+      onEndReached();
+    },
+    [onEndReached]
+  );
 
   // Section-header rows stick to the top of the viewport while
   // their section is in view, so scrolling deep into Friends still
@@ -766,13 +772,9 @@ function SectionsPane({
       data={rows}
       keyExtractor={(item) => item.key}
       stickyHeaderIndices={stickyHeaderIndices}
-      onScrollBeginDrag={() => {
-        userScrolledRef.current = true;
-      }}
-      onEndReachedThreshold={0.5}
-      onEndReached={() => {
-        if (!userScrolledRef.current) return;
-        onEndReached();
+      onMomentumScrollEnd={(e) => {
+        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+        onMomentumScrollEnd(contentOffset.y, contentSize.height, layoutMeasurement.height);
       }}
       ListFooterComponent={isFetchingNextPage ? <SectionsListLoader /> : null}
       renderItem={({ item }) => (
@@ -917,22 +919,18 @@ function SearchPaneList({
   onEndReached: () => void;
   isFetchingNextPage: boolean;
 }) {
-  // Same scroll-flag guard the SectionsPane and search modal use:
-  // FlashList fires onEndReached on render when content fits the
-  // viewport, so we only honour it once the user has scrolled at
-  // least once. Without this guard, "user1" returning 100 matches
-  // chained through every page on the same frame.
-  const userScrolledRef = React.useRef(false);
+  // Pagination drives off onMomentumScrollEnd so a sub-viewport
+  // list never chains through every page on render — same fix
+  // SectionsPane and the search modal use.
   return (
     <List
       data={rows}
       keyExtractor={(r, i) => r.user.id ?? r.user.username ?? `idx-${i}`}
-      onScrollBeginDrag={() => {
-        userScrolledRef.current = true;
-      }}
-      onEndReachedThreshold={0.5}
-      onEndReached={() => {
-        if (!userScrolledRef.current) return;
+      onMomentumScrollEnd={(e) => {
+        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+        const distanceFromBottom =
+          contentSize.height - (contentOffset.y + layoutMeasurement.height);
+        if (distanceFromBottom > layoutMeasurement.height * 0.5) return;
         onEndReached();
       }}
       ListFooterComponent={
@@ -1247,7 +1245,11 @@ function SectionHeader({
       accessibilityLabel={`${title}, ${count} ${count === 1 ? 'item' : 'items'}`}
       accessibilityState={{ expanded: !collapsed }}
       testID={`friend-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
-      className="flex-row items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 active:bg-muted">
+      // Opaque background — sticky-header bleed-through let the
+      // user see avatar rows underneath the chevron strip while
+      // scrolling. `bg-card` matches the chrome around the modal
+      // and keeps the slight elevation read.
+      className="flex-row items-center gap-2 border-b border-border bg-card px-4 py-2 active:bg-muted">
       <Caret size={14} color={mutedFg} />
       <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}
