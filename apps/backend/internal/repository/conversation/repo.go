@@ -149,6 +149,12 @@ WHERE m.user_id = $1
     )
   )`
 
+// Member-name match excludes blocked-pair members so a group
+// doesn't surface just because a blocked user's display_name /
+// username happens to contain the query. The group itself stays
+// searchable by its own name; only the per-member contribution
+// to the OR-match is gated. Symmetric block: caller blocking the
+// member, OR the member blocking the caller, both apply.
 const searchByUserAndNameSQL = `-- name: SearchByUserAndName :many
 SELECT DISTINCT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
@@ -157,6 +163,12 @@ JOIN conversation_members caller ON caller.conversation_id = c.id AND caller.use
 LEFT JOIN conversation_members other_m
   ON other_m.conversation_id = c.id
  AND other_m.user_id <> $1
+ AND NOT EXISTS (
+   SELECT 1 FROM friendships f
+   WHERE f.status = 'blocked'
+     AND ((f.requester_id = $1 AND f.addressee_id = other_m.user_id)
+       OR (f.requester_id = other_m.user_id AND f.addressee_id = $1))
+ )
 LEFT JOIN users other_u ON other_u.id = other_m.user_id
 WHERE c.type = 'group'
   AND (
@@ -178,6 +190,12 @@ JOIN conversation_members caller ON caller.conversation_id = c.id AND caller.use
 LEFT JOIN conversation_members other_m
   ON other_m.conversation_id = c.id
  AND other_m.user_id <> $1
+ AND NOT EXISTS (
+   SELECT 1 FROM friendships f
+   WHERE f.status = 'blocked'
+     AND ((f.requester_id = $1 AND f.addressee_id = other_m.user_id)
+       OR (f.requester_id = other_m.user_id AND f.addressee_id = $1))
+ )
 LEFT JOIN users other_u ON other_u.id = other_m.user_id
 WHERE c.type = 'group'
   AND (

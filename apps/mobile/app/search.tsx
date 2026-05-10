@@ -564,7 +564,13 @@ export default function SearchModalScreen() {
 
         {!enabled ? (
           <SearchHint />
-        ) : (searchQ.isFetching || usersDrillQ.isFetching) && rows.length === 0 ? (
+        ) : // Block on the friend graph load too — without it, user
+        // hits render in stranger order, then jump-reorder once
+        // friendsQ lands. The graph is shared with the friends-tab
+        // cache (staleTime 30s), so this gate only fires the FIRST
+        // time the modal mounts in a fresh session.
+        (searchQ.isFetching || usersDrillQ.isFetching || friendsQ.isLoading) &&
+          rows.length === 0 ? (
           <SearchLoading />
         ) : (searchQ.isError || usersDrillQ.isError) && rows.length === 0 ? (
           <SearchError
