@@ -79,6 +79,10 @@ func TestSmoke_MessagesGoldenPath(t *testing.T) {
 	bobID := whoami(t, srv, bob)
 	carolID := whoami(t, srv, carol)
 
+	// Friends-only DM enforcement: alice + bob need to be friends
+	// before alice can create a direct DM with bob.
+	makeFriendsSmoke(t, srv, alice, bob, bobUsername)
+
 	// 2) alice creates a direct with bob.
 	directRow := mustPostJSON(t, alice, srv.URL+"/v1/conversations", map[string]any{
 		"type": "direct", "member_ids": []string{bobID},

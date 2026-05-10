@@ -272,9 +272,10 @@ func TestGetAttachment_BadUUID(t *testing.T) {
 func TestGetAttachment_LinkedMemberCanRead(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	uploaderClient, _ := h.AuthClient(t)
+	uploaderClient, uploader := h.AuthClient(t)
 	memberClient, member := h.AuthClient(t)
 	stranger, _ := h.AuthClient(t)
+	h.MakeFriendship(t, uploader, member)
 
 	// Upload (still orphan).
 	attID := requireUploadAttachment(t, h, uploaderClient)

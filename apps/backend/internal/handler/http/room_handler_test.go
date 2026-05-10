@@ -17,9 +17,11 @@ import (
 
 // makeDirectViaService creates an alice<->bob direct via the conv
 // service so the harness's room handler has a real conversation to
-// authorize against.
+// authorize against. Establishes the friendship first because the
+// service rejects direct creates between non-friends.
 func makeDirectViaService(t *testing.T, h *testutil.Harness, a, b domain.User) string {
 	t.Helper()
+	h.MakeFriendship(t, a, b)
 	res, err := h.ConvSvc.Create(context.Background(), conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})

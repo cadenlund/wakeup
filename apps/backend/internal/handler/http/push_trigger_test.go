@@ -25,8 +25,9 @@ import (
 func TestSendMessage_FiresOfflinePush_Direct(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	bClient, b := h.AuthClient(t)
+	h.MakeFriendship(t, ua, b)
 
 	if _, err := h.DeviceRepo.Register(context.Background(), b.ID, "ExponentPushToken[b]", domain.DeviceIOS); err != nil {
 		t.Fatalf("seed device: %v", err)
@@ -61,6 +62,7 @@ func TestSendMessage_DoesNotPushSender(t *testing.T) {
 	h := testutil.New(t)
 	a, ua := h.AuthClient(t)
 	_, b := h.AuthClient(t)
+	h.MakeFriendship(t, ua, b)
 	// Register a device for the sender. They must NOT receive their own message push.
 	if _, err := h.DeviceRepo.Register(context.Background(), ua.ID, "ExponentPushToken[a]", domain.DeviceIOS); err != nil {
 		t.Fatalf("seed device a: %v", err)
@@ -84,8 +86,9 @@ func TestSendMessage_NoPushForOnlineRecipient(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, b := h.AuthClient(t)
+	h.MakeFriendship(t, ua, b)
 
 	if _, err := h.DeviceRepo.Register(ctx, b.ID, "ExponentPushToken[b]", domain.DeviceIOS); err != nil {
 		t.Fatalf("seed device: %v", err)
@@ -113,6 +116,8 @@ func TestSendFriendRequest_FiresOfflinePush(t *testing.T) {
 	h := testutil.New(t)
 	a, _ := h.AuthClient(t)
 	_, b := h.AuthClient(t)
+	// No prior friendship — this test exercises the friend-request
+	// send path itself, which 409s if the pair is already friends.
 
 	if _, err := h.DeviceRepo.Register(context.Background(), b.ID, "ExponentPushToken[b]", domain.DeviceIOS); err != nil {
 		t.Fatalf("seed device: %v", err)
@@ -145,6 +150,7 @@ func TestSendFriendRequest_NoPushWhenAddresseeOnline(t *testing.T) {
 	h := testutil.New(t)
 	a, _ := h.AuthClient(t)
 	_, b := h.AuthClient(t)
+	// No prior friendship — see comment on TestSendFriendRequest_FiresOfflinePush.
 
 	if _, err := h.DeviceRepo.Register(ctx, b.ID, "ExponentPushToken[b]", domain.DeviceIOS); err != nil {
 		t.Fatalf("seed device: %v", err)
@@ -176,8 +182,9 @@ func TestSendMessage_PrefOffSuppressesPush(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, b := h.AuthClient(t)
+	h.MakeFriendship(t, ua, b)
 
 	if _, err := h.DeviceRepo.Register(ctx, b.ID, "ExponentPushToken[b]", domain.DeviceIOS); err != nil {
 		t.Fatalf("seed device: %v", err)

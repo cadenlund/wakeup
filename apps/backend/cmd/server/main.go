@@ -207,7 +207,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("notification service: %w", err)
 	}
-	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convsRepo, Users: users})
+	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convsRepo, Users: users, Friends: friendsRepo})
 	if err != nil {
 		return fmt.Errorf("conversation service: %w", err)
 	}

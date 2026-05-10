@@ -30,6 +30,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
+	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 )
 
@@ -43,16 +44,18 @@ const MaxNameLen = 80
 
 // Service is the conversation service.
 type Service struct {
-	pool  *pgxpool.Pool // for AddMemberWithCap and tx-wrapped creates
-	convs *convrepo.Queries
-	users *userrepo.Queries
+	pool    *pgxpool.Pool // for AddMemberWithCap and tx-wrapped creates
+	convs   *convrepo.Queries
+	users   *userrepo.Queries
+	friends *friendrepo.Queries
 }
 
 // Config builds the service.
 type Config struct {
-	Pool  *pgxpool.Pool
-	Convs *convrepo.Queries
-	Users *userrepo.Queries
+	Pool    *pgxpool.Pool
+	Convs   *convrepo.Queries
+	Users   *userrepo.Queries
+	Friends *friendrepo.Queries
 }
 
 // New constructs the service.
@@ -66,7 +69,10 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Users == nil {
 		return nil, errors.New("conversation: Config.Users is required")
 	}
-	return &Service{pool: cfg.Pool, convs: cfg.Convs, users: cfg.Users}, nil
+	if cfg.Friends == nil {
+		return nil, errors.New("conversation: Config.Friends is required")
+	}
+	return &Service{pool: cfg.Pool, convs: cfg.Convs, users: cfg.Users, friends: cfg.Friends}, nil
 }
 
 // CreateParams is the input to Create. Type=direct: MemberIDs MUST hold
@@ -129,7 +135,10 @@ func (s *Service) createDirect(ctx context.Context, p CreateParams) (CreateResul
 		return CreateResult{}, apierror.Internal("lookup other user").WithCause(err)
 	}
 
-	// Dedup: if a direct already exists, return it.
+	// Dedup: if a direct already exists, return it. Existing DMs
+	// short-circuit the friendship check below — once a thread is
+	// open, an unfriend shouldn't lock you out of re-reading the
+	// history. Creating a new DM is what requires friendship.
 	if existing, err := s.convs.GetDirectByPair(ctx, p.Creator, other); err == nil {
 		members, err := s.convs.ListMembers(ctx, existing.ID)
 		if err != nil {
@@ -138,6 +147,20 @@ func (s *Service) createDirect(ctx context.Context, p CreateParams) (CreateResul
 		return CreateResult{Conversation: existing, Members: members}, nil
 	} else if !errors.Is(err, convrepo.ErrNotFound) {
 		return CreateResult{}, apierror.Internal("dedup direct").WithCause(err)
+	}
+
+	// Friends-only DM enforcement (§1 product overview: "friend-graph
+	// chat"). Without this, anyone you can search by username can be
+	// DM'd, which sidesteps the friend-request consent step. The
+	// frontend gates the affordance too, but the server is the
+	// authority — a direct CALL to POST /v1/conversations with
+	// non-friend ids must 403, not silently create a chat.
+	pair, err := s.friends.GetByPair(ctx, p.Creator, other)
+	if err != nil && !errors.Is(err, friendrepo.ErrNotFound) {
+		return CreateResult{}, apierror.Internal("check friendship").WithCause(err)
+	}
+	if errors.Is(err, friendrepo.ErrNotFound) || pair.Status != domain.FriendshipAccepted {
+		return CreateResult{}, apierror.Forbidden("you must be friends to start a conversation")
 	}
 
 	tx, err := s.pool.Begin(ctx)

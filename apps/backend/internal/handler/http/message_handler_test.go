@@ -40,8 +40,9 @@ func requireSendMessage(t *testing.T, h *testutil.Harness, c *http.Client, convI
 func TestSendMessage_Success(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -65,8 +66,9 @@ func TestSendMessage_Success(t *testing.T) {
 func TestSendMessage_NonMemberSees404(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	stranger, _ := h.AuthClient(t)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
@@ -80,8 +82,9 @@ func TestSendMessage_NonMemberSees404(t *testing.T) {
 func TestSendMessage_EmptyBody(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -116,8 +119,9 @@ func TestSendMessage_Unauthenticated(t *testing.T) {
 func TestListMessages_Success(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -144,8 +148,9 @@ func TestListMessages_Success(t *testing.T) {
 func TestListMessages_Query(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -171,8 +176,9 @@ func TestListMessages_Query(t *testing.T) {
 func TestListMessages_NonMember(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	stranger, _ := h.AuthClient(t)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
@@ -190,8 +196,9 @@ func TestListMessages_NonMember(t *testing.T) {
 func TestEditMessage_Owner(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -215,10 +222,10 @@ func TestEditMessage_Owner(t *testing.T) {
 func TestEditMessage_NonOwnerForbidden(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, b := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	bClient, _ := h.AuthClient(t)
-	_ = b
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -242,8 +249,9 @@ func TestEditMessage_NotFound(t *testing.T) {
 func TestEditMessage_OverlongBody(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -259,8 +267,9 @@ func TestEditMessage_OverlongBody(t *testing.T) {
 func TestDeleteMessage_OwnerSucceeds(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -297,8 +306,9 @@ func TestDeleteMessage_OwnerSucceeds(t *testing.T) {
 func TestDeleteMessage_StrangerForbidden(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	stranger, _ := h.AuthClient(t)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
@@ -313,8 +323,9 @@ func TestDeleteMessage_StrangerForbidden(t *testing.T) {
 func TestDeleteMessage_Idempotent(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})
@@ -338,8 +349,9 @@ func TestDeleteMessage_Idempotent(t *testing.T) {
 func TestListReads_NonMemberSees404(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	stranger, _ := h.AuthClient(t)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
@@ -357,8 +369,9 @@ func TestListReads_NonMemberSees404(t *testing.T) {
 func TestListReads_MemberEmpty(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	_, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
 	})

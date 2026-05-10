@@ -242,6 +242,7 @@ func buildRouter(d routerDeps) (*chi.Mux, error) {
 				r.Post("/v1/friends/requests", d.FriendHandler.SendRequest)
 				r.Post("/v1/friends/requests/{id}/accept", d.FriendHandler.AcceptRequest)
 				r.Post("/v1/friends/requests/{id}/decline", d.FriendHandler.DeclineRequest)
+				r.Delete("/v1/friends/requests/{id}", d.FriendHandler.CancelRequest)
 				r.Delete("/v1/friends/{user_id}", d.FriendHandler.Unfriend)
 				r.Post("/v1/friends/{user_id}/block", d.FriendHandler.Block)
 				r.Delete("/v1/friends/{user_id}/block", d.FriendHandler.Unblock)

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -131,6 +132,45 @@ type Harness struct {
 	serverURL *url.URL
 }
 
+// MakeFriendship establishes an accepted friendship between two
+// users. Tests that exercise the conversation create path for
+// direct DMs need this — the service rejects non-friends with 403.
+// Idempotent: if the pair is already in any state, the helper
+// fast-forwards to accepted (existing pending → Accept; existing
+// accepted → no-op; blocked → unblock + accept). The accept path
+// goes through the repo, not the service, so the test can build a
+// pre-accepted relationship without faking actor identity.
+func (h *Harness) MakeFriendship(t *testing.T, a, b domain.User) {
+	t.Helper()
+	ctx := context.Background()
+	if existing, err := h.FriendRepo.GetByPair(ctx, a.ID, b.ID); err == nil {
+		switch existing.Status {
+		case domain.FriendshipAccepted:
+			return
+		case domain.FriendshipPending:
+			if _, err := h.FriendRepo.Accept(ctx, existing.ID); err != nil {
+				t.Fatalf("MakeFriendship accept existing pending: %v", err)
+			}
+			return
+		case domain.FriendshipBlocked:
+			if err := h.FriendRepo.DeleteByPair(ctx, a.ID, b.ID); err != nil {
+				t.Fatalf("MakeFriendship delete blocked: %v", err)
+			}
+		}
+	} else if !errors.Is(err, friendrepo.ErrNotFound) {
+		t.Fatalf("MakeFriendship lookup: %v", err)
+	}
+	id := uuid.Must(uuid.NewV7())
+	if _, err := h.FriendRepo.Create(ctx, friendrepo.CreateParams{
+		ID: id, RequesterID: a.ID, AddresseeID: b.ID, Status: domain.FriendshipPending,
+	}); err != nil {
+		t.Fatalf("MakeFriendship create: %v", err)
+	}
+	if _, err := h.FriendRepo.Accept(ctx, id); err != nil {
+		t.Fatalf("MakeFriendship accept: %v", err)
+	}
+}
+
 // New starts a TLS test server with the Phase-3.6 service wiring. Each
 // call gets:
 //   - an isolated pgtestdb-cloned database
@@ -205,7 +245,7 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build user service: %v", err)
 	}
-	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users})
+	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users, Friends: friends})
 	if err != nil {
 		t.Fatalf("Harness: build conversation service: %v", err)
 	}

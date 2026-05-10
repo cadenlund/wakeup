@@ -200,8 +200,43 @@ func (s *Service) AcceptRequest(ctx context.Context, actor uuid.UUID, friendship
 	return updated, nil
 }
 
+// CancelRequest deletes a pending row from the requester's side —
+// "I changed my mind, take that friend request back." The addressee
+// cancels via DeclineRequest, which lives below this. Splitting the
+// two endpoints lets each side carry its own audit trail and gives
+// the client a clear "you sent this" vs "they sent this" affordance
+// without inferring the relationship from the actor.
+//
+// Errors:
+//   - row missing                  → apierror.NotFound
+//   - row not pending              → apierror.Conflict
+//   - actor is not the requester   → apierror.Forbidden
+func (s *Service) CancelRequest(ctx context.Context, actor, friendshipID uuid.UUID) error {
+	f, err := s.friends.GetByID(ctx, friendshipID)
+	if err != nil {
+		if errors.Is(err, friendrepo.ErrNotFound) {
+			return apierror.NotFound("friend request")
+		}
+		return apierror.Internal("get friend request").WithCause(err)
+	}
+	if f.RequesterID != actor {
+		return apierror.Forbidden("only the requester can cancel this request")
+	}
+	if f.Status != domain.FriendshipPending {
+		return apierror.Conflict("friend request is not pending")
+	}
+	if err := s.friends.Delete(ctx, friendshipID); err != nil {
+		if errors.Is(err, friendrepo.ErrNotFound) {
+			// Already gone — idempotent.
+			return nil
+		}
+		return apierror.Internal("delete friend request").WithCause(err)
+	}
+	return nil
+}
+
 // DeclineRequest deletes a pending row. Only the addressee can decline
-// — the requester cancels via a separate flow (out of scope for v1).
+// — the requester cancels via CancelRequest above.
 //
 // Errors:
 //   - row missing                  → apierror.NotFound

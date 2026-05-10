@@ -14,16 +14,18 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
+	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	"github.com/cadenlund/wakeup/apps/backend/internal/testutil"
 )
 
 type stack struct {
-	svc   *conversation.Service
-	convs *convrepo.Queries
-	users *userrepo.Queries
-	pool  *pgxpool.Pool
+	svc     *conversation.Service
+	convs   *convrepo.Queries
+	users   *userrepo.Queries
+	friends *friendrepo.Queries
+	pool    *pgxpool.Pool
 }
 
 func newStack(t *testing.T) *stack {
@@ -31,11 +33,32 @@ func newStack(t *testing.T) *stack {
 	pool := testutil.NewTestDB(t)
 	convs := convrepo.New(pool)
 	users := userrepo.New(pool)
-	svc, err := conversation.New(conversation.Config{Pool: pool, Convs: convs, Users: users})
+	friends := friendrepo.New(pool)
+	svc, err := conversation.New(conversation.Config{
+		Pool: pool, Convs: convs, Users: users, Friends: friends,
+	})
 	if err != nil {
 		t.Fatalf("conversation.New: %v", err)
 	}
-	return &stack{svc: svc, convs: convs, users: users, pool: pool}
+	return &stack{svc: svc, convs: convs, users: users, friends: friends, pool: pool}
+}
+
+// makeFriendship is a setup helper that establishes an accepted
+// friendship between two users so createDirect's friends-only
+// gate doesn't reject the test conversation. The repo only allows
+// `pending` / `blocked` as initial statuses; we create + Accept in
+// two steps to land in `accepted`.
+func makeFriendship(ctx context.Context, t *testing.T, st *stack, a, b uuid.UUID) {
+	t.Helper()
+	id := uuid.Must(uuid.NewV7())
+	if _, err := st.friends.Create(ctx, friendrepo.CreateParams{
+		ID: id, RequesterID: a, AddresseeID: b, Status: domain.FriendshipPending,
+	}); err != nil {
+		t.Fatalf("makeFriendship create: %v", err)
+	}
+	if _, err := st.friends.Accept(ctx, id); err != nil {
+		t.Fatalf("makeFriendship accept: %v", err)
+	}
 }
 
 func makeUser(ctx context.Context, t *testing.T, st *stack) domain.User {
@@ -69,6 +92,13 @@ func ptr[T any](v T) *T { return &v }
 // caught the pattern on PR #35).
 func mustCreate(ctx context.Context, t *testing.T, st *stack, p conversation.CreateParams) conversation.CreateResult {
 	t.Helper()
+	// Friends-only DM enforcement requires every test that sets up a
+	// direct conversation to friend the pair first. mustCreate is a
+	// "must succeed" helper; the friendship is part of that contract
+	// so individual tests don't have to repeat the boilerplate.
+	if p.Type == domain.ConversationDirect && len(p.MemberIDs) == 1 {
+		makeFriendship(ctx, t, st, p.Creator, p.MemberIDs[0])
+	}
 	got, err := st.svc.Create(ctx, p)
 	if err != nil {
 		t.Fatalf("setup Create: %v", err)
@@ -84,6 +114,7 @@ func TestCreate_DirectSuccess(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
+	makeFriendship(ctx, t, st, a.ID, b.ID)
 
 	got, err := st.svc.Create(ctx, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
@@ -105,6 +136,7 @@ func TestCreate_DirectDeduplicates(t *testing.T) {
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
+	makeFriendship(ctx, t, st, a.ID, b.ID)
 
 	first, err := st.svc.Create(ctx, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
@@ -304,6 +336,7 @@ func TestGet_NonMemberReturnsNotFound(t *testing.T) {
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	c := makeUser(ctx, t, st)
+	makeFriendship(ctx, t, st, a.ID, b.ID)
 	got, err := st.svc.Create(ctx, conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
