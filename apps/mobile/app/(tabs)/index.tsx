@@ -122,6 +122,12 @@ export default function ChatsScreen() {
 
   const isInitialLoad = conversationsQ.isLoading && !conversationsQ.data;
 
+  // FlashList fires onEndReached on render whenever the visible
+  // content fits the viewport, which used to chain through every
+  // page back-to-back when the user had a lot of conversations.
+  // Gate fetchNextPage on the user's first scroll-drag.
+  const userScrolledRef = React.useRef(false);
+
   return (
     <View className="flex-1 bg-background">
       <ChatsSearchBar
@@ -159,8 +165,12 @@ export default function ChatsScreen() {
           // current view to one row — otherwise typing a query would
           // freeze pagination at the rows we've happened to fetch so
           // far.
+          onScrollBeginDrag={() => {
+            userScrolledRef.current = true;
+          }}
           onEndReachedThreshold={0.5}
           onEndReached={() => {
+            if (!userScrolledRef.current) return;
             if (conversationsQ.hasNextPage && !conversationsQ.isFetchingNextPage) {
               void conversationsQ.fetchNextPage();
             }

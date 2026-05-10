@@ -513,6 +513,32 @@ export default function SearchModalScreen() {
 
   const mutedFg = useThemeColor('muted-foreground');
 
+  // FlashList fires onEndReached as soon as the last item is inside
+  // (threshold * viewport) of the bottom — when the rendered list
+  // is shorter than the viewport that's true on EVERY render. With
+  // 100 matching users, tapping "Show all" expanded the list to
+  // ~25 rows, fired onEndReached on the same frame, fetched page 2,
+  // re-rendered, fired again, fetched page 3, and so on until every
+  // page was loaded. Gate fetchNextPage on a flag set by the user's
+  // first scroll-drag — turns the runaway into normal "scroll to
+  // load more" pagination.
+  const userScrolledRef = React.useRef(false);
+  // Reset the flag on a new query or expand toggle so a fresh
+  // session starts paused (the first page that lands shouldn't
+  // trigger another fetch).
+  React.useEffect(() => {
+    userScrolledRef.current = false;
+  }, [debouncedQuery, usersExpanded]);
+
+  // Header rows stick to the top of the viewport while their
+  // section is in view so a long expanded People section can be
+  // collapsed mid-scroll without paging back up to find the
+  // chevron.
+  const stickyHeaderIndices = React.useMemo(
+    () => rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0),
+    [rows]
+  );
+
   return (
     <ModalScreenShell onClose={goCancel} testID="search-modal-shell">
       <View className="flex-1 bg-background">
@@ -536,13 +562,21 @@ export default function SearchModalScreen() {
             ref={listRef}
             data={rows}
             keyExtractor={(item) => item.key}
+            stickyHeaderIndices={stickyHeaderIndices}
+            onScrollBeginDrag={() => {
+              userScrolledRef.current = true;
+            }}
             // When People is expanded the modal becomes an
             // infinite-scroll surface for /v1/users; fire the next
             // page once we get within half a viewport of the end.
-            // Other sections (chats / messages) don't paginate so
-            // onEndReached is a no-op for them.
+            // Gated on the user actually scrolling (see ref above)
+            // so a render that fits in the viewport doesn't chain
+            // through every page on the same frame. Other sections
+            // (chats / messages) don't paginate so onEndReached is
+            // a no-op for them.
             onEndReachedThreshold={0.5}
             onEndReached={() => {
+              if (!userScrolledRef.current) return;
               if (usersExpanded && usersDrillQ.hasNextPage && !usersDrillQ.isFetchingNextPage) {
                 void usersDrillQ.fetchNextPage();
               }

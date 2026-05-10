@@ -725,6 +725,21 @@ function SectionsPane({
 
   const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
 
+  // Same runaway-fetch guard as the search modal: gate
+  // fetchNextPage on the user actually scrolling so a list shorter
+  // than the viewport doesn't keep firing onEndReached on every
+  // re-render and drain the cursor.
+  const userScrolledRef = React.useRef(false);
+
+  // Section-header rows stick to the top of the viewport while
+  // their section is in view, so scrolling deep into Friends still
+  // leaves the chevron tappable for collapse without scrolling
+  // back up.
+  const stickyHeaderIndices = React.useMemo(
+    () => rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0),
+    [rows]
+  );
+
   // Empty / single-empty-header collapse to the welcoming empty
   // state; we still wrap that in a ScrollView so pull-to-refresh
   // works even when there's no data yet.
@@ -750,8 +765,15 @@ function SectionsPane({
       ref={listRef}
       data={rows}
       keyExtractor={(item) => item.key}
+      stickyHeaderIndices={stickyHeaderIndices}
+      onScrollBeginDrag={() => {
+        userScrolledRef.current = true;
+      }}
       onEndReachedThreshold={0.5}
-      onEndReached={onEndReached}
+      onEndReached={() => {
+        if (!userScrolledRef.current) return;
+        onEndReached();
+      }}
       ListFooterComponent={isFetchingNextPage ? <SectionsListLoader /> : null}
       renderItem={({ item }) => (
         <RenderedRow
@@ -857,11 +879,62 @@ function SearchPane({
     );
   }
   return (
+    <SearchPaneList
+      rows={rows}
+      total={total}
+      friendActions={friendActions}
+      onAcceptRequest={onAcceptRequest}
+      onDeclineRequest={onDeclineRequest}
+      onOpenMenu={onOpenMenu}
+      onOpenDM={onOpenDM}
+      pendingAction={pendingAction}
+      onEndReached={onEndReached}
+      isFetchingNextPage={isFetchingNextPage}
+    />
+  );
+}
+
+function SearchPaneList({
+  rows,
+  total,
+  friendActions,
+  onAcceptRequest,
+  onDeclineRequest,
+  onOpenMenu,
+  onOpenDM,
+  pendingAction,
+  onEndReached,
+  isFetchingNextPage,
+}: {
+  rows: SearchRow[];
+  total: number;
+  friendActions: ReturnType<typeof useFriendActions>;
+  onAcceptRequest: (f: Friendship) => void;
+  onDeclineRequest: (f: Friendship) => void;
+  onOpenMenu: (u: UserRow) => void;
+  onOpenDM: (friendUserId: string) => void;
+  pendingAction: Set<string>;
+  onEndReached: () => void;
+  isFetchingNextPage: boolean;
+}) {
+  // Same scroll-flag guard the SectionsPane and search modal use:
+  // FlashList fires onEndReached on render when content fits the
+  // viewport, so we only honour it once the user has scrolled at
+  // least once. Without this guard, "user1" returning 100 matches
+  // chained through every page on the same frame.
+  const userScrolledRef = React.useRef(false);
+  return (
     <List
       data={rows}
       keyExtractor={(r, i) => r.user.id ?? r.user.username ?? `idx-${i}`}
+      onScrollBeginDrag={() => {
+        userScrolledRef.current = true;
+      }}
       onEndReachedThreshold={0.5}
-      onEndReached={onEndReached}
+      onEndReached={() => {
+        if (!userScrolledRef.current) return;
+        onEndReached();
+      }}
       ListFooterComponent={
         <SearchListFooter loading={isFetchingNextPage} loaded={rows.length} total={total} />
       }
@@ -1085,7 +1158,10 @@ function RenderedRow({
           onLongPress={u ? () => onOpenMenu(u) : undefined}
           trailing={
             u ? (
-              <FriendRowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} />
+              <View className="flex-row items-center gap-2">
+                <RelationshipBadge label="Friend" />
+                <FriendRowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} />
+              </View>
             ) : undefined
           }
         />
@@ -1105,6 +1181,12 @@ function RenderedRow({
           ? { kind: 'incoming', requestId: fid }
           : { kind: 'outgoing', requestId: fid }
         : undefined;
+      // "Added" badge for outgoing pending rows so the section
+      // list reads with the same vocabulary as the search hits.
+      // Incoming rows already make their state obvious through
+      // the inline accept/decline icon pair, so they don't get a
+      // badge.
+      const showAddedBadge = row.direction === 'outgoing';
       return (
         <FriendRow
           displayName={u?.display_name}
@@ -1112,22 +1194,25 @@ function RenderedRow({
           avatarUrl={u?.avatar_url}
           hidePresence
           trailing={
-            <FriendStatusAction
-              status={status}
-              username={u?.username}
-              // Outgoing rows are the only state where Add fires;
-              // these rows are pending requests so the username
-              // path is dead. Wire to the shared hook for safety.
-              onAdd={friendActions.sendFriendRequest}
-              onCancel={friendActions.cancelFriendRequest}
-              isAdding={friendActions.isAddingFor(u?.username)}
-              isCanceling={friendActions.isCancelingFor(fid)}
-              onAccept={() => fid && onAccept(row.friendship)}
-              onDecline={() => fid && onDecline(row.friendship)}
-              acceptDisabled={inFlight}
-              incomingMode="actions"
-              testID={fid ? `friend-request-${fid}` : undefined}
-            />
+            <View className="flex-row items-center gap-2">
+              {showAddedBadge ? <RelationshipBadge label="Added" /> : null}
+              <FriendStatusAction
+                status={status}
+                username={u?.username}
+                // Outgoing rows are the only state where Add fires;
+                // these rows are pending requests so the username
+                // path is dead. Wire to the shared hook for safety.
+                onAdd={friendActions.sendFriendRequest}
+                onCancel={friendActions.cancelFriendRequest}
+                isAdding={friendActions.isAddingFor(u?.username)}
+                isCanceling={friendActions.isCancelingFor(fid)}
+                onAccept={() => fid && onAccept(row.friendship)}
+                onDecline={() => fid && onDecline(row.friendship)}
+                acceptDisabled={inFlight}
+                incomingMode="actions"
+                testID={fid ? `friend-request-${fid}` : undefined}
+              />
+            </View>
           }
         />
       );
