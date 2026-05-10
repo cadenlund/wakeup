@@ -46,7 +46,6 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
-import { Button } from '@/components/ui/button';
 import { DrawerSheet } from '@/components/ui/drawer-sheet';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -60,7 +59,6 @@ import {
   useDeleteV1FriendsUserId,
   useGetV1Friends,
   useGetV1FriendsRequests,
-  usePostV1FriendsRequests,
   usePostV1FriendsRequestsIdAccept,
   usePostV1FriendsRequestsIdDecline,
   usePostV1FriendsUserIdBlock,
@@ -103,13 +101,13 @@ type Row =
   | { kind: 'empty'; key: string; subtitle: string };
 
 // Search-mode row variant — backend returns search hits in a flat
-// list, no headers.
+// list, no headers. `status` matches the shared FriendStatusAction
+// map; `self` is the only state outside that vocabulary (you
+// shouldn't befriend yourself), so it gets its own flag.
 type SearchRow = {
   user: UserRow;
-  // 'friend' | 'incoming' | 'outgoing' | 'self' | 'sent' (optimistic)
-  // | undefined (free to add).
-  relation?: 'friend' | 'incoming' | 'outgoing' | 'self' | 'sent';
-  pending?: boolean;
+  status?: FriendStatus;
+  isSelf?: boolean;
 };
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -158,37 +156,30 @@ export default function FriendsScreen() {
     return m;
   }, [presenceData]);
 
-  // Build a lookup of existing relationships so search-mode rows can
-  // render the right badge without an extra per-user request.
-  const relationByUserId = React.useMemo(() => {
-    const m = new Map<string, 'friend' | 'incoming' | 'outgoing'>();
+  // Build a lookup of existing relationships so search-mode rows
+  // can render the right affordance without an extra per-user
+  // request. Outgoing / incoming entries carry the friendship.id
+  // so the Unsend / Accept / Decline buttons can target the right
+  // row — same map shape FriendStatusAction consumes elsewhere.
+  const friendStatusByUserId = React.useMemo(() => {
+    const m = new Map<string, FriendStatus>();
     for (const f of friendsData?.data ?? []) {
-      if (f.user?.id) m.set(f.user.id, 'friend');
+      if (f.user?.id) m.set(f.user.id, { kind: 'friend' });
     }
     for (const f of requestsData?.incoming ?? []) {
-      if (f.user?.id) m.set(f.user.id, 'incoming');
+      if (f.user?.id && f.id) m.set(f.user.id, { kind: 'incoming', requestId: f.id });
     }
     for (const f of requestsData?.outgoing ?? []) {
-      if (f.user?.id) m.set(f.user.id, 'outgoing');
+      if (f.user?.id && f.id) m.set(f.user.id, { kind: 'outgoing', requestId: f.id });
     }
     return m;
   }, [friendsData, requestsData]);
 
-  // Optimistic local state for "just-sent" requests so the row flips
-  // immediately on Add tap. Cleared when the user clears the query.
-  const [optimisticSent, setOptimisticSent] = React.useState<Set<string>>(new Set());
-  const [pendingSend, setPendingSend] = React.useState<Set<string>>(new Set());
-
-  // Keep optimistic state pinned to the current search session — once
-  // they leave search mode, drop it so the next session starts clean.
-  React.useEffect(() => {
-    if (!isSearchMode) {
-      setOptimisticSent(new Set());
-    }
-  }, [isSearchMode]);
+  // friendActions handles in-flight pending + invalidation, so the
+  // row's status flips from `none` → `outgoing` automatically once
+  // requestsData refetches. No local optimisticSent state needed.
 
   const qc = useQueryClient();
-  const sendRequest = usePostV1FriendsRequests();
   const acceptRequest = usePostV1FriendsRequestsIdAccept();
   const declineRequest = usePostV1FriendsRequestsIdDecline();
   const unfriend = useDeleteV1FriendsUserId();
@@ -256,36 +247,6 @@ export default function FriendsScreen() {
       }
     },
     [openingDmFor, ensureDM, router, surfaceError]
-  );
-
-  const onAddFriend = React.useCallback(
-    async (user: UserRow) => {
-      if (!user.id || !user.username) return;
-      setPendingSend((prev) => {
-        const next = new Set(prev);
-        next.add(user.id!);
-        return next;
-      });
-      try {
-        await sendRequest.mutateAsync({ data: { username: user.username } });
-        setOptimisticSent((prev) => {
-          const next = new Set(prev);
-          next.add(user.id!);
-          return next;
-        });
-        await qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() });
-        toast.success('Request sent', `Waiting on @${user.username}`);
-      } catch (err) {
-        surfaceError(err, "Couldn't send the request — try again in a sec.");
-      } finally {
-        setPendingSend((prev) => {
-          const next = new Set(prev);
-          next.delete(user.id!);
-          return next;
-        });
-      }
-    },
-    [sendRequest, qc, surfaceError]
   );
 
   const onAcceptRequest = React.useCallback(
@@ -477,26 +438,13 @@ export default function FriendsScreen() {
       .filter((u) => u.id) // backend guarantees this; defensive
       .map<SearchRow>((u) => {
         if (me?.id && u.id === me.id) {
-          return { user: u, relation: 'self' };
+          return { user: u, isSelf: true };
         }
-        // Server-derived relation wins over the optimistic "sent"
-        // state — once requests refetches (or a 4.6 WS update flips
-        // them to friend / incoming), we stop pinning the row to
-        // "Pending". Optimistic state is only a fallback for the
-        // window between mutate and refetch settling.
-        const rel = u.id ? relationByUserId.get(u.id) : undefined;
-        if (rel) {
-          return { user: u, relation: rel };
-        }
-        if (u.id && optimisticSent.has(u.id)) {
-          return { user: u, relation: 'sent' };
-        }
-        return {
-          user: u,
-          pending: u.id ? pendingSend.has(u.id) : false,
-        };
+        const status = u.id ? friendStatusByUserId.get(u.id) : undefined;
+        if (status) return { user: u, status };
+        return { user: u };
       });
-  }, [searchData, me, relationByUserId, optimisticSent, pendingSend]);
+  }, [searchData, me, friendStatusByUserId]);
 
   const isInitialLoad =
     !isSearchMode &&
@@ -526,7 +474,10 @@ export default function FriendsScreen() {
           isFetching={searchQ.isFetching}
           isError={searchQ.isError}
           rows={searchRows}
-          onAdd={onAddFriend}
+          friendActions={friendActions}
+          onAcceptRequest={onAcceptRequest}
+          onDeclineRequest={onDeclineRequest}
+          pendingAction={pendingAction}
         />
       ) : isInitialLoad ? (
         <FriendsLoading />
@@ -728,13 +679,19 @@ function SearchPane({
   isFetching,
   isError,
   rows,
-  onAdd,
+  friendActions,
+  onAcceptRequest,
+  onDeclineRequest,
+  pendingAction,
 }: {
   searchEnabled: boolean;
   isFetching: boolean;
   isError: boolean;
   rows: SearchRow[];
-  onAdd: (user: UserRow) => void;
+  friendActions: ReturnType<typeof useFriendActions>;
+  onAcceptRequest: (f: Friendship) => void;
+  onDeclineRequest: (f: Friendship) => void;
+  pendingAction: Set<string>;
 }) {
   const fg = useThemeColor('muted-foreground');
   if (!searchEnabled) {
@@ -774,56 +731,69 @@ function SearchPane({
     <List
       data={rows}
       keyExtractor={(r, i) => r.user.id ?? r.user.username ?? `idx-${i}`}
-      renderItem={({ item }) => <SearchResultRow row={item} onAdd={onAdd} />}
+      renderItem={({ item }) => (
+        <SearchResultRow
+          row={item}
+          friendActions={friendActions}
+          onAcceptRequest={onAcceptRequest}
+          onDeclineRequest={onDeclineRequest}
+          pendingAction={pendingAction}
+        />
+      )}
     />
   );
 }
 
-function SearchResultRow({ row, onAdd }: { row: SearchRow; onAdd: (user: UserRow) => void }) {
+function SearchResultRow({
+  row,
+  friendActions,
+  onAcceptRequest,
+  onDeclineRequest,
+  pendingAction,
+}: {
+  row: SearchRow;
+  friendActions: ReturnType<typeof useFriendActions>;
+  onAcceptRequest: (f: Friendship) => void;
+  onDeclineRequest: (f: Friendship) => void;
+  pendingAction: Set<string>;
+}) {
   const u = row.user;
+  // Only "you" stays a custom hint — every other relation maps
+  // onto the shared FriendStatusAction so search results feel
+  // identical to the section list and the global search modal.
   let trailing: React.ReactNode;
-  switch (row.relation) {
-    case 'self':
-      trailing = (
-        <Text variant="muted" className="text-xs">
-          You
-        </Text>
-      );
-      break;
-    case 'friend':
-      trailing = (
-        <Text variant="muted" className="text-xs">
-          Friend
-        </Text>
-      );
-      break;
-    case 'incoming':
-      trailing = (
-        <Text variant="muted" className="text-xs">
-          Wants to add you
-        </Text>
-      );
-      break;
-    case 'outgoing':
-    case 'sent':
-      trailing = (
-        <Text variant="muted" className="text-xs">
-          Pending
-        </Text>
-      );
-      break;
-    default:
-      trailing = (
-        <Button
-          size="sm"
-          variant="default"
-          disabled={row.pending}
-          onPress={() => onAdd(u)}
-          accessibilityLabel={`Send friend request to ${u.username ?? 'user'}`}
-          testID={`friend-add-${u.id ?? u.username}`}>
-          <Text>{row.pending ? 'Adding…' : 'Add'}</Text>
-        </Button>
-      );
+  if (row.isSelf) {
+    trailing = (
+      <Text variant="muted" className="text-xs">
+        You
+      </Text>
+    );
+  } else {
+    const fid = row.status?.kind !== 'friend' ? row.status?.requestId : undefined;
+    const acceptDisabled = fid ? pendingAction.has(fid) : false;
+    trailing = (
+      <FriendStatusAction
+        status={row.status}
+        username={u.username}
+        onAdd={friendActions.sendFriendRequest}
+        onCancel={friendActions.cancelFriendRequest}
+        isAdding={friendActions.isAddingFor(u.username)}
+        isCanceling={friendActions.isCancelingFor(fid)}
+        onAccept={() => {
+          if (row.status?.kind === 'incoming' && row.status.requestId) {
+            onAcceptRequest({ id: row.status.requestId, user: u });
+          }
+        }}
+        onDecline={() => {
+          if (row.status?.kind === 'incoming' && row.status.requestId) {
+            onDeclineRequest({ id: row.status.requestId, user: u });
+          }
+        }}
+        acceptDisabled={acceptDisabled}
+        incomingMode="actions"
+        testID={u.id ? `friend-search-${u.id}` : undefined}
+      />
+    );
   }
   return (
     <FriendRow

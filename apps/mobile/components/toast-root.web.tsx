@@ -18,6 +18,12 @@
 import '../sonner.css';
 
 import * as React from 'react';
+// `react-dom` ships no .d.ts in our node_modules tree (we don't pull
+// in `@types/react-dom`); the runtime export exists since react-dom
+// is a direct dep. Suppress the implicit-any on the import — every
+// other surface in this file is fully typed.
+// @ts-expect-error — react-dom typings not installed; runtime safe.
+import { createPortal } from 'react-dom';
 import { Toaster } from 'sonner';
 
 import { toast } from '@/lib/toast';
@@ -31,5 +37,15 @@ export function ToastRoot() {
   React.useEffect(() => {
     toast.flushPending();
   }, []);
-  return <Toaster theme={mode} position="top-right" richColors closeButton />;
+  // Mount via portal at document.body so the toaster escapes every
+  // parent stacking context — without this the ThemeProvider's
+  // `style={vars(...)}` wrapper (or any other ancestor that creates
+  // a new context) caps sonner's z-index and our route-modal /
+  // drawer overlays render on top of toasts. Returning null on the
+  // SSR / pre-mount pass avoids hydration warnings.
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <Toaster theme={mode} position="top-right" richColors closeButton />,
+    document.body
+  );
 }
