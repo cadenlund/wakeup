@@ -28,7 +28,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ConversationRow } from '@/components/conversation-row';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
-import { Toast, toastConfig, TOAST_TOP_OFFSET } from '@/components/toast-config';
+import { Toast, toastConfig } from '@/components/toast-config';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -343,8 +343,12 @@ export default function SearchModalScreen() {
           at the root layout sit BEHIND this screen's chrome. The
           react-native-toast-message lib stacks refs and uses the
           last-mounted instance, so this Toast wins while the
-          modal is open. Web isn't affected (sonner via portal). */}
-      {Platform.OS !== 'web' ? <Toast config={toastConfig} topOffset={TOAST_TOP_OFFSET} /> : null}
+          modal is open. Web isn't affected (sonner via portal).
+          topOffset is small (12) because the parent view starts
+          BELOW the iOS sheet's drag handle — the root screen's
+          larger TOAST_TOP_OFFSET would push the toast halfway
+          down the modal. */}
+      {Platform.OS !== 'web' ? <Toast config={toastConfig} topOffset={12} /> : null}
     </ModalScreenShell>
   );
 }
@@ -506,13 +510,16 @@ function RenderedRow({
       case 'user': {
         const u = row.user;
         const opening = u.id != null && u.id === openingForUserId;
+        const isSelf = !!myUserId && u.id === myUserId;
         const status = u.id ? friendStatusByUser.get(u.id) : undefined;
         const isFriend = status?.kind === 'friend';
         // Friends can be tapped to open a DM. Non-friends get the row
         // tap disabled — the affordance lives in the trailing button
         // (Add friend / Unsend / accept-via-friends-tab) so a stray
         // row tap doesn't 403 against the friends-only DM rule.
-        const onTap = !opening && isFriend && u.id ? () => onTapUser(u) : undefined;
+        // Self gets no tap or button — the backend rejects self-DMs
+        // and self-friend-requests; we shouldn't surface either.
+        const onTap = !opening && !isSelf && isFriend && u.id ? () => onTapUser(u) : undefined;
         return (
           <FriendRow
             displayName={u.display_name}
@@ -521,19 +528,25 @@ function RenderedRow({
             hidePresence
             onPress={onTap}
             trailing={
-              <FriendStatusAction
-                status={status}
-                username={u.username}
-                busyLabel={opening ? 'Opening…' : undefined}
-                onAdd={friendActions.sendFriendRequest}
-                onCancel={friendActions.cancelFriendRequest}
-                isAdding={friendActions.isAddingFor(u.username)}
-                isCanceling={friendActions.isCancelingFor(
-                  status?.kind === 'outgoing' ? status.requestId : undefined
-                )}
-                incomingMode="hint"
-                testID={u.id ? `search-${u.id}` : undefined}
-              />
+              isSelf ? (
+                <Text variant="muted" className="text-xs">
+                  You
+                </Text>
+              ) : (
+                <FriendStatusAction
+                  status={status}
+                  username={u.username}
+                  busyLabel={opening ? 'Opening…' : undefined}
+                  onAdd={friendActions.sendFriendRequest}
+                  onCancel={friendActions.cancelFriendRequest}
+                  isAdding={friendActions.isAddingFor(u.username)}
+                  isCanceling={friendActions.isCancelingFor(
+                    status?.kind === 'outgoing' ? status.requestId : undefined
+                  )}
+                  incomingMode="hint"
+                  testID={u.id ? `search-${u.id}` : undefined}
+                />
+              )
             }
           />
         );

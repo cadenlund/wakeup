@@ -21,7 +21,7 @@ import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
-import { Toast, toastConfig, TOAST_TOP_OFFSET } from '@/components/toast-config';
+import { Toast, toastConfig } from '@/components/toast-config';
 import { Avatar } from '@/components/ui/avatar';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -227,8 +227,10 @@ export default function NewConversationScreen() {
         />
       </View>
       {/* Per-screen Toast so iOS modal toasts render above this
-          screen's chrome — see search.tsx for the rationale. */}
-      {Platform.OS !== 'web' ? <Toast config={toastConfig} topOffset={TOAST_TOP_OFFSET} /> : null}
+          screen's chrome — see search.tsx for the rationale.
+          Smaller topOffset because the parent starts below the
+          iOS sheet's drag handle. */}
+      {Platform.OS !== 'web' ? <Toast config={toastConfig} topOffset={12} /> : null}
     </ModalScreenShell>
   );
 }
