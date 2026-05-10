@@ -14,7 +14,7 @@
 // Reused by Phase 5.6 (long-press on the row) and — when 5.7
 // lands — the conversation header overflow menu.
 import { useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import { haptics } from '@/lib/haptics';
 import { toast } from '@/lib/toast';
@@ -29,13 +29,39 @@ import type {
 } from '@/lib/api/model';
 
 type ListData = InternalHandlerHttpConversationListResponse;
+type InfiniteList = InfiniteData<ListData>;
+type CachedList = ListData | InfiniteList;
+
+// Type-guard: useInfiniteQuery stores `{ pages, pageParams }`; the
+// single-page `useQuery` shape is just the response body. Pin/mute
+// has to patch BOTH because the search modal reads from one and the
+// chats tab from the other (until everything migrates to infinite).
+function isInfinite(data: CachedList | undefined): data is InfiniteList {
+  return !!data && Array.isArray((data as InfiniteList).pages);
+}
 
 function patchRow(
-  data: ListData | undefined,
+  data: CachedList | undefined,
   conversationId: string,
   patch: Partial<InternalHandlerHttpConversationResponse>
-): ListData | undefined {
-  if (!data?.data) return data;
+): CachedList | undefined {
+  if (!data) return data;
+  if (isInfinite(data)) {
+    let touched = false;
+    const nextPages = data.pages.map((page) => {
+      if (!page.data) return page;
+      let pageTouched = false;
+      const nextData = page.data.map((c) => {
+        if (c.id !== conversationId) return c;
+        pageTouched = true;
+        touched = true;
+        return { ...c, ...patch };
+      });
+      return pageTouched ? { ...page, data: nextData } : page;
+    });
+    return touched ? { ...data, pages: nextPages } : data;
+  }
+  if (!data.data) return data;
   let touched = false;
   const next = data.data.map((c) => {
     if (c.id !== conversationId) return c;
@@ -47,20 +73,22 @@ function patchRow(
 }
 
 // Walk every cached `/v1/conversations` query (different `limit`
-// or filter params produce separate cache entries) and apply
-// `patch` to the matching row in each. Returns a snapshot of the
-// previous values keyed by full query key, for rollback.
+// or filter params produce separate cache entries, and the
+// useInfiniteQuery shape lives under the same prefix with an
+// `'infinite'` suffix) and apply `patch` to the matching row in
+// each. Returns a snapshot of the previous values keyed by full
+// query key, for rollback.
 function patchAllConversationLists(
   qc: ReturnType<typeof useQueryClient>,
   conversationId: string,
   patch: Partial<InternalHandlerHttpConversationResponse>
 ) {
   const prefix = getGetV1ConversationsQueryKey()[0];
-  const entries = qc.getQueriesData<ListData>({ queryKey: [prefix] });
-  const snapshots: { key: readonly unknown[]; data: ListData | undefined }[] = [];
+  const entries = qc.getQueriesData<CachedList>({ queryKey: [prefix] });
+  const snapshots: { key: readonly unknown[]; data: CachedList | undefined }[] = [];
   for (const [key, data] of entries) {
     snapshots.push({ key: key as readonly unknown[], data });
-    qc.setQueryData(key as readonly unknown[], (prev: ListData | undefined) =>
+    qc.setQueryData(key as readonly unknown[], (prev: CachedList | undefined) =>
       patchRow(prev, conversationId, patch)
     );
   }
@@ -69,7 +97,7 @@ function patchAllConversationLists(
 
 function rollback(
   qc: ReturnType<typeof useQueryClient>,
-  snapshots: { key: readonly unknown[]; data: ListData | undefined }[]
+  snapshots: { key: readonly unknown[]; data: CachedList | undefined }[]
 ) {
   for (const { key, data } of snapshots) {
     qc.setQueryData(key, data);
@@ -79,7 +107,7 @@ function rollback(
 export function useConversationPinMute() {
   const qc = useQueryClient();
 
-  type Ctx = { snapshots: { key: readonly unknown[]; data: ListData | undefined }[] };
+  type Ctx = { snapshots: { key: readonly unknown[]; data: CachedList | undefined }[] };
 
   const pin = usePatchV1ConversationsIdPin({
     mutation: {

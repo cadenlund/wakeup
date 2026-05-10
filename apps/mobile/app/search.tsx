@@ -32,7 +32,6 @@ import {
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 import { FullWindowOverlay } from 'react-native-screens';
-import { useQueryClient } from '@tanstack/react-query';
 
 import { ConversationRow } from '@/components/conversation-row';
 import { FriendRow } from '@/components/friend-row';
@@ -46,16 +45,15 @@ import { ModalScreenShell } from '@/components/ui/modal-screen-shell';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
-import { getGetV1ConversationsQueryKey } from '@/lib/api/hooks/conversations/conversations';
-import { useGetV1Friends, useGetV1FriendsRequests } from '@/lib/api/hooks/friends/friends';
+import { useGetV1FriendsRequests } from '@/lib/api/hooks/friends/friends';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import { useFriendActions } from '@/lib/api/use-friend-actions';
+import { flatten, useInfiniteConversations, useInfiniteFriends } from '@/lib/api/use-infinite';
 import type {
-  InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
-  InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendRequestsResponse,
+  InternalHandlerHttpFriendshipResponse,
   InternalHandlerHttpPresenceListResponse,
   InternalHandlerHttpSearchConversationRow,
   InternalHandlerHttpSearchMessageRow,
@@ -104,7 +102,6 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 export default function SearchModalScreen() {
   const router = useRouter();
-  const qc = useQueryClient();
   const [rawQuery, setRawQuery] = React.useState('');
   const debouncedQuery = useDebouncedValue(rawQuery.trim(), DEBOUNCE_MS);
   const enabled = debouncedQuery.length >= MIN_CHARS;
@@ -132,16 +129,26 @@ export default function SearchModalScreen() {
     return m;
   }, [presenceData]);
 
-  const conversationsCache = qc.getQueryData<InternalHandlerHttpConversationListResponse>(
-    getGetV1ConversationsQueryKey({ limit: 100 })
-  );
+  // Hydrate the conversations infinite-query cache so a search hit
+  // for a chat the user just scrolled past in the chats tab can
+  // render the same StackedAvatars + member-count subtitle without
+  // re-fetching. The chats tab is the ONLY producer of this cache;
+  // when it hasn't been visited yet, the map stays empty and each
+  // ConversationRow falls back to the slim search-row payload below.
+  const fullConversationsQ = useInfiniteConversations({
+    query: { staleTime: 30_000 },
+  });
   const fullConversationById = React.useMemo(() => {
     const m = new Map<string, InternalHandlerHttpConversationResponse>();
-    for (const c of conversationsCache?.data ?? []) {
+    const { data: convs } = flatten<
+      InternalHandlerHttpConversationResponse,
+      { data?: InternalHandlerHttpConversationResponse[] }
+    >(fullConversationsQ.data?.pages);
+    for (const c of convs) {
       if (c.id) m.set(c.id, c);
     }
     return m;
-  }, [conversationsCache]);
+  }, [fullConversationsQ.data]);
 
   const ensureDM = useEnsureDirectConversation();
   const [openingFor, setOpeningFor] = React.useState<string | null>(null);
@@ -150,9 +157,9 @@ export default function SearchModalScreen() {
   // the search on it (results still show for non-friends), but
   // we use it to decide whether each user-section row gets a
   // "tap to message" action, an "Add friend" button, or an
-  // "Unsend" button for an outgoing request.
-  const friendsQ = useGetV1Friends({ limit: 100 }, { query: { staleTime: 30_000 } });
-  const friendsData = friendsQ.data as InternalHandlerHttpFriendListResponse | undefined;
+  // "Unsend" button for an outgoing request. The infinite-query
+  // cache shares with the friends tab so we don't re-fetch.
+  const friendsQ = useInfiniteFriends({ query: { staleTime: 30_000 } });
   const requestsQ = useGetV1FriendsRequests({ query: { staleTime: 30_000 } });
   const requestsData = requestsQ.data as InternalHandlerHttpFriendRequestsResponse | undefined;
 
@@ -161,7 +168,11 @@ export default function SearchModalScreen() {
   // friendship.id so the unsend button can DELETE the right row.
   const friendStatusByUser = React.useMemo(() => {
     const m = new Map<string, FriendStatus>();
-    for (const f of friendsData?.data ?? []) {
+    const { data: friends } = flatten<
+      InternalHandlerHttpFriendshipResponse,
+      { data?: InternalHandlerHttpFriendshipResponse[] }
+    >(friendsQ.data?.pages);
+    for (const f of friends) {
       if (f.user?.id) m.set(f.user.id, { kind: 'friend' });
     }
     for (const r of requestsData?.outgoing ?? []) {
@@ -171,7 +182,7 @@ export default function SearchModalScreen() {
       if (r.user?.id && r.id) m.set(r.user.id, { kind: 'incoming', requestId: r.id });
     }
     return m;
-  }, [friendsData, requestsData]);
+  }, [friendsQ.data, requestsData]);
 
   // Send + cancel friend-request actions live in the shared
   // useFriendActions hook so cache invalidation + toast vocab
@@ -433,7 +444,13 @@ function buildRows(
   if (!data) return [];
   const out: Row[] = [];
 
+  // Section header counts use `*_total` from the response — that's
+  // the absolute population across every page, even though the
+  // unified-search response itself is hard-capped at 10 per section.
+  // Falling back to the slice length keeps the count honest if a
+  // legacy backend response omits the total.
   const users = data.users ?? [];
+  const usersTotal = data.users_total ?? users.length;
   if (users.length > 0) {
     const isCollapsed = collapsed.has('users');
     const showAll = expanded.has('users');
@@ -442,7 +459,7 @@ function buildRows(
       kind: 'header',
       key: 'h:users',
       title: 'People',
-      count: users.length,
+      count: usersTotal,
       section: 'users',
       collapsed: isCollapsed,
     });
@@ -463,6 +480,7 @@ function buildRows(
   }
 
   const conversations = data.conversations ?? [];
+  const conversationsTotal = data.conversations_total ?? conversations.length;
   if (conversations.length > 0) {
     const isCollapsed = collapsed.has('conversations');
     const showAll = expanded.has('conversations');
@@ -471,7 +489,7 @@ function buildRows(
       kind: 'header',
       key: 'h:conversations',
       title: 'Chats',
-      count: conversations.length,
+      count: conversationsTotal,
       section: 'conversations',
       collapsed: isCollapsed,
     });
@@ -496,6 +514,7 @@ function buildRows(
   }
 
   const messages = data.messages ?? [];
+  const messagesTotal = data.messages_total ?? messages.length;
   if (messages.length > 0) {
     const isCollapsed = collapsed.has('messages');
     const showAll = expanded.has('messages');
@@ -504,7 +523,7 @@ function buildRows(
       kind: 'header',
       key: 'h:messages',
       title: 'Messages',
-      count: messages.length,
+      count: messagesTotal,
       section: 'messages',
       collapsed: isCollapsed,
     });

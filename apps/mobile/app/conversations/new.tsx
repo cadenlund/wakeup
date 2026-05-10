@@ -34,10 +34,9 @@ import {
   getGetV1ConversationsQueryKey,
   usePostV1Conversations,
 } from '@/lib/api/hooks/conversations/conversations';
-import { useGetV1Friends } from '@/lib/api/hooks/friends/friends';
+import { flatten, useInfiniteFriends } from '@/lib/api/use-infinite';
 import type {
   InternalHandlerHttpConversationResponse,
-  InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendshipResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
@@ -55,11 +54,22 @@ export default function NewConversationScreen() {
   const router = useRouter();
   const qc = useQueryClient();
 
-  const friendsQ = useGetV1Friends({ limit: 100 }, { query: { staleTime: 30_000 } });
-  const data = friendsQ.data as InternalHandlerHttpFriendListResponse | undefined;
-  // Memoise the array so downstream useMemo deps stay referentially
-  // stable across renders that don't actually touch the data.
-  const friends = React.useMemo(() => data?.data ?? [], [data]);
+  // Friends list — paginated. Without infinite scroll, users with
+  // hundreds of friends would never see most of them in the picker.
+  // The list is small enough that we can prefetch all pages once
+  // the modal mounts; effect below chains fetchNextPage until done.
+  const friendsQ = useInfiniteFriends({ query: { staleTime: 30_000 } });
+  React.useEffect(() => {
+    if (friendsQ.hasNextPage && !friendsQ.isFetchingNextPage) {
+      void friendsQ.fetchNextPage();
+    }
+  }, [friendsQ, friendsQ.hasNextPage, friendsQ.isFetchingNextPage]);
+  // Memoise the flattened array so downstream useMemo deps stay
+  // referentially stable across renders that don't touch the data.
+  const friends = React.useMemo(
+    () => flatten<Friendship, { data?: Friendship[] }>(friendsQ.data?.pages).data,
+    [friendsQ.data]
+  );
 
   const [query, setQuery] = React.useState('');
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());

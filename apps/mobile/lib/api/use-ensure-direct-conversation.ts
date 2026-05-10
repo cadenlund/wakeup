@@ -14,7 +14,7 @@
 // friends list now, the @-mention popover later, the user-profile
 // screen in 5.x. Callers compose the navigation themselves.
 import * as React from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import {
   getGetV1ConversationsQueryKey,
@@ -42,15 +42,33 @@ export function useEnsureDirectConversation(): {
 
   const ensure = React.useCallback(
     async (friendUserId: string): Promise<EnsureDirectResult> => {
-      // 1. Cache hit. Walk the conversations list (matches the limit
-      //    the chats tab uses) for an existing direct conversation
-      //    that includes this friend. Direct conversations are 1:1
-      //    so a single member match is enough — type === 'direct'
-      //    keeps us from picking a 1-other-member group.
-      const list = qc.getQueryData<InternalHandlerHttpConversationListResponse>(
-        getGetV1ConversationsQueryKey({ limit: 100 })
-      );
-      const existing = list?.data?.find(
+      // 1. Cache hit. Walk every cached `/v1/conversations` query
+      //    (the chats tab uses an infinite-query shape; pages live
+      //    under `data.pages[].data[]`) for an existing direct
+      //    conversation that includes this friend. Direct
+      //    conversations are 1:1 so a single member match is
+      //    enough — type === 'direct' keeps us from picking a
+      //    1-other-member group.
+      const prefix = getGetV1ConversationsQueryKey()[0];
+      type CachedList =
+        | InternalHandlerHttpConversationListResponse
+        | InfiniteData<InternalHandlerHttpConversationListResponse>;
+      const isInfinite = (
+        d: CachedList
+      ): d is InfiniteData<InternalHandlerHttpConversationListResponse> =>
+        Array.isArray((d as InfiniteData<InternalHandlerHttpConversationListResponse>).pages);
+      const cachedConversations: InternalHandlerHttpConversationResponse[] = [];
+      for (const [, data] of qc.getQueriesData<CachedList>({ queryKey: [prefix] })) {
+        if (!data) continue;
+        if (isInfinite(data)) {
+          for (const page of data.pages) {
+            if (page.data) cachedConversations.push(...page.data);
+          }
+        } else if (data.data) {
+          cachedConversations.push(...data.data);
+        }
+      }
+      const existing = cachedConversations.find(
         (c) =>
           c.type === 'direct' &&
           !!c.id &&

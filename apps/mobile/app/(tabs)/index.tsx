@@ -18,7 +18,7 @@
 // new-conversation flow lives at /conversations/new (Phase 5.2).
 import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
-import { Platform, Pressable, RefreshControl, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
@@ -33,11 +33,10 @@ import {
   isCurrentlyMuted,
 } from '@/lib/conversation-display';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
-import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
+import { flatten, useInfiniteConversations } from '@/lib/api/use-infinite';
 import { haptics } from '@/lib/haptics';
 import type {
-  InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
   InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
@@ -51,8 +50,16 @@ export default function ChatsScreen() {
   const meQ = useGetV1AuthMe({ query: { staleTime: 60_000 } });
   const me = meQ.data as { id?: string } | undefined;
 
-  const conversationsQ = useGetV1Conversations({ limit: 100 }, { query: { staleTime: 30_000 } });
-  const data = conversationsQ.data as InternalHandlerHttpConversationListResponse | undefined;
+  // Infinite-scroll the conversations list (§6.4). The first page
+  // covers most users in one fetch; FlashList's onEndReached wires
+  // each subsequent cursor below. `total` is read off the first
+  // page so the count in the header doesn't flicker as later pages
+  // land.
+  const conversationsQ = useInfiniteConversations({ query: { staleTime: 30_000 } });
+  const { data: conversations, total: conversationsTotal } = React.useMemo(
+    () => flatten<Conversation, { data?: Conversation[] }>(conversationsQ.data?.pages),
+    [conversationsQ.data]
+  );
 
   // Presence is keyed by user_id. Cache it once per render so each
   // row's display can look up O(1) without re-deriving the map per
@@ -67,7 +74,7 @@ export default function ChatsScreen() {
     return m;
   }, [presenceData]);
 
-  const sorted = React.useMemo(() => sortConversations(data?.data ?? []), [data]);
+  const sorted = React.useMemo(() => sortConversations(conversations), [conversations]);
 
   // Inline filter input. Matches the friends-tab shape so the two
   // tabs read the same. Filter narrows the existing list by name —
@@ -144,6 +151,27 @@ export default function ChatsScreen() {
             filterActive ? undefined : (
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
             )
+          }
+          // Infinite scroll: once the user gets within ~half a viewport
+          // of the bottom, ask for the next cursor. The filter is
+          // CLIENT-side (matches the visible subset only), so we still
+          // pull the next page even if the filter has narrowed the
+          // current view to one row — otherwise typing a query would
+          // freeze pagination at the rows we've happened to fetch so
+          // far.
+          onEndReachedThreshold={0.5}
+          onEndReached={() => {
+            if (conversationsQ.hasNextPage && !conversationsQ.isFetchingNextPage) {
+              void conversationsQ.fetchNextPage();
+            }
+          }}
+          ListFooterComponent={
+            <ConversationsFooter
+              loading={conversationsQ.isFetchingNextPage}
+              loaded={visible.length}
+              total={filterActive ? visible.length : conversationsTotal}
+              filterActive={filterActive}
+            />
           }
           renderItem={({ item }) => (
             <RenderedConversationRow
@@ -382,6 +410,39 @@ function PullableEmpty({ refreshing, onRefresh }: { refreshing: boolean; onRefre
       renderItem={() => <ChatsAllEmpty />}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     />
+  );
+}
+
+function ConversationsFooter({
+  loading,
+  loaded,
+  total,
+  filterActive,
+}: {
+  loading: boolean;
+  loaded: number;
+  total: number;
+  filterActive: boolean;
+}) {
+  const mutedFg = useThemeColor('muted-foreground');
+  if (loading) {
+    return (
+      <View className="items-center py-4">
+        <ActivityIndicator color={mutedFg} />
+      </View>
+    );
+  }
+  // No total hint while filtering — the "N of M" hint would read
+  // wrong (it'd compare filtered visible to global total). Filter
+  // is local only; pagination drives the un-filtered shape.
+  if (filterActive) return null;
+  if (total <= loaded) return null;
+  return (
+    <View className="items-center py-3">
+      <Text variant="muted" className="text-xs">
+        Showing {loaded} of {total}
+      </Text>
+    </View>
   );
 }
 

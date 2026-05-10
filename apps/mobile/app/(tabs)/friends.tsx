@@ -58,25 +58,22 @@ import {
   getGetV1FriendsQueryKey,
   getGetV1FriendsRequestsQueryKey,
   useDeleteV1FriendsUserId,
-  useGetV1Friends,
   useGetV1FriendsRequests,
   usePostV1FriendsRequestsIdAccept,
   usePostV1FriendsRequestsIdDecline,
   usePostV1FriendsUserIdBlock,
 } from '@/lib/api/hooks/friends/friends';
+import { flatten, useInfiniteFriends, useInfiniteUsers } from '@/lib/api/use-infinite';
 import {
   getGetV1PresenceFriendsQueryKey,
   useGetV1PresenceFriends,
 } from '@/lib/api/hooks/presence/presence';
-import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
 import { useFriendActions } from '@/lib/api/use-friend-actions';
 import type {
-  InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendRequestsResponse,
   InternalHandlerHttpFriendshipResponse,
   InternalHandlerHttpPresenceListResponse,
-  InternalHandlerHttpSearchResponse,
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
@@ -132,15 +129,22 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 }
 
 export default function FriendsScreen() {
-  const friendsQ = useGetV1Friends({ limit: 100 }, { query: { staleTime: 30_000 } });
+  // Infinite-scroll friends list (§6.4). Earlier this asked for
+  // limit:100 which capped users with more friends than that and
+  // ignored next_cursor entirely.
+  const friendsQ = useInfiniteFriends({ query: { staleTime: 30_000 } });
   const requestsQ = useGetV1FriendsRequests({ query: { staleTime: 30_000 } });
   const presenceQ = useGetV1PresenceFriends({ query: { staleTime: 15_000 } });
   const meQ = useGetV1AuthMe({ query: { staleTime: 60_000 } });
 
+  const { data: friendsList, total: friendsTotal } = React.useMemo(
+    () => flatten<Friendship, { data?: Friendship[] }>(friendsQ.data?.pages),
+    [friendsQ.data]
+  );
+
   // apiFetch returns the unwrapped JSON body; orval types the response
   // as the {data, status, headers} envelope. Cast to the runtime shape
   // (same pattern as auth-gate.tsx).
-  const friendsData = friendsQ.data as InternalHandlerHttpFriendListResponse | undefined;
   const requestsData = requestsQ.data as InternalHandlerHttpFriendRequestsResponse | undefined;
   const presenceData = presenceQ.data as InternalHandlerHttpPresenceListResponse | undefined;
   const me = meQ.data as { id?: string } | undefined;
@@ -151,11 +155,20 @@ export default function FriendsScreen() {
   const isSearchMode = rawQuery.trim().length >= SEARCH_MIN_CHARS;
   const searchEnabled = debouncedQuery.length >= SEARCH_MIN_CHARS;
 
-  const searchQ = useGetV1Search(
-    { q: debouncedQuery, types: 'users' },
+  // Per-section paginated user search — friends tab needs the FULL
+  // result set (so users with hundreds of matching contacts can still
+  // scroll past the first 10), not the global-search 10-cap. The
+  // /v1/users endpoint runs the same trigram + substring match the
+  // global modal does and supports the keyset cursor we drive
+  // infinite-scroll off of.
+  const searchQ = useInfiniteUsers(
+    { q: debouncedQuery },
     { query: { enabled: searchEnabled, staleTime: 30_000 } }
   );
-  const searchData = searchQ.data as InternalHandlerHttpSearchResponse | undefined;
+  const { data: searchUsers, total: searchTotal } = React.useMemo(
+    () => flatten<UserRow, { data?: UserRow[] }>(searchQ.data?.pages),
+    [searchQ.data]
+  );
 
   const presenceByUser = React.useMemo(() => {
     const m = new Map<string, string>();
@@ -172,7 +185,7 @@ export default function FriendsScreen() {
   // row — same map shape FriendStatusAction consumes elsewhere.
   const friendStatusByUserId = React.useMemo(() => {
     const m = new Map<string, FriendStatus>();
-    for (const f of friendsData?.data ?? []) {
+    for (const f of friendsList) {
       if (f.user?.id) m.set(f.user.id, { kind: 'friend' });
     }
     for (const f of requestsData?.incoming ?? []) {
@@ -182,7 +195,7 @@ export default function FriendsScreen() {
       if (f.user?.id && f.id) m.set(f.user.id, { kind: 'outgoing', requestId: f.id });
     }
     return m;
-  }, [friendsData, requestsData]);
+  }, [friendsList, requestsData]);
 
   // friendActions handles in-flight pending + invalidation, so the
   // row's status flips from `none` → `outgoing` automatically once
@@ -376,7 +389,7 @@ export default function FriendsScreen() {
   }, []);
 
   const sectionRows = React.useMemo<Row[]>(() => {
-    const friends = friendsData?.data ?? [];
+    const friends = friendsList;
     const incoming = requestsData?.incoming ?? [];
     const outgoing = requestsData?.outgoing ?? [];
 
@@ -454,7 +467,11 @@ export default function FriendsScreen() {
       key: 'h:friends',
       sectionId: 'friends',
       title: 'Friends',
-      count: friends.length,
+      // Header count is the absolute friends total from the
+      // backend, not friends.length — with infinite scroll we
+      // haven't necessarily loaded everyone, but the user wants
+      // "you have N friends," not "I've shown you M of N."
+      count: friendsTotal || friends.length,
       collapsed: friendsCollapsed,
     });
     if (!friendsCollapsed) {
@@ -477,10 +494,17 @@ export default function FriendsScreen() {
     }
 
     return out;
-  }, [friendsData, requestsData, presenceByUser, collapsedSections, expandedRequestSections]);
+  }, [
+    friendsList,
+    friendsTotal,
+    requestsData,
+    presenceByUser,
+    collapsedSections,
+    expandedRequestSections,
+  ]);
 
   const searchRows = React.useMemo<SearchRow[]>(() => {
-    const users = searchData?.users ?? [];
+    const users = searchUsers;
     const mapped = users
       .filter((u) => u.id) // backend guarantees this; defensive
       .map<SearchRow>((u) => {
@@ -511,7 +535,7 @@ export default function FriendsScreen() {
         return a.idx - b.idx;
       })
       .map(({ r }) => r);
-  }, [searchData, me, friendStatusByUserId]);
+  }, [searchUsers, me, friendStatusByUserId]);
 
   const isInitialLoad =
     !isSearchMode &&
@@ -541,10 +565,17 @@ export default function FriendsScreen() {
           isFetching={searchQ.isFetching}
           isError={searchQ.isError}
           rows={searchRows}
+          total={searchTotal}
           friendActions={friendActions}
           onAcceptRequest={onAcceptRequest}
           onDeclineRequest={onDeclineRequest}
           pendingAction={pendingAction}
+          onEndReached={() => {
+            if (searchQ.hasNextPage && !searchQ.isFetchingNextPage) {
+              void searchQ.fetchNextPage();
+            }
+          }}
+          isFetchingNextPage={searchQ.isFetchingNextPage}
         />
       ) : isInitialLoad ? (
         <FriendsLoading />
@@ -563,6 +594,12 @@ export default function FriendsScreen() {
           refreshing={refreshing}
           onRefresh={onRefresh}
           justToggledRef={justToggledRef}
+          onEndReached={() => {
+            if (friendsQ.hasNextPage && !friendsQ.isFetchingNextPage) {
+              void friendsQ.fetchNextPage();
+            }
+          }}
+          isFetchingNextPage={friendsQ.isFetchingNextPage}
         />
       )}
 
@@ -639,6 +676,8 @@ function SectionsPane({
   refreshing,
   onRefresh,
   justToggledRef,
+  onEndReached,
+  isFetchingNextPage,
 }: {
   rows: Row[];
   pendingAction: Set<string>;
@@ -656,6 +695,8 @@ function SectionsPane({
   refreshing: boolean;
   onRefresh: () => void;
   justToggledRef: React.MutableRefObject<SectionId | null>;
+  onEndReached: () => void;
+  isFetchingNextPage: boolean;
 }) {
   const listRef = React.useRef<ListRef<Row>>(null);
 
@@ -705,6 +746,9 @@ function SectionsPane({
       ref={listRef}
       data={rows}
       keyExtractor={(item) => item.key}
+      onEndReachedThreshold={0.5}
+      onEndReached={onEndReached}
+      ListFooterComponent={isFetchingNextPage ? <SectionsListLoader /> : null}
       renderItem={({ item }) => (
         <RenderedRow
           row={item}
@@ -750,19 +794,25 @@ function SearchPane({
   isFetching,
   isError,
   rows,
+  total,
   friendActions,
   onAcceptRequest,
   onDeclineRequest,
   pendingAction,
+  onEndReached,
+  isFetchingNextPage,
 }: {
   searchEnabled: boolean;
   isFetching: boolean;
   isError: boolean;
   rows: SearchRow[];
+  total: number;
   friendActions: ReturnType<typeof useFriendActions>;
   onAcceptRequest: (f: Friendship) => void;
   onDeclineRequest: (f: Friendship) => void;
   pendingAction: Set<string>;
+  onEndReached: () => void;
+  isFetchingNextPage: boolean;
 }) {
   const fg = useThemeColor('muted-foreground');
   if (!searchEnabled) {
@@ -802,6 +852,11 @@ function SearchPane({
     <List
       data={rows}
       keyExtractor={(r, i) => r.user.id ?? r.user.username ?? `idx-${i}`}
+      onEndReachedThreshold={0.5}
+      onEndReached={onEndReached}
+      ListFooterComponent={
+        <SearchListFooter loading={isFetchingNextPage} loaded={rows.length} total={total} />
+      }
       renderItem={({ item }) => (
         <SearchResultRow
           row={item}
@@ -812,6 +867,42 @@ function SearchPane({
         />
       )}
     />
+  );
+}
+
+function SearchListFooter({
+  loading,
+  loaded,
+  total,
+}: {
+  loading: boolean;
+  loaded: number;
+  total: number;
+}) {
+  const mutedFg = useThemeColor('muted-foreground');
+  if (loading) {
+    return (
+      <View className="items-center py-4">
+        <ActivityIndicator color={mutedFg} />
+      </View>
+    );
+  }
+  if (total <= loaded) return null;
+  return (
+    <View className="items-center py-3">
+      <Text variant="muted" className="text-xs">
+        Showing {loaded} of {total}
+      </Text>
+    </View>
+  );
+}
+
+function SectionsListLoader() {
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <View className="items-center py-4">
+      <ActivityIndicator color={mutedFg} />
+    </View>
   );
 }
 
