@@ -327,10 +327,12 @@ func (q *Queries) ListByConversation(ctx context.Context, p ListByConversationPa
 	return out, nil
 }
 
-// CountByConversation returns the absolute number of non-deleted
-// messages in the conversation matching the optional body
-// substring. Drives the thread-screen "X of N" total. Pass an
-// empty query to count every message.
+// CountByConversation returns the absolute number of messages in
+// the conversation matching the optional body substring, including
+// soft-deleted rows so the count matches what ListByConversation
+// returns (which renders deleted rows as the §4.6 placeholder).
+// Drives the thread-screen "X of N" total. Pass an empty query to
+// count every message.
 func (q *Queries) CountByConversation(ctx context.Context, conversationID uuid.UUID, query string) (int, error) {
 	var n int
 	if err := q.db.QueryRow(ctx, countByConversationSQL, conversationID, strings.TrimSpace(query)).Scan(&n); err != nil {

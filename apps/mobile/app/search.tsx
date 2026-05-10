@@ -128,8 +128,15 @@ export default function SearchModalScreen() {
   const debouncedQuery = useDebouncedValue(rawQuery.trim(), DEBOUNCE_MS);
   const enabled = debouncedQuery.length >= MIN_CHARS;
 
+  // Unified search drives only the conversations + messages
+  // sections — those endpoints don't have a per-section paginated
+  // counterpart, so the unified 10-cap is what we render. People
+  // search has its own paginated endpoint (/v1/users), and
+  // splitting it out lets the tier sort run across the FULL
+  // matching set instead of the unified-search top-10 (which is
+  // ranked by trigram score and may not include any friends).
   const searchQ = useGetV1Search(
-    { q: debouncedQuery, types: 'users,conversations,messages' },
+    { q: debouncedQuery, types: 'conversations,messages' },
     { query: { enabled, staleTime: 30_000 } }
   );
   const data = searchQ.data as InternalHandlerHttpSearchResponse | undefined;
@@ -381,29 +388,26 @@ export default function SearchModalScreen() {
     });
   }, []);
 
-  // Users-section drill-down. When the user expands People past
-  // the unified-search 10-cap, this kicks off the paginated
-  // /v1/users endpoint so they can scroll the full matching set.
-  // Only enabled once expanded — otherwise the modal pre-fetches
-  // a second copy of the same 10 rows on every open.
+  // People search runs against /v1/users from the moment the user
+  // types — the friend-tier sort needs the FULL matching set to
+  // place friends first (the unified-search top-10 is ranked by
+  // trigram score and often returns zero friends). Drilling for
+  // more pages just keeps appending rows below; the cap-5 default
+  // happens client-side after the sort.
   const usersExpanded = expandedSections.has('users');
-  const usersTotal = data?.users_total ?? data?.users?.length ?? 0;
   const conversationsTotal = data?.conversations_total ?? data?.conversations?.length ?? 0;
   const messagesTotal = data?.messages_total ?? data?.messages?.length ?? 0;
   const usersDrillQ = useInfiniteUsers(
     { q: debouncedQuery },
     {
-      query: {
-        enabled: enabled && usersExpanded && usersTotal > 0,
-        staleTime: 30_000,
-      },
+      query: { enabled, staleTime: 30_000 },
     }
   );
-  const drilledUsers = React.useMemo(
+  const { data: drilledUsers, total: usersTotal } = React.useMemo(
     () =>
       flatten<InternalHandlerHttpUserResponse, { data?: InternalHandlerHttpUserResponse[] }>(
         usersDrillQ.data?.pages
-      ).data,
+      ),
     [usersDrillQ.data]
   );
 
@@ -414,7 +418,8 @@ export default function SearchModalScreen() {
         usersTotal,
         conversationsTotal,
         messagesTotal,
-        drilledUsers: usersExpanded ? drilledUsers : undefined,
+        drilledUsers,
+        usersExpanded,
         expanded: expandedSections,
         collapsed: collapsedSections,
         friendStatusByUser,
@@ -515,10 +520,15 @@ export default function SearchModalScreen() {
 
         {!enabled ? (
           <SearchHint />
-        ) : searchQ.isFetching && rows.length === 0 ? (
+        ) : (searchQ.isFetching || usersDrillQ.isFetching) && rows.length === 0 ? (
           <SearchLoading />
-        ) : searchQ.isError && rows.length === 0 ? (
-          <SearchError onRetry={() => searchQ.refetch()} />
+        ) : (searchQ.isError || usersDrillQ.isError) && rows.length === 0 ? (
+          <SearchError
+            onRetry={() => {
+              void searchQ.refetch();
+              void usersDrillQ.refetch();
+            }}
+          />
         ) : rows.length === 0 ? (
           <SearchNoResults />
         ) : (
@@ -716,6 +726,7 @@ function buildRows({
   conversationsTotal,
   messagesTotal,
   drilledUsers,
+  usersExpanded,
   expanded,
   collapsed,
   friendStatusByUser,
@@ -725,10 +736,14 @@ function buildRows({
   usersTotal: number;
   conversationsTotal: number;
   messagesTotal: number;
-  // When the People section is expanded, drill-down pages from
-  // /v1/users replace the unified-search slice — that's how the
-  // user scrolls past the 10-cap into the full matching set.
-  drilledUsers: InternalHandlerHttpUserResponse[] | undefined;
+  // /v1/users-paginated user matches. Used as the SOLE source for
+  // the People section so the friend-tier sort can reorder across
+  // the full matching set, not just the unified-search top-10.
+  drilledUsers: InternalHandlerHttpUserResponse[];
+  // True once the user taps "Show all N people"; the modal then
+  // renders every loaded page and lets the FlashList drive
+  // fetchNextPage on scroll.
+  usersExpanded: boolean;
   expanded: Set<SectionId>;
   collapsed: Set<SectionId>;
   // Sort context — friends first, pending requests second, strangers
@@ -736,19 +751,13 @@ function buildRows({
   friendStatusByUser: Map<string, FriendStatus>;
   myUserId: string | undefined;
 }): Row[] {
-  if (!data) return [];
   const out: Row[] = [];
 
-  const usersSlice = data.users ?? [];
-  const usersExpanded = expanded.has('users');
-  // When expanded, render the drill-down pages (full set, infinite
-  // scroll). Otherwise show the top VISIBLE_PER_SECTION of the
-  // unified-search slice. Sort by friend-tier so the user always
-  // sees their own people first.
-  const sourceUsers = usersExpanded ? (drilledUsers ?? usersSlice) : usersSlice;
-  const sortedUsers = sortByFriendTier(sourceUsers, friendStatusByUser, myUserId);
+  // People section runs against /v1/users from the start so the
+  // tier sort sees the FULL matching set on every keystroke.
+  const sortedUsers = sortByFriendTier(drilledUsers, friendStatusByUser, myUserId);
   const renderedUsers = usersExpanded ? sortedUsers : sortedUsers.slice(0, VISIBLE_PER_SECTION);
-  if (usersTotal > 0 || usersSlice.length > 0) {
+  if (usersTotal > 0 || drilledUsers.length > 0) {
     const isCollapsed = collapsed.has('users');
     out.push({
       kind: 'header',
@@ -778,7 +787,7 @@ function buildRows({
     }
   }
 
-  const conversations = data.conversations ?? [];
+  const conversations = data?.conversations ?? [];
   if (conversationsTotal > 0 || conversations.length > 0) {
     const isCollapsed = collapsed.has('conversations');
     const showAll = expanded.has('conversations');
@@ -816,7 +825,7 @@ function buildRows({
     }
   }
 
-  const messages = data.messages ?? [];
+  const messages = data?.messages ?? [];
   if (messagesTotal > 0 || messages.length > 0) {
     const isCollapsed = collapsed.has('messages');
     const showAll = expanded.has('messages');
