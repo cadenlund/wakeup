@@ -10,6 +10,7 @@ import { Sentry, navigationIntegration, sentryEnabled } from '@/lib/sentry';
 
 import { Stack, useGlobalSearchParams, useNavigationContainerRef, usePathname } from 'expo-router';
 import * as React from 'react';
+import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 
@@ -86,16 +87,31 @@ function ProtectedStack() {
         guard={auth.isLoading || (auth.isAuthenticated && auth.onboardingDone && !hasToken)}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+        {/* Native: `presentation: 'modal'` gives the iOS sheet
+            chrome users expect (rounded top, status-bar padding,
+            drag-to-dismiss). Web: `transparentModal` keeps the
+            parent route mounted behind the pushed screen so the
+            ModalScreenShell backdrop dims the chats list instead
+            of painting onto a blank viewport. */}
         <Stack.Screen
           name="conversations/new"
-          options={{ presentation: 'modal', headerShown: false }}
+          options={{
+            presentation: Platform.OS === 'web' ? 'transparentModal' : 'modal',
+            headerShown: false,
+          }}
         />
         {/* `headerShown: false` lives here, not inside search.tsx —
             toggling it from inside the screen body triggers an
             infinite-remount loop on iOS modals (the screen re-mounts
             on each header-options diff, and the screen always sets
             the same option, so it never settles). */}
-        <Stack.Screen name="search" options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen
+          name="search"
+          options={{
+            presentation: Platform.OS === 'web' ? 'transparentModal' : 'modal',
+            headerShown: false,
+          }}
+        />
       </Stack.Protected>
     </Stack>
   );

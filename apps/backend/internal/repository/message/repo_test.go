@@ -327,7 +327,13 @@ func TestListByConversation_FullTextMatches(t *testing.T) {
 	}
 }
 
-func TestListByConversation_FullTextStems(t *testing.T) {
+// TestListByConversation_QuerySubstring regresses the change to
+// ILIKE substring matching — partial words inside a token now
+// match (e.g. "runn" finds "running"). The previous English-stem
+// behavior (where "runs" matched "running" via stemming) is gone
+// in favor of consistent substring matching across all search
+// surfaces.
+func TestListByConversation_QuerySubstring(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pool := testutil.NewTestDB(t)
@@ -338,15 +344,14 @@ func TestListByConversation_FullTextStems(t *testing.T) {
 	send(ctx, t, repo, cid, a, "running through the field")
 	send(ctx, t, repo, cid, a, "no relevant text here")
 
-	// English stemmer maps "ran"/"runs" → "run", same as "running".
 	got, err := repo.ListByConversation(ctx, message.ListByConversationParams{
-		ConversationID: cid, Limit: 10, Query: "runs",
+		ConversationID: cid, Limit: 10, Query: "runn",
 	})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if len(got) != 1 {
-		t.Errorf("len = %d, want 1 stem-match for 'runs'", len(got))
+		t.Errorf("len = %d, want 1 substring-match for 'runn'", len(got))
 	}
 }
 

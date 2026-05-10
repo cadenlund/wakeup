@@ -18,12 +18,15 @@
 // new-conversation flow lives at /conversations/new (Phase 5.2).
 import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
-import { Pressable, RefreshControl, View } from 'react-native';
+import { Platform, Pressable, RefreshControl, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
+import { ConversationActionMenu } from '@/components/conversation-action-menu';
 import { ConversationRow } from '@/components/conversation-row';
+import { MuteSheet } from '@/components/mute-sheet';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import { Text } from '@/components/ui/text';
 import {
   conversationDisplay,
   filterConversations,
@@ -32,12 +35,14 @@ import {
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { useGetV1Conversations } from '@/lib/api/hooks/conversations/conversations';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
+import { haptics } from '@/lib/haptics';
 import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
   InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { useConversationPinMute } from '@/lib/use-conversation-pin-mute';
 import { EmptyState } from '@/components/ui/empty-state';
 
 type Conversation = InternalHandlerHttpConversationResponse;
@@ -88,11 +93,39 @@ export default function ChatsScreen() {
   const router = useRouter();
   const goCompose = React.useCallback(() => router.push('/conversations/new'), [router]);
 
+  // Long-press menu state machine: 'menu' shows pin + mute
+  // entry; 'mute' is the duration sheet. The active conversation
+  // ID stays in state across the transition so the mute sheet
+  // resolves against the same row even after the menu closes.
+  // null = nothing open.
+  const [activeAction, setActiveAction] = React.useState<{
+    id: string;
+    title: string;
+    isPinned: boolean;
+    isMuted: boolean;
+    screen: 'menu' | 'mute';
+  } | null>(null);
+  const closeMenu = React.useCallback(() => setActiveAction(null), []);
+  const openMuteSheet = React.useCallback(
+    () => setActiveAction((s) => (s ? { ...s, screen: 'mute' } : s)),
+    []
+  );
+
+  const { togglePin, setMute, unmute } = useConversationPinMute();
+
   const isInitialLoad = conversationsQ.isLoading && !conversationsQ.data;
 
   return (
     <View className="flex-1 bg-background">
-      <ChatsSearchBar value={query} onChange={setQuery} />
+      <ChatsSearchBar
+        value={query}
+        onChange={setQuery}
+        // Web: render the "+ New chat" button on the same line as
+        // the filter input — there's plenty of horizontal room and
+        // a separate header would just steal a row. Native keeps
+        // the floating FAB; the addon is undefined.
+        rightAddon={Platform.OS === 'web' ? <NewChatButton onPress={goCompose} /> : undefined}
+      />
       {isInitialLoad ? (
         <ChatsLoading />
       ) : sorted.length === 0 ? (
@@ -117,21 +150,100 @@ export default function ChatsScreen() {
               conversation={item}
               myUserId={me?.id}
               presenceByUser={presenceByUser}
+              onMorePress={(row) => {
+                haptics.tap();
+                setActiveAction({
+                  id: row.id,
+                  title: row.title,
+                  isPinned: row.isPinned,
+                  isMuted: row.isMuted,
+                  screen: 'menu',
+                });
+              }}
             />
           )}
         />
       )}
 
-      <ComposeFab onPress={goCompose} />
+      {/* The floating compose FAB is the right thumb-zone affordance
+          on touch but on a desktop browser it's a stranded floating
+          button. Web gets the top-bar "New chat" button instead
+          (rendered above) — this stays native-only. */}
+      {Platform.OS !== 'web' ? <ComposeFab onPress={goCompose} /> : null}
+
+      <ConversationActionMenu
+        visible={activeAction?.screen === 'menu'}
+        title={activeAction?.title ?? ''}
+        isPinned={activeAction?.isPinned ?? false}
+        isMuted={activeAction?.isMuted ?? false}
+        onTogglePin={() => {
+          if (!activeAction) return;
+          togglePin(activeAction.id, activeAction.isPinned);
+          closeMenu();
+        }}
+        onMutePress={openMuteSheet}
+        onUnmute={() => {
+          if (!activeAction) return;
+          unmute(activeAction.id);
+          closeMenu();
+        }}
+        onClose={closeMenu}
+        testID="conversation-action-menu"
+      />
+      <MuteSheet
+        visible={activeAction?.screen === 'mute'}
+        isMuted={activeAction?.isMuted ?? false}
+        onPickUntil={(until) => {
+          if (!activeAction) return;
+          setMute(activeAction.id, until);
+          closeMenu();
+        }}
+        onUnmute={() => {
+          if (!activeAction) return;
+          unmute(activeAction.id);
+          closeMenu();
+        }}
+        onClose={closeMenu}
+        testID="mute-sheet"
+      />
     </View>
   );
 }
 
-function ChatsSearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+// Inline "+ New chat" button rendered on web inside the filter
+// row. Rectangular with slightly rounded corners (rounded-md, not
+// full pill) so it reads as a deliberate action button, not a
+// chip — matches the inputs around it visually.
+function NewChatButton({ onPress }: { onPress: () => void }) {
+  const fg = useThemeColor('primary-foreground');
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="New conversation"
+      testID="conversation-compose-web"
+      className="h-10 shrink-0 flex-row items-center gap-2 rounded-md bg-primary px-3 active:opacity-80">
+      <Plus size={16} color={fg} />
+      <Text style={{ color: fg }} className="text-sm font-semibold">
+        New chat
+      </Text>
+    </Pressable>
+  );
+}
+
+function ChatsSearchBar({
+  value,
+  onChange,
+  rightAddon,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  rightAddon?: React.ReactNode;
+}) {
   const mutedFg = useThemeColor('muted-foreground');
   return (
-    <View className="border-b border-border bg-background px-4 pb-3 pt-3">
-      <View className="relative">
+    <View className="flex-row items-center gap-3 border-b border-border bg-background px-4 pb-3 pt-3">
+      <View className="relative flex-1">
         <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
           <Search size={16} color={mutedFg} />
         </View>
@@ -159,6 +271,7 @@ function ChatsSearchBar({ value, onChange }: { value: string; onChange: (v: stri
           </Pressable>
         ) : null}
       </View>
+      {rightAddon}
     </View>
   );
 }
@@ -199,10 +312,12 @@ function RenderedConversationRow({
   conversation,
   myUserId,
   presenceByUser,
+  onMorePress,
 }: {
   conversation: Conversation;
   myUserId: string | undefined;
   presenceByUser: Map<string, string>;
+  onMorePress?: (row: { id: string; title: string; isPinned: boolean; isMuted: boolean }) => void;
 }) {
   const router = useRouter();
   const display = conversationDisplay(conversation, myUserId, presenceByUser);
@@ -219,10 +334,22 @@ function RenderedConversationRow({
       lastMessageAt={conversation.last_message_at}
       isMuted={isMuted}
       isPinned={isPinned}
+      mutedUntil={conversation.muted_until}
       testID={`conversation-${conversation.id}`}
       onPress={() => {
         if (conversation.id) router.push(`/conversations/${conversation.id}`);
       }}
+      onMorePress={
+        conversation.id && onMorePress
+          ? () =>
+              onMorePress({
+                id: conversation.id!,
+                title: display.title,
+                isPinned,
+                isMuted,
+              })
+          : undefined
+      }
     />
   );
 }

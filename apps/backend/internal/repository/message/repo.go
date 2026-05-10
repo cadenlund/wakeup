@@ -77,7 +77,7 @@ SELECT id, conversation_id, sender_id, body, reply_to_message_id,
 FROM messages
 WHERE conversation_id = $1
   AND ($2::timestamptz IS NULL OR ($2::timestamptz, $3::uuid) > (created_at, id))
-  AND ($5::text = '' OR body_tsv @@ plainto_tsquery('english', $5))
+  AND ($5::text = '' OR body ILIKE '%' || $5::text || '%')
 ORDER BY created_at DESC, id DESC
 LIMIT $4`
 
@@ -118,7 +118,7 @@ FROM messages m
 JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = $1
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.deleted_at IS NULL
-  AND m.body_tsv @@ plainto_tsquery('english', $2::text)
+  AND m.body ILIKE '%' || $2::text || '%'
   AND (
     c.type <> 'direct'
     OR NOT EXISTS (

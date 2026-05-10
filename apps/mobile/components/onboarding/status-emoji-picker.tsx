@@ -89,7 +89,7 @@ export function StatusEmojiPicker({ value, onChange, disabled, testID }: Props) 
             while a max-h cap leaves visible breathing room above and
             below — full-height looked oppressive on the test sim. */}
         <View
-          className="flex-1 bg-black/50"
+          className="flex-1 bg-black/40"
           style={{
             paddingTop: insets.top + 32,
             paddingBottom: insets.bottom + 32,

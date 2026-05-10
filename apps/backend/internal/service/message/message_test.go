@@ -17,6 +17,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 	attachrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/attachment"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
+	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	msgrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/message"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
@@ -94,7 +95,8 @@ func stackWithPush(t *testing.T, presence *fakePresence, notifier *fakeNotifier)
 	msgs := msgrepo.New(pool)
 	users := userrepo.New(pool)
 
-	cs, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users})
+	friends := friendrepo.New(pool)
+	cs, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users, Friends: friends})
 	if err != nil {
 		t.Fatalf("convsvc.New: %v", err)
 	}
@@ -108,7 +110,7 @@ func stackWithPush(t *testing.T, presence *fakePresence, notifier *fakeNotifier)
 	if err != nil {
 		t.Fatalf("message.New: %v", err)
 	}
-	return &stack{svc: svc, convsvc: cs, convs: convs, msgs: msgs, users: users, pool: pool, broker: broker}
+	return &stack{svc: svc, convsvc: cs, convs: convs, msgs: msgs, users: users, friends: friends, pool: pool, broker: broker}
 }
 
 type stack struct {
@@ -117,8 +119,26 @@ type stack struct {
 	convs   *convrepo.Queries
 	msgs    *msgrepo.Queries
 	users   *userrepo.Queries
+	friends *friendrepo.Queries
 	pool    *pgxpool.Pool
 	broker  pubsub.Broker
+}
+
+// makeFriendship establishes an accepted friendship via the repo
+// (Create then Accept since the repo rejects an `accepted` initial
+// status). makeDirect calls this so the conversation service's
+// friends-only DM gate doesn't reject the test setup.
+func makeFriendship(ctx context.Context, t *testing.T, st *stack, a, b uuid.UUID) {
+	t.Helper()
+	id := uuid.Must(uuid.NewV7())
+	if _, err := st.friends.Create(ctx, friendrepo.CreateParams{
+		ID: id, RequesterID: a, AddresseeID: b, Status: domain.FriendshipPending,
+	}); err != nil {
+		t.Fatalf("makeFriendship create: %v", err)
+	}
+	if _, err := st.friends.Accept(ctx, id); err != nil {
+		t.Fatalf("makeFriendship accept: %v", err)
+	}
 }
 
 func newStack(t *testing.T) *stack {
@@ -128,7 +148,8 @@ func newStack(t *testing.T) *stack {
 	msgs := msgrepo.New(pool)
 	users := userrepo.New(pool)
 
-	cs, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users})
+	friends := friendrepo.New(pool)
+	cs, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users, Friends: friends})
 	if err != nil {
 		t.Fatalf("convsvc.New: %v", err)
 	}
@@ -142,7 +163,7 @@ func newStack(t *testing.T) *stack {
 	if err != nil {
 		t.Fatalf("message.New: %v", err)
 	}
-	return &stack{svc: svc, convsvc: cs, convs: convs, msgs: msgs, users: users, pool: pool, broker: broker}
+	return &stack{svc: svc, convsvc: cs, convs: convs, msgs: msgs, users: users, friends: friends, pool: pool, broker: broker}
 }
 
 func makeUser(ctx context.Context, t *testing.T, st *stack) domain.User {
@@ -160,9 +181,12 @@ func makeUser(ctx context.Context, t *testing.T, st *stack) domain.User {
 }
 
 // makeDirect uses the conversation service so the resulting conversation
-// is structurally consistent (creator + member rows, etc.).
+// is structurally consistent (creator + member rows, etc.). Friends
+// the pair first because the service rejects direct creates between
+// non-friends.
 func makeDirect(ctx context.Context, t *testing.T, st *stack, a, b domain.User) uuid.UUID {
 	t.Helper()
+	makeFriendship(ctx, t, st, a.ID, b.ID)
 	res, err := st.convsvc.Create(ctx, convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})
@@ -779,7 +803,8 @@ func TestSend_NilBrokerWorks(t *testing.T) {
 	convs := convrepo.New(pool)
 	msgs := msgrepo.New(pool)
 	users := userrepo.New(pool)
-	cs, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users})
+	friends := friendrepo.New(pool)
+	cs, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users, Friends: friends})
 	if err != nil {
 		t.Fatalf("convsvc.New: %v", err)
 	}
@@ -787,7 +812,7 @@ func TestSend_NilBrokerWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("message.New: %v", err)
 	}
-	st := &stack{svc: svc, convsvc: cs, convs: convs, msgs: msgs, users: users, pool: pool}
+	st := &stack{svc: svc, convsvc: cs, convs: convs, msgs: msgs, users: users, friends: friends, pool: pool}
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
 	cid := makeDirect(ctx, t, st, a, b)

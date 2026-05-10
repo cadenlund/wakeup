@@ -146,6 +146,7 @@ func TestWSHandler_TypingFansOutToOtherConvMembers(t *testing.T) {
 
 	// Create a direct between alice and bob via the conversation
 	// service so both have the channel subscription wired on dial.
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -237,6 +238,7 @@ func TestWSHandler_TypingRejectsNonMember(t *testing.T) {
 	strangerClient, _ := h.AuthClient(t)
 
 	// alice + bob make a direct; stranger isn't a member.
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -301,6 +303,7 @@ func TestWSHandler_DisconnectClearsBridgeSubscriptions(t *testing.T) {
 
 	// Give alice at least one conv so the bridge has something to
 	// subscribe to.
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})

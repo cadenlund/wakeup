@@ -1,0 +1,38 @@
+# Phase 5.6 — pin/mute long-press menu on conversation rows.
+#
+# A freshly-registered account has no conversations to long-press,
+# so this flow walks the structural path that single-user mode can
+# exercise:
+#
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs) Chats tab with the empty state.
+#   2. Confirm the chats screen mounts cleanly with the new
+#      <ConversationActionMenu> + <MuteSheet> children attached
+#      (no crash on render).
+#
+# The populated long-press → pin → mute happy path needs a second
+# account fixture (as does 5.2 and 5.3); the QR-on-phone review at
+# the end of this milestone covers the full menu interaction.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. Mount-without-crash is the only assertion
+# this flow can run on a single fresh account; the new modals are
+# children of this screen, so a clean render here proves the wiring
+# doesn't blow up.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+- takeScreenshot: pin-mute-chats-empty

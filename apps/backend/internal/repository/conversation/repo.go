@@ -76,6 +76,19 @@ WHERE id = $1 AND last_message_at < $2`
 const deleteConversationSQL = `-- name: DeleteConversation :exec
 DELETE FROM conversations WHERE id = $1`
 
+// deleteDirectByPairSQL drops every direct conversation that has
+// BOTH a and b as members. Group conversations are unaffected —
+// they survive an unfriend/block between any two members per
+// product policy. Cascades through conversation_members and
+// messages on the FK.
+const deleteDirectByPairSQL = `-- name: DeleteDirectByPair :exec
+DELETE FROM conversations c
+WHERE c.type = 'direct'
+  AND EXISTS (SELECT 1 FROM conversation_members ma
+              WHERE ma.conversation_id = c.id AND ma.user_id = $1)
+  AND EXISTS (SELECT 1 FROM conversation_members mb
+              WHERE mb.conversation_id = c.id AND mb.user_id = $2)`
+
 // listConversationsByUserSQL hides direct conversations whose OTHER
 // member is in a 'blocked' friendship row with the caller — either
 // direction. Group conversations stay visible regardless of the
@@ -112,13 +125,20 @@ ORDER BY (m.pinned_at IS NOT NULL) DESC,
 LIMIT $4`
 
 const searchByUserAndNameSQL = `-- name: SearchByUserAndName :many
-SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
+SELECT DISTINCT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
 FROM conversations c
-JOIN conversation_members m ON m.conversation_id = c.id
-WHERE m.user_id = $1
-  AND c.type = 'group'
-  AND c.name ILIKE '%' || $2::text || '%'
+JOIN conversation_members caller ON caller.conversation_id = c.id AND caller.user_id = $1
+LEFT JOIN conversation_members other_m
+  ON other_m.conversation_id = c.id
+ AND other_m.user_id <> $1
+LEFT JOIN users other_u ON other_u.id = other_m.user_id
+WHERE c.type = 'group'
+  AND (
+    c.name ILIKE '%' || $2::text || '%'
+    OR other_u.display_name ILIKE '%' || $2::text || '%'
+    OR other_u.username ILIKE '%' || $2::text || '%'
+  )
 ORDER BY c.last_message_at DESC, c.id DESC
 LIMIT $3`
 
@@ -279,6 +299,18 @@ func (q *Queries) DeleteConversation(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// DeleteDirectByPair removes every direct conversation that has
+// both `a` and `b` as members. Used by the friend service when an
+// unfriend or block between the pair clears their DM history.
+// Idempotent — no error when zero rows match (the pair may not
+// have a DM thread, which is fine).
+func (q *Queries) DeleteDirectByPair(ctx context.Context, a, b uuid.UUID) error {
+	if _, err := q.db.Exec(ctx, deleteDirectByPairSQL, a, b); err != nil {
+		return fmt.Errorf("conversation: delete direct by pair: %w", err)
+	}
+	return nil
+}
+
 // ListConversationsByUser returns conversations the user is a member of,
 // keyset-paginated on (last_message_at DESC, id DESC).
 func (q *Queries) ListConversationsByUser(ctx context.Context, userID uuid.UUID, cursor *pagination.Cursor, limit int) ([]domain.Conversation, error) {
@@ -314,10 +346,15 @@ func (q *Queries) ListConversationsByUser(ctx context.Context, userID uuid.UUID,
 	return out, nil
 }
 
-// SearchByUserAndName returns up to limit group conversations the user
-// is a member of whose name contains the query (case-insensitive). Used
-// by GET /v1/search (mobile §5.1 global search). Direct conversations
-// have no name and are excluded.
+// SearchByUserAndName returns up to limit group conversations the
+// caller is a member of where either the conversation name OR any
+// member's display_name / username contains the query (case-
+// insensitive). Used by GET /v1/search (mobile §5.1 global search).
+// The member-name fallback means searching for a friend's name
+// surfaces every group they're in, not just groups whose title
+// happens to contain the same string. Direct conversations have no
+// name and are excluded — callers reach DMs via the user-search hit
+// + ensure-DM flow.
 func (q *Queries) SearchByUserAndName(ctx context.Context, userID uuid.UUID, query string, limit int) ([]domain.Conversation, error) {
 	if limit <= 0 {
 		limit = 10

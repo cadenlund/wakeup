@@ -129,6 +129,7 @@ func TestMessageNew_FiresForRecipients(t *testing.T) {
 	aliceClient, alice := h.AuthClient(t)
 	bobClient, bob := h.AuthClient(t)
 
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -161,6 +162,7 @@ func TestMessageNew_DoesNotFireForOutsiders(t *testing.T) {
 	_, bob := h.AuthClient(t)
 	strangerClient, _ := h.AuthClient(t)
 
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -188,6 +190,7 @@ func TestMessageNew_PayloadShape(t *testing.T) {
 	h := testutil.New(t)
 	aliceClient, alice := h.AuthClient(t)
 	bobClient, bob := h.AuthClient(t)
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -232,6 +235,7 @@ func TestMessageNew_MultiInstanceFanout(t *testing.T) {
 	h := testutil.New(t)
 	_, alice := h.AuthClient(t)
 	_, bob := h.AuthClient(t)
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -320,6 +324,7 @@ func TestMessageNew_TwoSendsProduceTwoEvents(t *testing.T) {
 	h := testutil.New(t)
 	_, alice := h.AuthClient(t)
 	bobClient, bob := h.AuthClient(t)
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -350,6 +355,7 @@ func TestTypingStart_FiresForRecipients(t *testing.T) {
 	h := testutil.New(t)
 	aliceClient, alice := h.AuthClient(t)
 	bobClient, bob := h.AuthClient(t)
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -386,6 +392,7 @@ func TestTypingStart_PayloadShape(t *testing.T) {
 	h := testutil.New(t)
 	aliceClient, alice := h.AuthClient(t)
 	bobClient, bob := h.AuthClient(t)
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
@@ -458,6 +465,7 @@ func TestWebSocketLifecycle(t *testing.T) {
 		h := testutil.New(t)
 		_, alice := h.AuthClient(t)
 		bobClient, bob := h.AuthClient(t)
+		h.MakeFriendship(t, alice, bob)
 		res, err := h.ConvSvc.Create(context.Background(), convsvc.CreateParams{
 			Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 		})

@@ -75,6 +75,17 @@ RETURNING id, requester_id, addressee_id, status, created_at, accepted_at`
 const deleteSQL = `-- name: Delete :exec
 DELETE FROM friendships WHERE id = $1`
 
+// deletePendingByRequesterSQL atomically deletes a row only when
+// it's still pending AND owned by the given requester. Used by
+// CancelRequest so the addressee can't accept the row out from
+// under us mid-flow — the equivalent service-level read-then-
+// delete is racy.
+const deletePendingByRequesterSQL = `-- name: DeletePendingByRequester :exec
+DELETE FROM friendships
+WHERE id = $1
+  AND requester_id = $2
+  AND status = 'pending'`
+
 const deleteByPairSQL = `-- name: DeleteByPair :exec
 DELETE FROM friendships
 WHERE LEAST(requester_id, addressee_id) = LEAST($1::uuid, $2::uuid)
@@ -210,6 +221,24 @@ func (q *Queries) Delete(ctx context.Context, id uuid.UUID) error {
 func (q *Queries) DeleteByPair(ctx context.Context, a, b uuid.UUID) error {
 	if _, err := q.db.Exec(ctx, deleteByPairSQL, a, b); err != nil {
 		return fmt.Errorf("friendship: delete by pair: %w", err)
+	}
+	return nil
+}
+
+// DeletePendingByRequester atomically deletes a friendship row only
+// when it's still `pending` AND owned by `requester`. Used by
+// CancelRequest so an in-flight Accept can't slip through the
+// service's read-then-delete window. Returns ErrNotFound when no
+// row matched (already accepted, declined, or owned by someone
+// else); callers can treat that as "request was no longer
+// cancelable" — distinct from a generic delete failure.
+func (q *Queries) DeletePendingByRequester(ctx context.Context, id, requester uuid.UUID) error {
+	tag, err := q.db.Exec(ctx, deletePendingByRequesterSQL, id, requester)
+	if err != nil {
+		return fmt.Errorf("friendship: delete pending: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

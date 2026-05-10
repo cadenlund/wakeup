@@ -11,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
+	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/room"
@@ -61,7 +62,8 @@ func newLoneKickStack(t *testing.T, kickAfter time.Duration) *loneKickStack {
 	pool := testutil.NewTestDB(t)
 	users := userrepo.New(pool)
 	convs := convrepo.New(pool)
-	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users})
+	friends := friendrepo.New(pool)
+	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users, Friends: friends})
 	if err != nil {
 		t.Fatalf("convsvc.New: %v", err)
 	}

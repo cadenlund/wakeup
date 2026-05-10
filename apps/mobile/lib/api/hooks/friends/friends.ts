@@ -568,6 +568,115 @@ export const usePostV1FriendsRequests = <TError = InternalHandlerHttpErrorRespon
       > => {
       return useMutation(getPostV1FriendsRequestsMutationOptions(options), queryClient);
     }
+    export type deleteV1FriendsRequestsIdResponse204 = {
+  data: void
+  status: 204
+}
+
+export type deleteV1FriendsRequestsIdResponse400 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 400
+}
+
+export type deleteV1FriendsRequestsIdResponse401 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 401
+}
+
+export type deleteV1FriendsRequestsIdResponse409 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 409
+}
+
+export type deleteV1FriendsRequestsIdResponse429 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 429
+}
+
+export type deleteV1FriendsRequestsIdResponse500 = {
+  data: InternalHandlerHttpErrorResponse
+  status: 500
+}
+
+export type deleteV1FriendsRequestsIdResponseSuccess = (deleteV1FriendsRequestsIdResponse204) & {
+  headers: Headers;
+};
+export type deleteV1FriendsRequestsIdResponseError = (deleteV1FriendsRequestsIdResponse400 | deleteV1FriendsRequestsIdResponse401 | deleteV1FriendsRequestsIdResponse409 | deleteV1FriendsRequestsIdResponse429 | deleteV1FriendsRequestsIdResponse500) & {
+  headers: Headers;
+};
+
+export type deleteV1FriendsRequestsIdResponse = (deleteV1FriendsRequestsIdResponseSuccess | deleteV1FriendsRequestsIdResponseError)
+
+export const getDeleteV1FriendsRequestsIdUrl = (id: string,) => {
+
+
+
+
+  return `/v1/friends/requests/${id}`
+}
+
+/**
+ * Deletes a pending friendship row that the caller sent. Only the requester may cancel; the addressee declines via the dedicated decline endpoint.
+ * @summary Cancel an outgoing friend request
+ */
+export const deleteV1FriendsRequestsId = async (id: string, options?: RequestInit): Promise<deleteV1FriendsRequestsIdResponse> => {
+
+  return orvalMutator<deleteV1FriendsRequestsIdResponse>(getDeleteV1FriendsRequestsIdUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteV1FriendsRequestsIdMutationOptions = <TError = InternalHandlerHttpErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1FriendsRequestsId>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteV1FriendsRequestsId>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['deleteV1FriendsRequestsId'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteV1FriendsRequestsId>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteV1FriendsRequestsId(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteV1FriendsRequestsIdMutationResult = NonNullable<Awaited<ReturnType<typeof deleteV1FriendsRequestsId>>>
+
+    export type DeleteV1FriendsRequestsIdMutationError = InternalHandlerHttpErrorResponse
+
+    /**
+ * @summary Cancel an outgoing friend request
+ */
+export const useDeleteV1FriendsRequestsId = <TError = InternalHandlerHttpErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteV1FriendsRequestsId>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalMutator>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteV1FriendsRequestsId>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteV1FriendsRequestsIdMutationOptions(options), queryClient);
+    }
     export type postV1FriendsRequestsIdAcceptResponse200 = {
   data: InternalHandlerHttpFriendshipResponse
   status: 200

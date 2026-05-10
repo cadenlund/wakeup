@@ -16,6 +16,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
+	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	convsvc "github.com/cadenlund/wakeup/apps/backend/internal/service/conversation"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/room"
@@ -33,6 +34,7 @@ type stack struct {
 	convSvc *convsvc.Service
 	convs   *convrepo.Queries
 	users   *userrepo.Queries
+	friends *friendrepo.Queries
 	rdb     *redis.Client
 	pool    *pgxpool.Pool
 	now     time.Time
@@ -43,8 +45,9 @@ func newStack(t *testing.T) *stack {
 	pool := testutil.NewTestDB(t)
 	users := userrepo.New(pool)
 	convs := convrepo.New(pool)
+	friends := friendrepo.New(pool)
 
-	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users})
+	convSvc, err := convsvc.New(convsvc.Config{Pool: pool, Convs: convs, Users: users, Friends: friends})
 	if err != nil {
 		t.Fatalf("convsvc.New: %v", err)
 	}
@@ -69,7 +72,23 @@ func newStack(t *testing.T) *stack {
 	}
 	return &stack{
 		svc: svc, convSvc: convSvc,
-		convs: convs, users: users, rdb: rdb, pool: pool, now: now,
+		convs: convs, users: users, friends: friends, rdb: rdb, pool: pool, now: now,
+	}
+}
+
+// makeFriendship establishes an accepted friendship via the repo —
+// the conv service's friends-only DM gate rejects pairs that
+// haven't friended each other.
+func makeFriendship(ctx context.Context, t *testing.T, st *stack, a, b uuid.UUID) {
+	t.Helper()
+	id := uuid.Must(uuid.NewV7())
+	if _, err := st.friends.Create(ctx, friendrepo.CreateParams{
+		ID: id, RequesterID: a, AddresseeID: b, Status: domain.FriendshipPending,
+	}); err != nil {
+		t.Fatalf("makeFriendship create: %v", err)
+	}
+	if _, err := st.friends.Accept(ctx, id); err != nil {
+		t.Fatalf("makeFriendship accept: %v", err)
 	}
 }
 
@@ -99,6 +118,7 @@ func makeUser(ctx context.Context, t *testing.T, st *stack) domain.User {
 
 func makeDirect(ctx context.Context, t *testing.T, st *stack, a, b domain.User) uuid.UUID {
 	t.Helper()
+	makeFriendship(ctx, t, st, a.ID, b.ID)
 	res, err := st.convSvc.Create(ctx, convsvc.CreateParams{
 		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
 	})

@@ -14,6 +14,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
+	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/friend"
@@ -25,6 +26,7 @@ type stack struct {
 	svc     *friend.Service
 	users   *userrepo.Queries
 	friends *friendrepo.Queries
+	convs   *convrepo.Queries
 	pool    *pgxpool.Pool
 }
 
@@ -33,11 +35,12 @@ func newStack(t *testing.T) *stack {
 	pool := testutil.NewTestDB(t)
 	users := userrepo.New(pool)
 	friends := friendrepo.New(pool)
-	svc, err := friend.New(friend.Config{Friends: friends, Users: users})
+	convs := convrepo.New(pool)
+	svc, err := friend.New(friend.Config{Friends: friends, Users: users, Convs: convs})
 	if err != nil {
 		t.Fatalf("friend.New: %v", err)
 	}
-	return &stack{svc: svc, users: users, friends: friends, pool: pool}
+	return &stack{svc: svc, users: users, friends: friends, convs: convs, pool: pool}
 }
 
 type fakePresence struct {
@@ -86,8 +89,9 @@ func stackWithPush(t *testing.T, presence *fakePresence, notifier *fakeNotifier)
 	pool := testutil.NewTestDB(t)
 	users := userrepo.New(pool)
 	friends := friendrepo.New(pool)
+	convs := convrepo.New(pool)
 	svc, err := friend.New(friend.Config{
-		Friends: friends, Users: users,
+		Friends: friends, Users: users, Convs: convs,
 		Presence: presence, Notifications: notifier,
 	})
 	if err != nil {
@@ -463,6 +467,103 @@ func TestUnfriend_Success(t *testing.T) {
 	}
 	if _, err := st.friends.GetByPair(ctx, a.ID, b.ID); !errors.Is(err, friendrepo.ErrNotFound) {
 		t.Errorf("after Unfriend, GetByPair = %v, want ErrNotFound", err)
+	}
+}
+
+// TestUnfriend_ClearsDirectKeepsGroup regresses the policy that an
+// unfriend drops every direct conversation between the pair (DM
+// history is no longer reachable per the friend-graph rule) but
+// leaves group conversations untouched.
+func TestUnfriend_ClearsDirectKeepsGroup(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	pending, _ := st.svc.SendRequest(ctx, a.ID, b.Username)
+	_, _ = st.svc.AcceptRequest(ctx, b.ID, pending.ID)
+
+	directID := uuid.Must(uuid.NewV7())
+	if _, err := st.convs.CreateConversation(ctx, convrepo.CreateParams{
+		ID: directID, Type: domain.ConversationDirect, CreatedBy: a.ID,
+	}); err != nil {
+		t.Fatalf("seed direct: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, directID, a.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed direct member a: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, directID, b.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed direct member b: %v", err)
+	}
+	groupName := "shared crew"
+	groupID := uuid.Must(uuid.NewV7())
+	if _, err := st.convs.CreateConversation(ctx, convrepo.CreateParams{
+		ID: groupID, Type: domain.ConversationGroup, Name: &groupName, CreatedBy: a.ID,
+	}); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, groupID, a.ID, domain.MemberRoleAdmin); err != nil {
+		t.Fatalf("seed group member a: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, groupID, b.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed group member b: %v", err)
+	}
+
+	if err := st.svc.Unfriend(ctx, a.ID, b.ID); err != nil {
+		t.Fatalf("Unfriend: %v", err)
+	}
+	if _, err := st.convs.GetConversation(ctx, directID); !errors.Is(err, convrepo.ErrNotFound) {
+		t.Errorf("direct conversation should be deleted, GetByID = %v", err)
+	}
+	if _, err := st.convs.GetConversation(ctx, groupID); err != nil {
+		t.Errorf("group conversation should survive unfriend, GetByID = %v", err)
+	}
+}
+
+// Same regression on Block — directs cleared, groups kept.
+func TestBlock_ClearsDirectKeepsGroup(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	pending, _ := st.svc.SendRequest(ctx, a.ID, b.Username)
+	_, _ = st.svc.AcceptRequest(ctx, b.ID, pending.ID)
+
+	directID := uuid.Must(uuid.NewV7())
+	if _, err := st.convs.CreateConversation(ctx, convrepo.CreateParams{
+		ID: directID, Type: domain.ConversationDirect, CreatedBy: a.ID,
+	}); err != nil {
+		t.Fatalf("seed direct: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, directID, a.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed direct member a: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, directID, b.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed direct member b: %v", err)
+	}
+	groupName := "still ours"
+	groupID := uuid.Must(uuid.NewV7())
+	if _, err := st.convs.CreateConversation(ctx, convrepo.CreateParams{
+		ID: groupID, Type: domain.ConversationGroup, Name: &groupName, CreatedBy: a.ID,
+	}); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, groupID, a.ID, domain.MemberRoleAdmin); err != nil {
+		t.Fatalf("seed group member a: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, groupID, b.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed group member b: %v", err)
+	}
+
+	if _, err := st.svc.Block(ctx, a.ID, b.ID); err != nil {
+		t.Fatalf("Block: %v", err)
+	}
+	if _, err := st.convs.GetConversation(ctx, directID); !errors.Is(err, convrepo.ErrNotFound) {
+		t.Errorf("direct conversation should be deleted on block, GetByID = %v", err)
+	}
+	if _, err := st.convs.GetConversation(ctx, groupID); err != nil {
+		t.Errorf("group conversation should survive block, GetByID = %v", err)
 	}
 }
 
@@ -984,6 +1085,7 @@ func TestNew_RejectsBadConfig(t *testing.T) {
 	}{
 		{"nil all", friend.Config{}},
 		{"nil users", friend.Config{Friends: &friendrepo.Queries{}}},
+		{"nil convs", friend.Config{Friends: &friendrepo.Queries{}, Users: &userrepo.Queries{}}},
 	}
 	for _, tc := range cases {
 		tc := tc

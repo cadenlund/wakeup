@@ -63,9 +63,9 @@ UPDATE users SET role = $2 WHERE id = $1 AND deleted_at IS NULL;
 UPDATE users SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: ListByPrefix :many
--- Trigram-indexed prefix search on (username, display_name). The pg_trgm
--- GIN index accelerates `ILIKE 'prefix%'` patterns against either column
--- (Postgres 9.1+). q="" returns all (non-deleted) users.
+-- Trigram-indexed substring search on (username, display_name). The
+-- pg_trgm GIN index accelerates `ILIKE '%q%'` patterns against either
+-- column (Postgres 9.1+). q="" returns all (non-deleted) users.
 -- $2/$3 are the (created_at, id) keyset cursor; pass NULL for first page.
 --
 -- Caller MUST pass $1 already escaped for LIKE — the Go layer replaces \,
@@ -77,8 +77,8 @@ FROM users
 WHERE deleted_at IS NULL
   AND (
     $1::text = ''
-    OR username ILIKE $1::text || '%' ESCAPE '\'
-    OR display_name ILIKE $1::text || '%' ESCAPE '\'
+    OR username ILIKE '%' || $1::text || '%' ESCAPE '\'
+    OR display_name ILIKE '%' || $1::text || '%' ESCAPE '\'
   )
   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
 ORDER BY created_at DESC, id DESC

@@ -30,10 +30,9 @@
 // pull-to-refresh because the search query already runs live off
 // every keystroke (debounced).
 import {
-  Check,
   ChevronDown,
   ChevronRight,
-  MoreHorizontal,
+  MoreVertical,
   Search,
   ShieldOff,
   UserMinus,
@@ -42,11 +41,13 @@ import {
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as React from 'react';
-import { ActivityIndicator, Modal, Pressable, RefreshControl, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendRow } from '@/components/friend-row';
+import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
 import { Button } from '@/components/ui/button';
+import { DrawerSheet } from '@/components/ui/drawer-sheet';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List, type ListRef } from '@/components/ui/list';
@@ -59,7 +60,6 @@ import {
   useDeleteV1FriendsUserId,
   useGetV1Friends,
   useGetV1FriendsRequests,
-  usePostV1FriendsRequests,
   usePostV1FriendsRequestsIdAccept,
   usePostV1FriendsRequestsIdDecline,
   usePostV1FriendsUserIdBlock,
@@ -70,6 +70,7 @@ import {
 } from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
+import { useFriendActions } from '@/lib/api/use-friend-actions';
 import type {
   InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendRequestsResponse,
@@ -98,16 +99,24 @@ type Row =
     }
   | { kind: 'friend'; key: string; friendship: Friendship; presence?: string }
   | { kind: 'request'; key: string; friendship: Friendship; direction: 'incoming' | 'outgoing' }
+  | { kind: 'show-all'; key: string; section: 'incoming' | 'outgoing'; label: string }
   | { kind: 'empty'; key: string; subtitle: string };
 
+// Top-N each request section truncates to before showing a
+// "Show N more requests" row. Friends section is uncapped — at
+// realistic scale users scroll their friends list, but they
+// rarely have so many pending requests that scanning the list
+// is a problem. Mirrors the global-search modal pattern.
+const VISIBLE_REQUESTS = 5;
+
 // Search-mode row variant — backend returns search hits in a flat
-// list, no headers.
+// list, no headers. `status` matches the shared FriendStatusAction
+// map; `self` is the only state outside that vocabulary (you
+// shouldn't befriend yourself), so it gets its own flag.
 type SearchRow = {
   user: UserRow;
-  // 'friend' | 'incoming' | 'outgoing' | 'self' | 'sent' (optimistic)
-  // | undefined (free to add).
-  relation?: 'friend' | 'incoming' | 'outgoing' | 'self' | 'sent';
-  pending?: boolean;
+  status?: FriendStatus;
+  isSelf?: boolean;
 };
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -156,41 +165,40 @@ export default function FriendsScreen() {
     return m;
   }, [presenceData]);
 
-  // Build a lookup of existing relationships so search-mode rows can
-  // render the right badge without an extra per-user request.
-  const relationByUserId = React.useMemo(() => {
-    const m = new Map<string, 'friend' | 'incoming' | 'outgoing'>();
+  // Build a lookup of existing relationships so search-mode rows
+  // can render the right affordance without an extra per-user
+  // request. Outgoing / incoming entries carry the friendship.id
+  // so the Unsend / Accept / Decline buttons can target the right
+  // row — same map shape FriendStatusAction consumes elsewhere.
+  const friendStatusByUserId = React.useMemo(() => {
+    const m = new Map<string, FriendStatus>();
     for (const f of friendsData?.data ?? []) {
-      if (f.user?.id) m.set(f.user.id, 'friend');
+      if (f.user?.id) m.set(f.user.id, { kind: 'friend' });
     }
     for (const f of requestsData?.incoming ?? []) {
-      if (f.user?.id) m.set(f.user.id, 'incoming');
+      if (f.user?.id && f.id) m.set(f.user.id, { kind: 'incoming', requestId: f.id });
     }
     for (const f of requestsData?.outgoing ?? []) {
-      if (f.user?.id) m.set(f.user.id, 'outgoing');
+      if (f.user?.id && f.id) m.set(f.user.id, { kind: 'outgoing', requestId: f.id });
     }
     return m;
   }, [friendsData, requestsData]);
 
-  // Optimistic local state for "just-sent" requests so the row flips
-  // immediately on Add tap. Cleared when the user clears the query.
-  const [optimisticSent, setOptimisticSent] = React.useState<Set<string>>(new Set());
-  const [pendingSend, setPendingSend] = React.useState<Set<string>>(new Set());
-
-  // Keep optimistic state pinned to the current search session — once
-  // they leave search mode, drop it so the next session starts clean.
-  React.useEffect(() => {
-    if (!isSearchMode) {
-      setOptimisticSent(new Set());
-    }
-  }, [isSearchMode]);
+  // friendActions handles in-flight pending + invalidation, so the
+  // row's status flips from `none` → `outgoing` automatically once
+  // requestsData refetches. No local optimisticSent state needed.
 
   const qc = useQueryClient();
-  const sendRequest = usePostV1FriendsRequests();
   const acceptRequest = usePostV1FriendsRequestsIdAccept();
   const declineRequest = usePostV1FriendsRequestsIdDecline();
   const unfriend = useDeleteV1FriendsUserId();
   const blockUser = usePostV1FriendsUserIdBlock();
+  // Shared friend-action hook — drives the trailing affordance on
+  // outgoing-request rows (Unsend) and supplies the per-row pending
+  // flag so the right pill spins. Same source of truth as the
+  // global search modal so a user who unsends from one surface
+  // sees the row clear from the other after invalidation lands.
+  const friendActions = useFriendActions();
 
   // Pending action set keyed by friendship id (for accept/decline) or
   // user id (for unfriend/block) so the row can show a disabled state
@@ -248,36 +256,6 @@ export default function FriendsScreen() {
       }
     },
     [openingDmFor, ensureDM, router, surfaceError]
-  );
-
-  const onAddFriend = React.useCallback(
-    async (user: UserRow) => {
-      if (!user.id || !user.username) return;
-      setPendingSend((prev) => {
-        const next = new Set(prev);
-        next.add(user.id!);
-        return next;
-      });
-      try {
-        await sendRequest.mutateAsync({ data: { username: user.username } });
-        setOptimisticSent((prev) => {
-          const next = new Set(prev);
-          next.add(user.id!);
-          return next;
-        });
-        await qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() });
-        toast.success('Request sent', `Waiting on @${user.username}`);
-      } catch (err) {
-        surfaceError(err, "Couldn't send the request — try again in a sec.");
-      } finally {
-        setPendingSend((prev) => {
-          const next = new Set(prev);
-          next.delete(user.id!);
-          return next;
-        });
-      }
-    },
-    [sendRequest, qc, surfaceError]
   );
 
   const onAcceptRequest = React.useCallback(
@@ -362,6 +340,22 @@ export default function FriendsScreen() {
   // — fine for now; persistence under STORAGE_KEYS lands when there
   // are more user-prefs to keep with it.
   const [collapsedSections, setCollapsedSections] = React.useState<Set<SectionId>>(new Set());
+  // "Show all" expansion for the request sections — independent of
+  // the chevron-collapse state above. Default is truncated to top
+  // VISIBLE_REQUESTS; tapping the show-all row promotes the
+  // section here and the rest of the rows render. Friends section
+  // is uncapped so it doesn't appear here.
+  const [expandedRequestSections, setExpandedRequestSections] = React.useState<
+    Set<'incoming' | 'outgoing'>
+  >(new Set());
+  const expandRequestSection = React.useCallback((section: 'incoming' | 'outgoing') => {
+    setExpandedRequestSections((prev) => {
+      if (prev.has(section)) return prev;
+      const next = new Set(prev);
+      next.add(section);
+      return next;
+    });
+  }, []);
   // Track the section that was just toggled (in either direction)
   // so the post-render effect can scroll its header to the top.
   // Without this, FlashList preserves the prior scroll offset:
@@ -390,6 +384,8 @@ export default function FriendsScreen() {
 
     if (incoming.length > 0) {
       const collapsed = collapsedSections.has('incoming');
+      const showAll = expandedRequestSections.has('incoming');
+      const visible = showAll ? incoming : incoming.slice(0, VISIBLE_REQUESTS);
       out.push({
         kind: 'header',
         key: 'h:incoming',
@@ -399,7 +395,7 @@ export default function FriendsScreen() {
         collapsed,
       });
       if (!collapsed) {
-        incoming.forEach((f, i) => {
+        visible.forEach((f, i) => {
           out.push({
             kind: 'request',
             key: `req:in:${f.id ?? f.user?.id ?? `idx-${i}`}`,
@@ -407,11 +403,22 @@ export default function FriendsScreen() {
             direction: 'incoming',
           });
         });
+        if (!showAll && incoming.length > VISIBLE_REQUESTS) {
+          const more = incoming.length - VISIBLE_REQUESTS;
+          out.push({
+            kind: 'show-all',
+            key: 'show-all:incoming',
+            section: 'incoming',
+            label: `Show ${more} more ${more === 1 ? 'request' : 'requests'}`,
+          });
+        }
       }
     }
 
     if (outgoing.length > 0) {
       const collapsed = collapsedSections.has('outgoing');
+      const showAll = expandedRequestSections.has('outgoing');
+      const visible = showAll ? outgoing : outgoing.slice(0, VISIBLE_REQUESTS);
       out.push({
         kind: 'header',
         key: 'h:outgoing',
@@ -421,7 +428,7 @@ export default function FriendsScreen() {
         collapsed,
       });
       if (!collapsed) {
-        outgoing.forEach((f, i) => {
+        visible.forEach((f, i) => {
           out.push({
             kind: 'request',
             key: `req:out:${f.id ?? f.user?.id ?? `idx-${i}`}`,
@@ -429,6 +436,15 @@ export default function FriendsScreen() {
             direction: 'outgoing',
           });
         });
+        if (!showAll && outgoing.length > VISIBLE_REQUESTS) {
+          const more = outgoing.length - VISIBLE_REQUESTS;
+          out.push({
+            kind: 'show-all',
+            key: 'show-all:outgoing',
+            section: 'outgoing',
+            label: `Show ${more} more ${more === 1 ? 'request' : 'requests'}`,
+          });
+        }
       }
     }
 
@@ -461,34 +477,41 @@ export default function FriendsScreen() {
     }
 
     return out;
-  }, [friendsData, requestsData, presenceByUser, collapsedSections]);
+  }, [friendsData, requestsData, presenceByUser, collapsedSections, expandedRequestSections]);
 
   const searchRows = React.useMemo<SearchRow[]>(() => {
     const users = searchData?.users ?? [];
-    return users
+    const mapped = users
       .filter((u) => u.id) // backend guarantees this; defensive
       .map<SearchRow>((u) => {
         if (me?.id && u.id === me.id) {
-          return { user: u, relation: 'self' };
+          return { user: u, isSelf: true };
         }
-        // Server-derived relation wins over the optimistic "sent"
-        // state — once requests refetches (or a 4.6 WS update flips
-        // them to friend / incoming), we stop pinning the row to
-        // "Pending". Optimistic state is only a fallback for the
-        // window between mutate and refetch settling.
-        const rel = u.id ? relationByUserId.get(u.id) : undefined;
-        if (rel) {
-          return { user: u, relation: rel };
-        }
-        if (u.id && optimisticSent.has(u.id)) {
-          return { user: u, relation: 'sent' };
-        }
-        return {
-          user: u,
-          pending: u.id ? pendingSend.has(u.id) : false,
-        };
+        const status = u.id ? friendStatusByUserId.get(u.id) : undefined;
+        if (status) return { user: u, status };
+        return { user: u };
       });
-  }, [searchData, me, relationByUserId, optimisticSent, pendingSend]);
+    // Prioritise friends > pending requests > strangers in the
+    // search results — typing a name is almost always "find my
+    // friend X" and seeing strangers above the friend match is
+    // the wrong answer. Backend search is sorted by created_at
+    // DESC; we re-sort here without changing the order within
+    // each tier (stable on backend's response order).
+    const tier = (r: SearchRow) => {
+      if (r.isSelf) return 4; // self at the bottom — opens nothing
+      if (r.status?.kind === 'friend') return 0;
+      if (r.status?.kind === 'incoming' || r.status?.kind === 'outgoing') return 1;
+      return 2; // strangers
+    };
+    return mapped
+      .map((r, idx) => ({ r, idx }))
+      .sort((a, b) => {
+        const t = tier(a.r) - tier(b.r);
+        if (t !== 0) return t;
+        return a.idx - b.idx;
+      })
+      .map(({ r }) => r);
+  }, [searchData, me, friendStatusByUserId]);
 
   const isInitialLoad =
     !isSearchMode &&
@@ -518,7 +541,10 @@ export default function FriendsScreen() {
           isFetching={searchQ.isFetching}
           isError={searchQ.isError}
           rows={searchRows}
-          onAdd={onAddFriend}
+          friendActions={friendActions}
+          onAcceptRequest={onAcceptRequest}
+          onDeclineRequest={onDeclineRequest}
+          pendingAction={pendingAction}
         />
       ) : isInitialLoad ? (
         <FriendsLoading />
@@ -530,8 +556,10 @@ export default function FriendsScreen() {
           onDecline={onDeclineRequest}
           onOpenMenu={setMenuTarget}
           onOpenDM={onOpenDMWithFriend}
+          friendActions={friendActions}
           menuOpen={!!menuTarget}
           onToggleSection={toggleSection}
+          onExpandRequestSection={expandRequestSection}
           refreshing={refreshing}
           onRefresh={onRefresh}
           justToggledRef={justToggledRef}
@@ -604,8 +632,10 @@ function SectionsPane({
   onDecline,
   onOpenMenu,
   onOpenDM,
+  friendActions,
   menuOpen,
   onToggleSection,
+  onExpandRequestSection,
   refreshing,
   onRefresh,
   justToggledRef,
@@ -616,11 +646,13 @@ function SectionsPane({
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
   onOpenDM: (friendUserId: string) => void;
+  friendActions: ReturnType<typeof useFriendActions>;
   // True while the bottom-sheet action menu is open. Threaded
   // through to RenderedRow so a Pressable's onPress can't race the
   // long-press → menu transition (CR #134).
   menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
+  onExpandRequestSection: (section: 'incoming' | 'outgoing') => void;
   refreshing: boolean;
   onRefresh: () => void;
   justToggledRef: React.MutableRefObject<SectionId | null>;
@@ -681,8 +713,10 @@ function SectionsPane({
           onDecline={onDecline}
           onOpenMenu={onOpenMenu}
           onOpenDM={onOpenDM}
+          friendActions={friendActions}
           menuOpen={menuOpen}
           onToggleSection={onToggleSection}
+          onExpandRequestSection={onExpandRequestSection}
         />
       )}
       refreshControl={refreshControl}
@@ -716,13 +750,19 @@ function SearchPane({
   isFetching,
   isError,
   rows,
-  onAdd,
+  friendActions,
+  onAcceptRequest,
+  onDeclineRequest,
+  pendingAction,
 }: {
   searchEnabled: boolean;
   isFetching: boolean;
   isError: boolean;
   rows: SearchRow[];
-  onAdd: (user: UserRow) => void;
+  friendActions: ReturnType<typeof useFriendActions>;
+  onAcceptRequest: (f: Friendship) => void;
+  onDeclineRequest: (f: Friendship) => void;
+  pendingAction: Set<string>;
 }) {
   const fg = useThemeColor('muted-foreground');
   if (!searchEnabled) {
@@ -762,56 +802,69 @@ function SearchPane({
     <List
       data={rows}
       keyExtractor={(r, i) => r.user.id ?? r.user.username ?? `idx-${i}`}
-      renderItem={({ item }) => <SearchResultRow row={item} onAdd={onAdd} />}
+      renderItem={({ item }) => (
+        <SearchResultRow
+          row={item}
+          friendActions={friendActions}
+          onAcceptRequest={onAcceptRequest}
+          onDeclineRequest={onDeclineRequest}
+          pendingAction={pendingAction}
+        />
+      )}
     />
   );
 }
 
-function SearchResultRow({ row, onAdd }: { row: SearchRow; onAdd: (user: UserRow) => void }) {
+function SearchResultRow({
+  row,
+  friendActions,
+  onAcceptRequest,
+  onDeclineRequest,
+  pendingAction,
+}: {
+  row: SearchRow;
+  friendActions: ReturnType<typeof useFriendActions>;
+  onAcceptRequest: (f: Friendship) => void;
+  onDeclineRequest: (f: Friendship) => void;
+  pendingAction: Set<string>;
+}) {
   const u = row.user;
+  // Only "you" stays a custom hint — every other relation maps
+  // onto the shared FriendStatusAction so search results feel
+  // identical to the section list and the global search modal.
   let trailing: React.ReactNode;
-  switch (row.relation) {
-    case 'self':
-      trailing = (
-        <Text variant="muted" className="text-xs">
-          You
-        </Text>
-      );
-      break;
-    case 'friend':
-      trailing = (
-        <Text variant="muted" className="text-xs">
-          Friend
-        </Text>
-      );
-      break;
-    case 'incoming':
-      trailing = (
-        <Text variant="muted" className="text-xs">
-          Wants to add you
-        </Text>
-      );
-      break;
-    case 'outgoing':
-    case 'sent':
-      trailing = (
-        <Text variant="muted" className="text-xs">
-          Pending
-        </Text>
-      );
-      break;
-    default:
-      trailing = (
-        <Button
-          size="sm"
-          variant="default"
-          disabled={row.pending}
-          onPress={() => onAdd(u)}
-          accessibilityLabel={`Send friend request to ${u.username ?? 'user'}`}
-          testID={`friend-add-${u.id ?? u.username}`}>
-          <Text>{row.pending ? 'Adding…' : 'Add'}</Text>
-        </Button>
-      );
+  if (row.isSelf) {
+    trailing = (
+      <Text variant="muted" className="text-xs">
+        You
+      </Text>
+    );
+  } else {
+    const fid = row.status?.kind !== 'friend' ? row.status?.requestId : undefined;
+    const acceptDisabled = fid ? pendingAction.has(fid) : false;
+    trailing = (
+      <FriendStatusAction
+        status={row.status}
+        username={u.username}
+        onAdd={friendActions.sendFriendRequest}
+        onCancel={friendActions.cancelFriendRequest}
+        isAdding={friendActions.isAddingFor(u.username)}
+        isCanceling={friendActions.isCancelingFor(fid)}
+        onAccept={() => {
+          if (row.status?.kind === 'incoming' && row.status.requestId) {
+            onAcceptRequest({ id: row.status.requestId, user: u });
+          }
+        }}
+        onDecline={() => {
+          if (row.status?.kind === 'incoming' && row.status.requestId) {
+            onDeclineRequest({ id: row.status.requestId, user: u });
+          }
+        }}
+        acceptDisabled={acceptDisabled}
+        incomingMode="actions"
+        testID={u.id ? `friend-search-${u.id}` : undefined}
+      />
+    );
   }
   return (
     <FriendRow
@@ -831,8 +884,10 @@ function RenderedRow({
   onDecline,
   onOpenMenu,
   onOpenDM,
+  friendActions,
   menuOpen,
   onToggleSection,
+  onExpandRequestSection,
 }: {
   row: Row;
   pendingAction: Set<string>;
@@ -840,8 +895,10 @@ function RenderedRow({
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
   onOpenDM: (friendUserId: string) => void;
+  friendActions: ReturnType<typeof useFriendActions>;
   menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
+  onExpandRequestSection: (section: 'incoming' | 'outgoing') => void;
 }) {
   switch (row.kind) {
     case 'header':
@@ -855,6 +912,8 @@ function RenderedRow({
       );
     case 'empty':
       return <SectionEmpty subtitle={row.subtitle} />;
+    case 'show-all':
+      return <ShowAllRow label={row.label} onPress={() => onExpandRequestSection(row.section)} />;
     case 'friend': {
       const u = row.friendship.user;
       const userId = u?.id;
@@ -878,63 +937,44 @@ function RenderedRow({
       const u = row.friendship.user;
       const fid = row.friendship.id;
       const inFlight = fid ? pendingAction.has(fid) : false;
-      const trailing =
-        row.direction === 'incoming' ? (
-          <RequestActions
-            disabled={inFlight}
-            onAccept={() => onAccept(row.friendship)}
-            onDecline={() => onDecline(row.friendship)}
-          />
-        ) : (
-          <Text variant="muted" className="text-xs">
-            Pending
-          </Text>
-        );
+      // Same trailing affordance as the global search modal —
+      // FriendStatusAction renders the right pill per status.
+      // Friends-tab incoming requests use the icon-button pair
+      // (accept/decline both inline) since this is THE surface
+      // for resolving requests; the search modal uses a hint.
+      const status: FriendStatus | undefined = fid
+        ? row.direction === 'incoming'
+          ? { kind: 'incoming', requestId: fid }
+          : { kind: 'outgoing', requestId: fid }
+        : undefined;
       return (
         <FriendRow
           displayName={u?.display_name}
           username={u?.username}
           avatarUrl={u?.avatar_url}
           hidePresence
-          trailing={trailing}
+          trailing={
+            <FriendStatusAction
+              status={status}
+              username={u?.username}
+              // Outgoing rows are the only state where Add fires;
+              // these rows are pending requests so the username
+              // path is dead. Wire to the shared hook for safety.
+              onAdd={friendActions.sendFriendRequest}
+              onCancel={friendActions.cancelFriendRequest}
+              isAdding={friendActions.isAddingFor(u?.username)}
+              isCanceling={friendActions.isCancelingFor(fid)}
+              onAccept={() => fid && onAccept(row.friendship)}
+              onDecline={() => fid && onDecline(row.friendship)}
+              acceptDisabled={inFlight}
+              incomingMode="actions"
+              testID={fid ? `friend-request-${fid}` : undefined}
+            />
+          }
         />
       );
     }
   }
-}
-
-function RequestActions({
-  disabled,
-  onAccept,
-  onDecline,
-}: {
-  disabled: boolean;
-  onAccept: () => void;
-  onDecline: () => void;
-}) {
-  const fg = useThemeColor('foreground');
-  return (
-    <>
-      <Button
-        size="icon"
-        variant="outline"
-        disabled={disabled}
-        onPress={onDecline}
-        accessibilityLabel="Decline friend request"
-        testID="friend-request-decline">
-        <X size={16} color={fg} />
-      </Button>
-      <Button
-        size="icon"
-        variant="default"
-        disabled={disabled}
-        onPress={onAccept}
-        accessibilityLabel="Accept friend request"
-        testID="friend-request-accept">
-        <Check size={16} color="#fff" />
-      </Button>
-    </>
-  );
 }
 
 function RowMenuButton({ disabled, onPress }: { disabled: boolean; onPress: () => void }) {
@@ -948,7 +988,7 @@ function RowMenuButton({ disabled, onPress }: { disabled: boolean; onPress: () =
       testID="friend-row-menu"
       hitSlop={6}
       className="h-8 w-8 items-center justify-center rounded-md active:bg-muted">
-      <MoreHorizontal size={18} color={mutedFg} />
+      <MoreVertical size={18} color={mutedFg} />
     </Pressable>
   );
 }
@@ -972,65 +1012,47 @@ function FriendActionMenu({
   const handle = target?.username ? `@${target.username}` : (target?.display_name ?? '');
   const inFlight = target?.id ? pendingAction.has(target.id) : false;
   return (
-    <Modal
-      visible={!!target}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-      // Stop scrolling underneath while the sheet is up.
-      statusBarTranslucent>
-      <Pressable
-        accessibilityLabel="Dismiss"
-        onPress={onClose}
-        className="flex-1 justify-end bg-black/40">
-        {/* Inner Pressable absorbs touches on the sheet itself so taps
-            inside don't bubble to the dimmer and dismiss it. */}
-        <Pressable onPress={() => {}} className="rounded-t-3xl bg-card">
-          <View className="items-center pt-3">
-            <View className="h-1 w-12 rounded-full bg-muted-foreground/30" />
-          </View>
-          <View className="px-4 pb-2 pt-3">
-            <Text variant="muted" className="text-center text-sm">
-              {handle}
-            </Text>
-          </View>
-          <View className="px-2 pb-6">
-            <Pressable
-              onPress={() => target && onUnfriend(target)}
-              disabled={inFlight}
-              accessibilityRole="button"
-              accessibilityLabel="Unfriend"
-              testID="friend-menu-unfriend"
-              className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
-              <UserMinus size={18} color={fg} />
-              <Text className="text-base">Unfriend</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => target && onBlock(target)}
-              disabled={inFlight}
-              accessibilityRole="button"
-              accessibilityLabel="Block"
-              testID="friend-menu-block"
-              className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
-              <ShieldOff size={18} color={destructive} />
-              <Text style={{ color: destructive }} className="text-base font-medium">
-                Block
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={onClose}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel"
-              testID="friend-menu-cancel"
-              className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
-              <Text style={{ color: mutedFg }} className="text-sm">
-                Cancel
-              </Text>
-            </Pressable>
-          </View>
+    <DrawerSheet visible={!!target} onClose={onClose}>
+      <View className="px-4 pb-2 pt-3">
+        <Text variant="muted" className="text-center text-sm">
+          {handle}
+        </Text>
+      </View>
+      <View className="px-2 pb-6">
+        <Pressable
+          onPress={() => target && onUnfriend(target)}
+          disabled={inFlight}
+          accessibilityRole="button"
+          accessibilityLabel="Unfriend"
+          testID="friend-menu-unfriend"
+          className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
+          <UserMinus size={18} color={fg} />
+          <Text className="text-base">Unfriend</Text>
         </Pressable>
-      </Pressable>
-    </Modal>
+        <Pressable
+          onPress={() => target && onBlock(target)}
+          disabled={inFlight}
+          accessibilityRole="button"
+          accessibilityLabel="Block"
+          testID="friend-menu-block"
+          className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
+          <ShieldOff size={18} color={destructive} />
+          <Text style={{ color: destructive }} className="text-base font-medium">
+            Block
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel"
+          testID="friend-menu-cancel"
+          className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
+          <Text style={{ color: mutedFg }} className="text-sm">
+            Cancel
+          </Text>
+        </Pressable>
+      </View>
+    </DrawerSheet>
   );
 }
 
@@ -1070,6 +1092,20 @@ function SectionHeader({
         {count}
       </Text>
     </Pressable>
+  );
+}
+
+// Tap target appended to a request section that's been truncated
+// to VISIBLE_REQUESTS rows. Click promotes the section into the
+// expanded set and the rest of the rows render in place.
+// Mirrors the global-search modal's <ShowAllRow> visual.
+function ShowAllRow({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <View className="px-4 py-2">
+      <Button size="sm" variant="ghost" onPress={onPress} accessibilityLabel={label}>
+        <Text className="text-primary">{label}</Text>
+      </Button>
+    </View>
   );
 }
 

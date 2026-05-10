@@ -115,7 +115,9 @@ func TestSmoke_AttachmentsGoldenPath(t *testing.T) {
 	}
 
 	// 7) Alice creates a direct with bob, sends a message linking the
-	// attachment → bob can now GET, carol still 404.
+	// attachment → bob can now GET, carol still 404. Friend the pair
+	// first or the create returns 403 (friends-only DM enforcement).
+	makeFriendsSmoke(t, srv, alice, bob, bobUsername)
 	directRow := mustPostJSON(t, alice, srv.URL+"/v1/conversations", map[string]any{
 		"type": "direct", "member_ids": []string{bobID},
 	}, http.StatusCreated)

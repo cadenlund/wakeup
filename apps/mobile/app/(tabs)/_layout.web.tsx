@@ -26,6 +26,7 @@ import {
   LogOut,
   MessageCircle,
   Moon,
+  Search,
   User,
   Users,
   type LucideIcon,
@@ -144,6 +145,27 @@ export default function TabsWebLayout() {
   // logout UX lands in Phase 11.6; this is the temporary surface.
   const qc = useQueryClient();
   const router = useRouter();
+
+  // ⌘K / Ctrl+K opens global search from anywhere in the app on
+  // web. Convention from Slack / Linear / Notion / GitHub. Bound
+  // at the layout level so it works regardless of which tab the
+  // user is on; the search route is itself idempotent (pushing
+  // it twice from inside the modal is a no-op since /search is
+  // already at the top of the stack).
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Holding the chord fires keydown on every OS-level repeat;
+      // skipping repeats prevents stacking router.push calls.
+      if (e.repeat) return;
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        router.push('/search');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [router]);
   const logout = usePostV1AuthLogout({
     mutation: {
       onSuccess: () => signedOut(qc, router),
@@ -194,6 +216,25 @@ export default function TabsWebLayout() {
               <ChevronLeft size={16} color={mutedFg} />
             )}
           </Pressable>
+        </View>
+
+        {/* Sidebar search trigger — sits between brand row and the
+            nav stack so it reads as the "global, anywhere" entry
+            point rather than another nav destination. The visual
+            mirrors the inline filter pills at the top of the chats
+            and friends tabs (rounded border, leading search icon,
+            placeholder text) so users recognise the affordance —
+            but it's a Pressable, not an Input: tap opens /search
+            (a centered modal card on web). On native this layout
+            is never rendered. */}
+        <View className="border-b border-border px-3 py-3">
+          <SidebarSearchTrigger
+            collapsed={collapsed}
+            onPress={() => router.push('/search')}
+            mutedFg={mutedFg}
+            labelStyle={labelStyle}
+            labelInteractive={!collapsed}
+          />
         </View>
 
         <View className="py-3">
@@ -263,6 +304,86 @@ function RowShell({ active, children }: { active?: boolean; children: React.Reac
       {children}
     </View>
   );
+}
+
+// Pressable styled like the inline filter inputs on chats/
+// friends so the affordance reads the same across the app — same
+// rounded border, same leading search icon, same placeholder
+// register. It's a button, not a text field: typing on the
+// /search modal happens after the route push.
+function SidebarSearchTrigger({
+  collapsed,
+  onPress,
+  mutedFg,
+  labelStyle,
+  labelInteractive,
+}: {
+  collapsed: boolean;
+  onPress: () => void;
+  mutedFg: string;
+  labelStyle: LabelStyle;
+  labelInteractive: boolean;
+}) {
+  // Collapsed: just the icon centered inside the same input-style
+  // pill so the affordance reads as a search box even when the
+  // sidebar is narrow — matches the chats/friends inline filter
+  // chrome (rounded border, muted background) so users recognise
+  // the icon as "this opens search" not "this is a nav row."
+  if (collapsed) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel="Search people, chats, messages"
+        testID="sidebar-search"
+        className="h-9 items-center justify-center rounded-md border border-input bg-background active:bg-muted">
+        <Search size={18} color={mutedFg} />
+      </Pressable>
+    );
+  }
+  // Show ⌘K on macOS, Ctrl K elsewhere. navigator.platform is
+  // deprecated but still present everywhere; userAgentData is
+  // safer when available.
+  const isMac = detectMac();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Search people, chats, messages"
+      testID="sidebar-search"
+      className="h-9 flex-row items-center gap-2 rounded-md border border-input bg-background pl-3 pr-1 active:bg-muted">
+      <Search size={16} color={mutedFg} />
+      {/* `flex: 1` lives in the inline style so the wrapper claims
+          the remaining row width even when reanimated's style
+          merging happens to drop NativeWind className-derived flex
+          on web. Without this the chip sometimes hugged the
+          placeholder text instead of pinning to the trailing edge. */}
+      <Animated.View
+        style={[labelStyle, { flex: 1 }]}
+        pointerEvents={labelInteractive ? 'auto' : 'none'}>
+        <Text numberOfLines={1} style={{ color: mutedFg }} className="text-sm">
+          Search
+        </Text>
+      </Animated.View>
+      {/* Shortcut chip pinned to the trailing edge of the pill. */}
+      <Animated.View style={labelStyle} pointerEvents="none">
+        <View className="rounded border border-border bg-muted/50 px-1.5 py-0.5">
+          <Text style={{ color: mutedFg }} className="text-[10px] font-medium tracking-wide">
+            {isMac ? '⌘K' : 'Ctrl K'}
+          </Text>
+        </View>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+function detectMac(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  // navigator.userAgentData is the modern shape; fall back to
+  // userAgent / platform on browsers that don't ship UA-CH yet.
+  const uaData = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData;
+  if (uaData?.platform) return /mac/i.test(uaData.platform);
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
 }
 
 function SidebarRow({

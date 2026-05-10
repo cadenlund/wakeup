@@ -215,18 +215,31 @@ export function AvatarPicker({ avatarUrl, displayName, size = DEFAULT_SIZE, test
         {hasAvatar ? 'Tap to change' : 'Tap to add a photo'}
       </Text>
 
-      {/* Action sheet — small, centred card with one row per
-          choice. Plain View instead of a Pressable wrapper around
-          the card so each row owns its own tap handling. */}
+      {/* Action sheet — bottom drawer on native, centered card on
+          web. The `sm:` breakpoint approach Tailwind would normally
+          handle here doesn't fire reliably on RN-web in every
+          configuration, so we branch explicitly on Platform.OS.
+          Plain View instead of a Pressable around the card so each
+          row owns its own tap handling. */}
       <Modal visible={sheetOpen} transparent animationType="fade" onRequestClose={closeSheet}>
-        <View className="flex-1 justify-end bg-black/50 sm:items-center sm:justify-center">
+        <View
+          className={
+            Platform.OS === 'web'
+              ? 'flex-1 items-center justify-center bg-black/40 p-4'
+              : 'flex-1 justify-end bg-black/40'
+          }>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Dismiss"
             onPress={closeSheet}
             className="absolute inset-0"
           />
-          <View className="w-full max-w-md rounded-t-3xl bg-card p-4 pb-8 sm:rounded-3xl sm:pb-4">
+          <View
+            className={
+              Platform.OS === 'web'
+                ? 'w-full max-w-md rounded-2xl bg-card p-4 shadow-2xl shadow-black/40'
+                : 'w-full rounded-t-3xl bg-card p-4 pb-8'
+            }>
             <Text className="px-2 pb-3 pt-1 text-sm font-semibold text-card-foreground">
               Profile picture
             </Text>

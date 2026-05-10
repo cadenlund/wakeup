@@ -56,6 +56,7 @@ func (h *FriendHandler) Mount(r chi.Router) {
 		r.Post("/requests", h.SendRequest)
 		r.Post("/requests/{id}/accept", h.AcceptRequest)
 		r.Post("/requests/{id}/decline", h.DeclineRequest)
+		r.Delete("/requests/{id}", h.CancelRequest)
 		r.Delete("/{user_id}", h.Unfriend)
 		r.Post("/{user_id}/block", h.Block)
 		r.Delete("/{user_id}/block", h.Unblock)
@@ -244,6 +245,41 @@ func (h *FriendHandler) AcceptRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, rendered)
+}
+
+// CancelRequest deletes a pending row from the requester's side.
+//
+// @Summary      Cancel an outgoing friend request
+// @Description  Deletes a pending friendship row that the caller sent. Only the requester may cancel; the addressee declines via the dedicated decline endpoint.
+// @Tags         friends
+// @Produce      json
+// @Security     CookieAuth
+// @Param        id               path     string  true   "Friendship id (UUID v7)"                          example("0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c")
+// @Param        Idempotency-Key  header   string  false  "Idempotency key (UUID v7); enables safe retries"  example("0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c")
+// @Success      204  "No Content"
+// @Header       204  {string}  X-Request-ID  "Echoed request id"
+// @Failure      400  {object}  ErrorResponse "Malformed friendship id"
+// @Failure      401  {object}  ErrorResponse "Not authenticated"
+// @Failure      409  {object}  ErrorResponse "Friend request is no longer cancelable (already accepted/declined, never existed, or owned by someone else)"
+// @Failure      429  {object}  ErrorResponse "Rate limited"
+// @Failure      500  {object}  ErrorResponse "Internal error"
+// @Router       /v1/friends/requests/{id} [delete]
+func (h *FriendHandler) CancelRequest(w http.ResponseWriter, r *http.Request) {
+	uid, err := h.auth.CurrentUser(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, r, apierror.BadRequest("id must be a valid UUID"))
+		return
+	}
+	if err := h.friends.CancelRequest(r.Context(), uid, id); err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteNoContent(w)
 }
 
 // DeclineRequest deletes a pending row. Only the addressee may decline.

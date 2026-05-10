@@ -18,13 +18,16 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Check, MessageCircle, Search, WifiOff, X } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
+import { FullWindowOverlay } from 'react-native-screens';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { Toast, toastConfig } from '@/components/toast-config';
 import { Avatar } from '@/components/ui/avatar';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import { ModalScreenShell } from '@/components/ui/modal-screen-shell';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import {
@@ -72,11 +75,12 @@ export default function NewConversationScreen() {
   );
   const isGroup = selectedIds.size >= 2;
   const overMemberCap = selectedIds.size > GROUP_MEMBER_MAX;
-  const canCreate =
-    !creating &&
-    selectedIds.size >= 1 &&
-    !overMemberCap &&
-    (!isGroup || groupName.trim().length > 0);
+  // Group name is optional — backend accepts unnamed groups and the
+  // chats list renders them with a "Alice, Bob, Carol and N more"
+  // title fallback (conversation-display.ts). Was gated on
+  // groupName.trim() being non-empty; that forced users to type
+  // something before they could even tap Create.
+  const canCreate = !creating && selectedIds.size >= 1 && !overMemberCap;
 
   const toggleSelect = React.useCallback((userId: string) => {
     setSelectedIds((prev) => {
@@ -113,9 +117,15 @@ export default function NewConversationScreen() {
     const memberIds = Array.from(selectedIds);
     setCreating(true);
     try {
+      // Group name is optional — omit when empty so the backend
+      // stores NULL and the chats list falls back to the
+      // member-name preview ("Alice, Bob, Carol and N more").
+      const trimmedName = groupName.trim();
       const res = (await create.mutateAsync({
         data: isGroup
-          ? { type: 'group', member_ids: memberIds, name: groupName.trim() }
+          ? trimmedName
+            ? { type: 'group', member_ids: memberIds, name: trimmedName }
+            : { type: 'group', member_ids: memberIds }
           : { type: 'direct', member_ids: memberIds },
       })) as InternalHandlerHttpConversationResponse | undefined;
       await qc.invalidateQueries({ queryKey: getGetV1ConversationsQueryKey() });
@@ -153,7 +163,11 @@ export default function NewConversationScreen() {
   );
 
   if (friendsQ.isLoading && !friendsQ.data) {
-    return <FullPaneLoading />;
+    return (
+      <ModalScreenShell onClose={onCancel}>
+        <FullPaneLoading />
+      </ModalScreenShell>
+    );
   }
   // Genuine empty list vs failed cold-load look identical without
   // the isError gate — both just have data === undefined / []. Show
@@ -161,56 +175,75 @@ export default function NewConversationScreen() {
   // failed; only fall through to "no friends yet" when we have a
   // confirmed empty array.
   if (friendsQ.isError && !friendsQ.data) {
-    return <FetchError onRetry={() => friendsQ.refetch()} onClose={onCancel} />;
+    return (
+      <ModalScreenShell onClose={onCancel}>
+        <FetchError onRetry={() => friendsQ.refetch()} onClose={onCancel} />
+      </ModalScreenShell>
+    );
   }
   if (friends.length === 0) {
-    return <NoFriends onClose={onCancel} />;
+    return (
+      <ModalScreenShell onClose={onCancel}>
+        <NoFriends onClose={onCancel} />
+      </ModalScreenShell>
+    );
   }
 
   return (
-    <View className="flex-1 bg-background">
-      <ModalHeader
-        canCreate={canCreate}
-        creating={creating}
-        onCancel={onCancel}
-        onCreate={onCreate}
-        ctaLabel={isGroup ? 'Create' : 'Start'}
-      />
+    <ModalScreenShell onClose={onCancel} testID="new-conversation-shell">
+      <View className="flex-1 bg-background">
+        <ModalHeader
+          canCreate={canCreate}
+          creating={creating}
+          onCancel={onCancel}
+          onCreate={onCreate}
+          ctaLabel={isGroup ? 'Create' : 'Start'}
+        />
 
-      {/* Selected pills strip — only when 1+ selected, gives the
-          user a visual confirmation of who's in the new conv. */}
-      {selectedFriends.length > 0 ? (
-        <SelectedStrip friends={selectedFriends} onRemove={(id) => toggleSelect(id)} />
+        {/* Selected pills strip — only when 1+ selected, gives the
+            user a visual confirmation of who's in the new conv. */}
+        {selectedFriends.length > 0 ? (
+          <SelectedStrip friends={selectedFriends} onRemove={(id) => toggleSelect(id)} />
+        ) : null}
+
+        {/* Group name field appears only at 2+ — DMs don't need a
+            name, and showing it for a 1-friend selection would be
+            cognitive noise. */}
+        {isGroup ? <GroupNameField value={groupName} onChange={setGroupName} /> : null}
+
+        {overMemberCap ? (
+          <View className="border-b border-border bg-destructive/10 px-4 py-2">
+            <Text variant="muted" className="text-center text-xs">
+              Groups can have at most {GROUP_MEMBER_MAX} other members.
+            </Text>
+          </View>
+        ) : null}
+
+        <SearchField value={query} onChange={setQuery} />
+
+        <List
+          data={filtered}
+          keyExtractor={(f, i) => f.user?.id ?? f.id ?? `idx-${i}`}
+          renderItem={({ item }) => (
+            <FriendCheckRow
+              friendship={item}
+              selected={!!item.user?.id && selectedIds.has(item.user.id)}
+              disabled={creating}
+              onToggle={() => item.user?.id && toggleSelect(item.user.id)}
+            />
+          )}
+        />
+      </View>
+      {/* FullWindowOverlay mounts above the iOS modal at the
+          window level so toasts pop ABOVE this screen's chrome.
+          iOS-only — the overlay is a no-op on Android, web uses
+          sonner via portal. */}
+      {Platform.OS === 'ios' ? (
+        <FullWindowOverlay>
+          <Toast config={toastConfig} topOffset={60} />
+        </FullWindowOverlay>
       ) : null}
-
-      {/* Group name field appears only at 2+ — DMs don't need a
-          name, and showing it for a 1-friend selection would be
-          cognitive noise. */}
-      {isGroup ? <GroupNameField value={groupName} onChange={setGroupName} /> : null}
-
-      {overMemberCap ? (
-        <View className="border-b border-border bg-destructive/10 px-4 py-2">
-          <Text variant="muted" className="text-center text-xs">
-            Groups can have at most {GROUP_MEMBER_MAX} other members.
-          </Text>
-        </View>
-      ) : null}
-
-      <SearchField value={query} onChange={setQuery} />
-
-      <List
-        data={filtered}
-        keyExtractor={(f, i) => f.user?.id ?? f.id ?? `idx-${i}`}
-        renderItem={({ item }) => (
-          <FriendCheckRow
-            friendship={item}
-            selected={!!item.user?.id && selectedIds.has(item.user.id)}
-            disabled={creating}
-            onToggle={() => item.user?.id && toggleSelect(item.user.id)}
-          />
-        )}
-      />
-    </View>
+    </ModalScreenShell>
   );
 }
 
@@ -352,7 +385,7 @@ function SelectedStrip({
             accessibilityRole="button"
             accessibilityLabel={`Remove ${handle}`}
             testID={`conversation-new-pill-${u.id}`}
-            className="flex-row items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1.5 active:bg-muted">
+            className="flex-row items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-1.5 active:bg-muted">
             <Avatar source={u.avatar_url} fallbackName={handle} size={20} />
             <Text className="text-sm">{handle}</Text>
             <X size={12} color={mutedFg} />

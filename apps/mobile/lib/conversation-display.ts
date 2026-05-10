@@ -81,21 +81,24 @@ export function conversationDisplay(
     };
   }
   // Unnamed group — fall back to a comma-joined preview of up to
-  // three member names so the row isn't empty.
+  // three member names with an "and N more" overflow indicator so
+  // the row reads as "you + these people" at a glance. Subtitle
+  // becomes the same "N members" line a named group uses, so the
+  // two shapes feel consistent.
   const previewNames = others
     .map((m) => m.user?.display_name?.trim() || m.user?.username?.trim())
     .filter((s): s is string => !!s);
-  const previewShown = previewNames.slice(0, 3).join(', ');
-  const remaining = previewNames.length - 3;
-  // "Caden, Test, Alice +2" when there's overflow; bare list when
-  // it all fits.
-  const subtitle = previewShown
+  const shownPreviewNames = previewNames.slice(0, 3);
+  const remaining = previewNames.length - shownPreviewNames.length;
+  const previewShown = shownPreviewNames.join(', ');
+  const title = previewShown
     ? remaining > 0
-      ? `${previewShown} +${remaining}`
+      ? `${previewShown} and ${remaining} more`
       : previewShown
-    : undefined;
+    : 'Group';
+  const subtitle = memberCount > 0 ? membersLabel(memberCount) : undefined;
   return {
-    title: previewShown || 'Group',
+    title,
     subtitle,
     avatarUrl: c.avatar_url,
     fallbackInitial: previewShown || 'G',

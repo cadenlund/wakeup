@@ -62,18 +62,26 @@ ORDER BY (m.pinned_at IS NOT NULL) DESC,
 LIMIT $4;
 
 -- name: SearchByUserAndName :many
--- Returns group conversations the user is a member of whose name
--- contains q (case-insensitive substring match). Direct conversations
--- don't have a name and are excluded — for those, search the friend
--- list (which surfaces the counterparty by display_name).
+-- Returns group conversations the user is a member of whose name OR
+-- any member's display_name / username contains q (case-insensitive
+-- substring match). Direct conversations don't have a name and are
+-- excluded — for those, search the friend list (which surfaces the
+-- counterparty by display_name).
 -- Used by GET /v1/search (mobile §5.1).
-SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
+SELECT DISTINCT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
 FROM conversations c
-JOIN conversation_members m ON m.conversation_id = c.id
-WHERE m.user_id = $1
-  AND c.type = 'group'
-  AND c.name ILIKE '%' || $2::text || '%'
+JOIN conversation_members caller ON caller.conversation_id = c.id AND caller.user_id = $1
+LEFT JOIN conversation_members other_m
+  ON other_m.conversation_id = c.id
+ AND other_m.user_id <> $1
+LEFT JOIN users other_u ON other_u.id = other_m.user_id
+WHERE c.type = 'group'
+  AND (
+    c.name ILIKE '%' || $2::text || '%'
+    OR other_u.display_name ILIKE '%' || $2::text || '%'
+    OR other_u.username ILIKE '%' || $2::text || '%'
+  )
 ORDER BY c.last_message_at DESC, c.id DESC
 LIMIT $3;
 

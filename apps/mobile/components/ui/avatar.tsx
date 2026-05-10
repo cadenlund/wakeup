@@ -35,18 +35,42 @@ function initialFor(name: string | null | undefined): string {
   return Array.from(trimmed)[0]!.toUpperCase();
 }
 
+// 1px primary-colored ring around every avatar. The ring serves
+// two purposes:
+//   1. Separates the avatar from a tinted surface (e.g. the
+//      `bg-primary/5` pinned-row band on the chats tab) so the
+//      photo doesn't bleed into the row.
+//   2. Reads as a brand accent on plain surfaces too, the same
+//      way the iOS Music app rings album artwork.
+//
+// Using `primary` works in both light and dark mode because the
+// token swaps with the theme. `card` would contrast on tinted
+// rows but be invisible on plain ones.
+const RING_WIDTH = 1;
+
 function Avatar({ source, fallbackName, size = 40, className, testID }: AvatarProps) {
-  const dim = { width: size, height: size, borderRadius: size / 2 };
+  // Subtract the ring from the inner image dimension so the outer
+  // box stays the same `size` callers asked for — keeps row
+  // alignment stable instead of growing every avatar by 2px.
+  // Clamp to a positive minimum so a tiny `size` (less than the
+  // ring's contribution) doesn't produce zero/negative width or
+  // text metrics.
+  const inner = Math.max(1, size - RING_WIDTH * 2);
+  const innerDim = { width: inner, height: inner, borderRadius: inner / 2 };
+  const outerDim = { width: size, height: size, borderRadius: size / 2 };
   const hasImage = !!source;
   return (
     <View
       testID={testID}
-      style={dim as ViewStyle}
-      className={cn('items-center justify-center overflow-hidden bg-muted', className)}>
+      style={outerDim as ViewStyle}
+      className={cn(
+        'items-center justify-center overflow-hidden border border-primary bg-muted',
+        className
+      )}>
       {hasImage ? (
         <Image
           source={{ uri: source! }}
-          style={dim}
+          style={innerDim}
           contentFit="cover"
           cachePolicy="memory-disk"
           transition={120}
@@ -54,7 +78,7 @@ function Avatar({ source, fallbackName, size = 40, className, testID }: AvatarPr
         />
       ) : (
         <Text
-          style={{ fontSize: size * 0.42, lineHeight: size * 0.5, includeFontPadding: false }}
+          style={{ fontSize: inner * 0.42, lineHeight: inner * 0.5, includeFontPadding: false }}
           className="font-semibold text-foreground/80">
           {initialFor(fallbackName)}
         </Text>

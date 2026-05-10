@@ -43,6 +43,10 @@ func TestSmoke_ConversationsGoldenPath(t *testing.T) {
 	carolID := whoami(t, srv, carol)
 	daveID := whoami(t, srv, dave)
 
+	// Friends-only DM enforcement: alice must friend bob first or the
+	// direct create returns 403.
+	makeFriendsSmoke(t, srv, alice, bob, bobUsername)
+
 	// 2) alice creates a direct with bob.
 	directRow := mustPostJSON(t, alice, srv.URL+"/v1/conversations", map[string]any{
 		"type":       "direct",
@@ -138,6 +142,29 @@ func registerSmoke(t *testing.T, srv *httptest.Server, username string) *http.Cl
 		"password":     "Password123!",
 	}, http.StatusCreated)
 	return c
+}
+
+// makeFriendsSmoke makes `requester` and the user with username
+// `addresseeUsername` an accepted friend pair via the public HTTP
+// endpoints — required before either can create a direct DM with
+// the other (POST /v1/conversations rejects non-friends with 403).
+func makeFriendsSmoke(
+	t *testing.T,
+	srv *httptest.Server,
+	requester *http.Client,
+	addressee *http.Client,
+	addresseeUsername string,
+) {
+	t.Helper()
+	pending := mustPostJSON(t, requester, srv.URL+"/v1/friends/requests", map[string]any{
+		"username": addresseeUsername,
+	}, http.StatusCreated)
+	id, ok := pending["id"].(string)
+	if !ok || id == "" {
+		t.Fatalf("makeFriendsSmoke: missing id in send-request: %#v", pending)
+	}
+	mustPostJSON(t, addressee, srv.URL+"/v1/friends/requests/"+id+"/accept",
+		nil, http.StatusOK)
 }
 
 // whoami returns the authenticated user's id by hitting /v1/auth/me.

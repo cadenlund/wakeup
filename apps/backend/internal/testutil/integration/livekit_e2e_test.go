@@ -99,6 +99,7 @@ func TestLiveKit_EndToEnd(t *testing.T) {
 	// the container's --dev mode.
 	aliceClient, alice := h.AuthClient(t)
 	bobClient, bob := h.AuthClient(t)
+	h.MakeFriendship(t, alice, bob)
 	res, err := h.ConvSvc.Create(context.Background(), conversation.CreateParams{
 		Type: domain.ConversationDirect, Creator: alice.ID, MemberIDs: []uuid.UUID{bob.ID},
 	})
