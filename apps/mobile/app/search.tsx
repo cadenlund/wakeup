@@ -157,10 +157,13 @@ export default function SearchModalScreen() {
   }, [friendsData, requestsData]);
 
   // Send + cancel friend-request actions live in the shared
-  // useFriendActions hook so toast vocabulary + cache invalidation
-  // are identical here and on the friends tab. Per-row pending
-  // checks scoped via isAddingFor / isCancelingFor.
-  const friendActions = useFriendActions();
+  // useFriendActions hook so cache invalidation is identical
+  // here and on the friends tab. Per-row pending checks scoped
+  // via isAddingFor / isCancelingFor. `silent: true` suppresses
+  // success toasts because the iOS modal renders above the root
+  // ToastRoot — toasts would land behind the drawer. The row's
+  // status flip (Add → Unsend) is the actual feedback users see.
+  const friendActions = useFriendActions({ silent: true });
 
   const goCancel = React.useCallback(() => {
     if (router.canGoBack()) router.back();

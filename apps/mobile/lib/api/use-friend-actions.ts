@@ -20,12 +20,22 @@ import {
 } from '@/lib/api/hooks/friends/friends';
 import { toast } from '@/lib/toast';
 
-export function useFriendActions() {
+type Options = {
+  /** Suppresses success toasts. Useful when the calling surface
+   * is itself a transient modal (e.g. /search on iOS) where the
+   * root-level toast renders behind the modal chrome and just
+   * confuses users. The row's status flip is feedback enough. */
+  silent?: boolean;
+};
+
+export function useFriendActions(opts: Options = {}) {
   const qc = useQueryClient();
+  const { silent } = opts;
 
   const send = usePostV1FriendsRequests({
     mutation: {
       onSuccess: (_data, vars) => {
+        if (silent) return;
         const username = vars?.data?.username;
         toast.success(username ? `Friend request sent to @${username}` : 'Friend request sent');
       },
@@ -43,6 +53,7 @@ export function useFriendActions() {
   const cancel = useDeleteV1FriendsRequestsId({
     mutation: {
       onSuccess: () => {
+        if (silent) return;
         toast.success('Friend request unsent');
       },
       onSettled: () => {
