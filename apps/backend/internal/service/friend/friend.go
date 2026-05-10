@@ -27,6 +27,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
+	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
@@ -50,6 +51,7 @@ type OfflinePusher interface {
 type Service struct {
 	friends       *friendrepo.Queries
 	users         *userrepo.Queries
+	convs         *convrepo.Queries
 	presence      PresenceLister
 	notifications OfflinePusher
 	logger        *slog.Logger
@@ -57,9 +59,13 @@ type Service struct {
 
 // Config builds the service. Presence + Notifications are optional —
 // when either is nil, the §11.5 offline-push fan-out becomes a no-op.
+// Convs is required: Unfriend / Block both clear DMs between the
+// pair, so the friend service needs the conversation repo to do the
+// cascading delete.
 type Config struct {
 	Friends       *friendrepo.Queries
 	Users         *userrepo.Queries
+	Convs         *convrepo.Queries
 	Presence      PresenceLister
 	Notifications OfflinePusher
 	Logger        *slog.Logger
@@ -73,6 +79,9 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Users == nil {
 		return nil, errors.New("friend: Config.Users is required")
 	}
+	if cfg.Convs == nil {
+		return nil, errors.New("friend: Config.Convs is required")
+	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -80,6 +89,7 @@ func New(cfg Config) (*Service, error) {
 	return &Service{
 		friends:       cfg.Friends,
 		users:         cfg.Users,
+		convs:         cfg.Convs,
 		presence:      cfg.Presence,
 		notifications: cfg.Notifications,
 		logger:        logger,
@@ -380,6 +390,15 @@ func (s *Service) Unfriend(ctx context.Context, actor, other uuid.UUID) error {
 		}
 		return apierror.Internal("delete friendship").WithCause(err)
 	}
+	// Clear any direct conversations between the pair — once the
+	// friendship is gone the DM thread is no longer reachable per
+	// the §1 friend-graph rule, and the product convention is to
+	// drop the history rather than leave an orphan thread visible
+	// in either user's chats list. Group conversations the pair
+	// shares are intentionally NOT touched.
+	if err := s.convs.DeleteDirectByPair(ctx, actor, other); err != nil {
+		return apierror.Internal("clear direct conversations").WithCause(err)
+	}
 	return nil
 }
 
@@ -439,6 +458,13 @@ func (s *Service) Block(ctx context.Context, actor, other uuid.UUID) (domain.Fri
 			return domain.Friendship{}, apierror.Conflict("block conflict — retry")
 		}
 		return domain.Friendship{}, apierror.Internal("create block row").WithCause(err)
+	}
+	// Same DM-clearing rule as Unfriend — block drops every direct
+	// conversation between the pair. Groups they share are kept;
+	// per product policy the user can leave those manually if they
+	// want to.
+	if err := s.convs.DeleteDirectByPair(ctx, actor, other); err != nil {
+		return domain.Friendship{}, apierror.Internal("clear direct conversations on block").WithCause(err)
 	}
 	return created, nil
 }

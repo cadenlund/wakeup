@@ -102,14 +102,20 @@ RETURNING avatar_url`
 // search visibility (Discord/Instagram convention). When $5 is NULL
 // the NOT EXISTS clause short-circuits true and no filtering happens
 // — that's the admin / system path that wants the full catalog.
+//
+// `ILIKE '%' || q || '%'` does substring matching, not just prefix.
+// Typing "den" finds "caden" — what users expect when searching
+// for a friend by partial name. Matches the contained-anywhere
+// behavior the conversation search uses for group member names so
+// the two sections feel consistent.
 const listByPrefixSQL = `-- name: ListByPrefix :many
 SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
 FROM users
 WHERE deleted_at IS NULL
   AND (
     $1::text = ''
-    OR username ILIKE $1::text || '%' ESCAPE '\'
-    OR display_name ILIKE $1::text || '%' ESCAPE '\'
+    OR username ILIKE '%' || $1::text || '%' ESCAPE '\'
+    OR display_name ILIKE '%' || $1::text || '%' ESCAPE '\'
   )
   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
   AND (

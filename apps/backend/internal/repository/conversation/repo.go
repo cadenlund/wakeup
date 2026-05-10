@@ -76,6 +76,19 @@ WHERE id = $1 AND last_message_at < $2`
 const deleteConversationSQL = `-- name: DeleteConversation :exec
 DELETE FROM conversations WHERE id = $1`
 
+// deleteDirectByPairSQL drops every direct conversation that has
+// BOTH a and b as members. Group conversations are unaffected —
+// they survive an unfriend/block between any two members per
+// product policy. Cascades through conversation_members and
+// messages on the FK.
+const deleteDirectByPairSQL = `-- name: DeleteDirectByPair :exec
+DELETE FROM conversations c
+WHERE c.type = 'direct'
+  AND EXISTS (SELECT 1 FROM conversation_members ma
+              WHERE ma.conversation_id = c.id AND ma.user_id = $1)
+  AND EXISTS (SELECT 1 FROM conversation_members mb
+              WHERE mb.conversation_id = c.id AND mb.user_id = $2)`
+
 // listConversationsByUserSQL hides direct conversations whose OTHER
 // member is in a 'blocked' friendship row with the caller — either
 // direction. Group conversations stay visible regardless of the
@@ -280,6 +293,18 @@ func (q *Queries) DeleteConversation(ctx context.Context, id uuid.UUID) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteDirectByPair removes every direct conversation that has
+// both `a` and `b` as members. Used by the friend service when an
+// unfriend or block between the pair clears their DM history.
+// Idempotent — no error when zero rows match (the pair may not
+// have a DM thread, which is fine).
+func (q *Queries) DeleteDirectByPair(ctx context.Context, a, b uuid.UUID) error {
+	if _, err := q.db.Exec(ctx, deleteDirectByPairSQL, a, b); err != nil {
+		return fmt.Errorf("conversation: delete direct by pair: %w", err)
 	}
 	return nil
 }

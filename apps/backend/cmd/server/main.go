@@ -223,7 +223,7 @@ func run() error {
 		return fmt.Errorf("presence service: %w", err)
 	}
 	friendSvc, err := friendsvc.New(friendsvc.Config{
-		Friends: friendsRepo, Users: users,
+		Friends: friendsRepo, Users: users, Convs: convsRepo,
 		Presence: presenceSvc, Notifications: notificationSvc, Logger: logger,
 	})
 	if err != nil {

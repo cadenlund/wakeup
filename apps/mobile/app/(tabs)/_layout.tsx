@@ -112,6 +112,12 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />
+      {/* The conversation thread lives inside (tabs) on web so the
+          sidebar stays visible when a chat is open. On native it
+          shouldn't appear in the tab bar — `href: null` excludes
+          it. The screen is reached via router.push from the chats
+          list either way. */}
+      <Tabs.Screen name="conversations/[id]" options={{ href: null }} />
     </Tabs>
   );
 }

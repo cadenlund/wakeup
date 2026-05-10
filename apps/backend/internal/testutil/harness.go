@@ -279,7 +279,7 @@ func New(t *testing.T) *Harness {
 		t.Fatalf("Harness: build presence service: %v", err)
 	}
 	friendSvc, err := friendsvc.New(friendsvc.Config{
-		Friends: friends, Users: users,
+		Friends: friends, Users: users, Convs: convs,
 		Presence: presenceSvc, Notifications: notificationSvc,
 	})
 	if err != nil {
