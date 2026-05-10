@@ -50,6 +50,21 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [setOsMode]);
 
+  // On web, mirror the theme attributes onto <html> so the
+  // `[data-theme="..."]:root` selectors in global.css match the
+  // document root. Without this the CSS variables only cascade
+  // inside the wrapping <View> (a <div>) below, and any content
+  // portaled to document.body — RN <Modal> overlays included —
+  // resolves bg-card / text-foreground / etc. to the defaults
+  // (white) instead of the active scheme. Native is unaffected
+  // because there's no DOM to mirror onto.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const html = document.documentElement;
+    html.setAttribute('data-theme', effective);
+    html.classList.toggle('dark', mode === 'dark');
+  }, [effective, mode]);
+
   // Resolve the active palette and shape it as `vars()` for native CSS
   // variable injection. Memoised on (effective, mode) so identity is
   // stable between unrelated re-renders — VariableContext consumers
