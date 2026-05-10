@@ -29,25 +29,16 @@
 // three relationship queries at once. Search mode doesn't expose a
 // pull-to-refresh because the search query already runs live off
 // every keystroke (debounced).
-import {
-  ChevronDown,
-  ChevronRight,
-  MoreVertical,
-  Search,
-  ShieldOff,
-  UserMinus,
-  Users,
-  X,
-} from 'lucide-react-native';
+import { ChevronDown, ChevronRight, Search, Users, X } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { FriendActionMenu, FriendRowMenuButton } from '@/components/friend-action-menu';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
 import { Button } from '@/components/ui/button';
-import { DrawerSheet } from '@/components/ui/drawer-sheet';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List, type ListRef } from '@/components/ui/list';
@@ -569,6 +560,7 @@ export default function FriendsScreen() {
           friendActions={friendActions}
           onAcceptRequest={onAcceptRequest}
           onDeclineRequest={onDeclineRequest}
+          onOpenMenu={setMenuTarget}
           pendingAction={pendingAction}
           onEndReached={() => {
             if (searchQ.hasNextPage && !searchQ.isFetchingNextPage) {
@@ -798,6 +790,7 @@ function SearchPane({
   friendActions,
   onAcceptRequest,
   onDeclineRequest,
+  onOpenMenu,
   pendingAction,
   onEndReached,
   isFetchingNextPage,
@@ -810,6 +803,7 @@ function SearchPane({
   friendActions: ReturnType<typeof useFriendActions>;
   onAcceptRequest: (f: Friendship) => void;
   onDeclineRequest: (f: Friendship) => void;
+  onOpenMenu: (u: UserRow) => void;
   pendingAction: Set<string>;
   onEndReached: () => void;
   isFetchingNextPage: boolean;
@@ -863,6 +857,7 @@ function SearchPane({
           friendActions={friendActions}
           onAcceptRequest={onAcceptRequest}
           onDeclineRequest={onDeclineRequest}
+          onOpenMenu={onOpenMenu}
           pendingAction={pendingAction}
         />
       )}
@@ -911,12 +906,14 @@ function SearchResultRow({
   friendActions,
   onAcceptRequest,
   onDeclineRequest,
+  onOpenMenu,
   pendingAction,
 }: {
   row: SearchRow;
   friendActions: ReturnType<typeof useFriendActions>;
   onAcceptRequest: (f: Friendship) => void;
   onDeclineRequest: (f: Friendship) => void;
+  onOpenMenu: (u: UserRow) => void;
   pendingAction: Set<string>;
 }) {
   const u = row.user;
@@ -930,8 +927,22 @@ function SearchResultRow({
         You
       </Text>
     );
+  } else if (row.status?.kind === 'friend') {
+    // Already a friend — surface the same trailing 3-dots menu the
+    // section list shows so the user can unfriend / block from
+    // here without leaving the search. Without this the row felt
+    // dead (no Add pill, no actions) when the matched user was
+    // already in the friend graph.
+    const inFlight = u.id ? pendingAction.has(u.id) : false;
+    trailing = (
+      <FriendRowMenuButton
+        disabled={inFlight}
+        onPress={() => onOpenMenu(u)}
+        testID={u.id ? `friend-search-${u.id}-menu` : undefined}
+      />
+    );
   } else {
-    const fid = row.status?.kind !== 'friend' ? row.status?.requestId : undefined;
+    const fid = row.status?.requestId;
     const acceptDisabled = fid ? pendingAction.has(fid) : false;
     trailing = (
       <FriendStatusAction
@@ -1019,7 +1030,9 @@ function RenderedRow({
           onPress={userId && !inFlight && !menuOpen ? () => onOpenDM(userId) : undefined}
           onLongPress={u ? () => onOpenMenu(u) : undefined}
           trailing={
-            u ? <RowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} /> : undefined
+            u ? (
+              <FriendRowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} />
+            ) : undefined
           }
         />
       );
@@ -1066,85 +1079,6 @@ function RenderedRow({
       );
     }
   }
-}
-
-function RowMenuButton({ disabled, onPress }: { disabled: boolean; onPress: () => void }) {
-  const mutedFg = useThemeColor('muted-foreground');
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel="More actions"
-      testID="friend-row-menu"
-      hitSlop={6}
-      className="h-8 w-8 items-center justify-center rounded-md active:bg-muted">
-      <MoreVertical size={18} color={mutedFg} />
-    </Pressable>
-  );
-}
-
-function FriendActionMenu({
-  target,
-  pendingAction,
-  onClose,
-  onUnfriend,
-  onBlock,
-}: {
-  target: UserRow | null;
-  pendingAction: Set<string>;
-  onClose: () => void;
-  onUnfriend: (u: UserRow) => void;
-  onBlock: (u: UserRow) => void;
-}) {
-  const fg = useThemeColor('foreground');
-  const destructive = useThemeColor('destructive');
-  const mutedFg = useThemeColor('muted-foreground');
-  const handle = target?.username ? `@${target.username}` : (target?.display_name ?? '');
-  const inFlight = target?.id ? pendingAction.has(target.id) : false;
-  return (
-    <DrawerSheet visible={!!target} onClose={onClose}>
-      <View className="px-4 pb-2 pt-3">
-        <Text variant="muted" className="text-center text-sm">
-          {handle}
-        </Text>
-      </View>
-      <View className="px-2 pb-6">
-        <Pressable
-          onPress={() => target && onUnfriend(target)}
-          disabled={inFlight}
-          accessibilityRole="button"
-          accessibilityLabel="Unfriend"
-          testID="friend-menu-unfriend"
-          className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
-          <UserMinus size={18} color={fg} />
-          <Text className="text-base">Unfriend</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => target && onBlock(target)}
-          disabled={inFlight}
-          accessibilityRole="button"
-          accessibilityLabel="Block"
-          testID="friend-menu-block"
-          className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
-          <ShieldOff size={18} color={destructive} />
-          <Text style={{ color: destructive }} className="text-base font-medium">
-            Block
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Cancel"
-          testID="friend-menu-cancel"
-          className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
-          <Text style={{ color: mutedFg }} className="text-sm">
-            Cancel
-          </Text>
-        </Pressable>
-      </View>
-    </DrawerSheet>
-  );
 }
 
 function SectionHeader({
