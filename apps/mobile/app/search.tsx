@@ -23,11 +23,13 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { ConciergeBell, MessageCircle, Search, Users as UsersIcon, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
+import { FullWindowOverlay } from 'react-native-screens';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { ConversationRow } from '@/components/conversation-row';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
+import { Toast, toastConfig } from '@/components/toast-config';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -157,13 +159,11 @@ export default function SearchModalScreen() {
   }, [friendsData, requestsData]);
 
   // Send + cancel friend-request actions live in the shared
-  // useFriendActions hook so cache invalidation is identical
-  // here and on the friends tab. Per-row pending checks scoped
-  // via isAddingFor / isCancelingFor. `silent: true` suppresses
-  // success toasts because the iOS modal renders above the root
-  // ToastRoot — toasts would land behind the drawer. The row's
-  // status flip (Add → Unsend) is the actual feedback users see.
-  const friendActions = useFriendActions({ silent: true });
+  // useFriendActions hook so cache invalidation + toast vocab
+  // match the friends tab. The toasts are mounted inside this
+  // screen via <FullWindowOverlay> below so they render on top
+  // of the iOS modal chrome.
+  const friendActions = useFriendActions();
 
   const goCancel = React.useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -341,6 +341,18 @@ export default function SearchModalScreen() {
           />
         )}
       </View>
+      {/* iOS native Modal hides the root <ToastRoot> behind the
+          modal chrome. <FullWindowOverlay> from react-native-
+          screens mounts a UIView at the WINDOW level — it sits
+          above any modal — so a Toast rendered inside it pops
+          on top of the search drawer. iOS-only because the
+          overlay primitive is a no-op on Android, and web
+          handles toasts via sonner+portal. */}
+      {Platform.OS === 'ios' ? (
+        <FullWindowOverlay>
+          <Toast config={toastConfig} topOffset={60} />
+        </FullWindowOverlay>
+      ) : null}
     </ModalScreenShell>
   );
 }

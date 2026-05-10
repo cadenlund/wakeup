@@ -231,15 +231,41 @@ func TestCreate_GroupSuccess(t *testing.T) {
 	}
 }
 
-func TestCreate_GroupRequiresName(t *testing.T) {
+// TestCreate_GroupAllowsNilName regresses the change that made
+// the group name optional on create — the mobile chats list
+// renders unnamed groups with a "first names + N more" title
+// fallback. Empty-string still rejects; only nil is accepted.
+func TestCreate_GroupAllowsNilName(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	st := newStack(t)
 	a := makeUser(ctx, t, st)
 	b := makeUser(ctx, t, st)
-	_, err := st.svc.Create(ctx, conversation.CreateParams{
+	got, err := st.svc.Create(ctx, conversation.CreateParams{
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, // no name
+	})
+	if err != nil {
+		t.Fatalf("expected nil-name group create to succeed, got %v", err)
+	}
+	if got.Conversation.Name != nil {
+		t.Errorf("Name = %v, want nil", got.Conversation.Name)
+	}
+}
+
+// Empty-string name is still rejected — that's a positive
+// signal of "I tried to set a name and it was empty," which
+// validateGroupName should treat as malformed.
+func TestCreate_GroupRejectsEmptyName(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	empty := ""
+	_, err := st.svc.Create(ctx, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID,
+		MemberIDs: []uuid.UUID{b.ID}, Name: &empty,
 	})
 	if asAPIError(t, err).Code != apierror.CodeValidation {
 		t.Errorf("Code = %q, want VALIDATION_FAILED", asAPIError(t, err).Code)

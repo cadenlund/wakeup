@@ -19,6 +19,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Check, MessageCircle, Search, WifiOff, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
+import { FullWindowOverlay } from 'react-native-screens';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { Toast, toastConfig } from '@/components/toast-config';
@@ -74,11 +75,12 @@ export default function NewConversationScreen() {
   );
   const isGroup = selectedIds.size >= 2;
   const overMemberCap = selectedIds.size > GROUP_MEMBER_MAX;
-  const canCreate =
-    !creating &&
-    selectedIds.size >= 1 &&
-    !overMemberCap &&
-    (!isGroup || groupName.trim().length > 0);
+  // Group name is optional — backend accepts unnamed groups and the
+  // chats list renders them with a "Alice, Bob, Carol and N more"
+  // title fallback (conversation-display.ts). Was gated on
+  // groupName.trim() being non-empty; that forced users to type
+  // something before they could even tap Create.
+  const canCreate = !creating && selectedIds.size >= 1 && !overMemberCap;
 
   const toggleSelect = React.useCallback((userId: string) => {
     setSelectedIds((prev) => {
@@ -115,9 +117,15 @@ export default function NewConversationScreen() {
     const memberIds = Array.from(selectedIds);
     setCreating(true);
     try {
+      // Group name is optional — omit when empty so the backend
+      // stores NULL and the chats list falls back to the
+      // member-name preview ("Alice, Bob, Carol and N more").
+      const trimmedName = groupName.trim();
       const res = (await create.mutateAsync({
         data: isGroup
-          ? { type: 'group', member_ids: memberIds, name: groupName.trim() }
+          ? trimmedName
+            ? { type: 'group', member_ids: memberIds, name: trimmedName }
+            : { type: 'group', member_ids: memberIds }
           : { type: 'direct', member_ids: memberIds },
       })) as InternalHandlerHttpConversationResponse | undefined;
       await qc.invalidateQueries({ queryKey: getGetV1ConversationsQueryKey() });
@@ -226,11 +234,15 @@ export default function NewConversationScreen() {
           )}
         />
       </View>
-      {/* Per-screen Toast so iOS modal toasts render above this
-          screen's chrome — see search.tsx for the rationale.
-          Smaller topOffset because the parent starts below the
-          iOS sheet's drag handle. */}
-      {Platform.OS !== 'web' ? <Toast config={toastConfig} topOffset={12} /> : null}
+      {/* FullWindowOverlay mounts above the iOS modal at the
+          window level so toasts pop ABOVE this screen's chrome.
+          iOS-only — the overlay is a no-op on Android, web uses
+          sonner via portal. */}
+      {Platform.OS === 'ios' ? (
+        <FullWindowOverlay>
+          <Toast config={toastConfig} topOffset={60} />
+        </FullWindowOverlay>
+      ) : null}
     </ModalScreenShell>
   );
 }

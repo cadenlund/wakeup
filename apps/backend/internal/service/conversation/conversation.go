@@ -204,7 +204,11 @@ func (s *Service) createDirect(ctx context.Context, p CreateParams) (CreateResul
 }
 
 func (s *Service) createGroup(ctx context.Context, p CreateParams) (CreateResult, error) {
-	if err := validateGroupName(p.Name, false); err != nil {
+	// Group name is optional on create — the mobile client renders
+	// unnamed groups with a "Alice, Bob, Carol and N more" title
+	// fallback. Update still requires a non-empty name when set
+	// (see validateGroupName(_, true) below).
+	if err := validateGroupName(p.Name, true); err != nil {
 		return CreateResult{}, err
 	}
 

@@ -186,7 +186,10 @@ func TestCreateConversation_MissingTarget(t *testing.T) {
 	assertCode(t, resp, http.StatusNotFound, apierror.CodeNotFound)
 }
 
-func TestCreateConversation_GroupRequiresName(t *testing.T) {
+// TestCreateConversation_GroupAllowsNoName regresses the change
+// that made group name optional on create — the chats list
+// renders unnamed groups with a member-name title fallback.
+func TestCreateConversation_GroupAllowsNoName(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
 	a, ua := h.AuthClient(t)
@@ -196,7 +199,17 @@ func TestCreateConversation_GroupRequiresName(t *testing.T) {
 		"type": "group", "member_ids": []uuid.UUID{ub.ID},
 	})
 	t.Cleanup(func() { _ = resp.Body.Close() })
-	assertCode(t, resp, http.StatusUnprocessableEntity, apierror.CodeValidation)
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	if got["type"] != "group" {
+		t.Errorf("type = %v, want group", got["type"])
+	}
+	if got["name"] != nil {
+		t.Errorf("name = %v, want nil", got["name"])
+	}
 }
 
 func TestCreateConversation_Unauthenticated(t *testing.T) {
