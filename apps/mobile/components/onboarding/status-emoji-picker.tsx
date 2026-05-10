@@ -80,79 +80,75 @@ export function StatusEmojiPicker({ value, onChange, disabled, testID }: Props) 
         ) : null}
       </Pressable>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
-        {/* Sibling layout: backdrop covers the screen for tap-to-
-            dismiss, card sits on top inside its own View. Wrapping
-            the card in a Pressable broke ScrollView gestures inside
-            it, so the card MUST be a plain View. Safe-area padding
-            keeps the Done button clear of the iPhone notch/home pill
-            while a max-h cap leaves visible breathing room above and
-            below — full-height looked oppressive on the test sim. */}
-        <View
-          className="flex-1 bg-black/50"
-          style={{
-            paddingTop: insets.top + 32,
-            paddingBottom: insets.bottom + 32,
-            paddingHorizontal: 16,
-          }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss emoji picker"
-            onPress={close}
-            className="absolute inset-0"
-          />
-          <View className="flex-1 items-center justify-center">
-            <View
-              className="w-full max-w-md overflow-hidden rounded-3xl bg-card shadow-2xl shadow-black/40"
-              style={{ maxHeight: 480 }}>
-              <View className="flex-row items-center justify-between px-5 pb-2 pt-4">
-                <Text className="text-base font-semibold text-card-foreground">
-                  What are you up to?
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Close emoji picker"
-                  hitSlop={10}
-                  onPress={close}>
-                  <Text className="text-sm font-medium text-muted-foreground">Done</Text>
-                </Pressable>
-              </View>
-              <ScrollView
-                className="px-5"
-                contentContainerClassName="gap-4 pb-6 pt-2"
-                showsVerticalScrollIndicator>
-                {EMOJI_GROUPS.map((group) => (
-                  <View key={group.label} className="gap-2">
-                    <Text variant="muted" className="text-xs uppercase">
-                      {group.label}
-                    </Text>
-                    <View className="flex-row flex-wrap" style={{ marginHorizontal: -4 }}>
-                      {group.emojis.map((emoji) => {
-                        const isSelected = emoji === value;
-                        return (
-                          <Pressable
-                            key={emoji}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Pick ${emoji}`}
-                            accessibilityState={{ selected: isSelected }}
-                            onPress={() => pick(emoji)}
-                            style={{ width: '12.5%', padding: 4 }}>
-                            <View
-                              className={`aspect-square items-center justify-center rounded-xl ${
-                                isSelected ? 'bg-primary/15' : 'bg-muted'
-                              }`}>
-                              <Text className="text-2xl">{emoji}</Text>
-                            </View>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-                ))}
-              </ScrollView>
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        onRequestClose={close}
+        statusBarTranslucent>
+        {/* Visual chrome matches the DrawerSheet primitive used
+            elsewhere — drag-handle pill, rounded-top card, bg-card
+            surface, bg-black/40 backdrop. The picker uses its own
+            Modal (instead of DrawerSheet) because the grid needs a
+            ScrollView, and wrapping the card in Pressable breaks
+            scroll gestures on iOS. */}
+        <Pressable
+          accessibilityLabel="Dismiss emoji picker"
+          onPress={close}
+          className="flex-1 justify-end bg-black/40">
+          <View
+            className="rounded-t-3xl bg-card"
+            style={{ maxHeight: 480, paddingBottom: insets.bottom }}>
+            <View className="items-center pt-3">
+              <View className="h-1 w-12 rounded-full bg-muted-foreground/30" />
             </View>
+            <View className="flex-row items-center justify-between px-5 pb-2 pt-3">
+              <Text className="text-base font-semibold text-card-foreground">
+                What are you up to?
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close emoji picker"
+                hitSlop={10}
+                onPress={close}>
+                <Text className="text-sm font-medium text-muted-foreground">Done</Text>
+              </Pressable>
+            </View>
+            <ScrollView
+              className="px-5"
+              contentContainerClassName="gap-4 pb-4 pt-2"
+              showsVerticalScrollIndicator>
+              {EMOJI_GROUPS.map((group) => (
+                <View key={group.label} className="gap-2">
+                  <Text variant="muted" className="text-xs uppercase">
+                    {group.label}
+                  </Text>
+                  <View className="flex-row flex-wrap" style={{ marginHorizontal: -4 }}>
+                    {group.emojis.map((emoji) => {
+                      const isSelected = emoji === value;
+                      return (
+                        <Pressable
+                          key={emoji}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Pick ${emoji}`}
+                          accessibilityState={{ selected: isSelected }}
+                          onPress={() => pick(emoji)}
+                          style={{ width: '12.5%', padding: 4 }}>
+                          <View
+                            className={`aspect-square items-center justify-center rounded-xl ${
+                              isSelected ? 'bg-primary/15' : 'bg-muted'
+                            }`}>
+                            <Text className="text-2xl">{emoji}</Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
           </View>
-        </View>
+        </Pressable>
       </Modal>
     </>
   );

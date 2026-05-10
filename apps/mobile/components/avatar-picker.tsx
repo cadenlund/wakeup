@@ -20,9 +20,10 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, ImagePlus, Trash2 } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { DrawerSheet } from '@/components/ui/drawer-sheet';
 import { Text } from '@/components/ui/text';
 import { getGetV1AuthMeQueryKey } from '@/lib/api/hooks/auth/auth';
 import { useDeleteV1UsersMeAvatar, usePostV1UsersMeAvatar } from '@/lib/api/hooks/users/users';
@@ -215,50 +216,45 @@ export function AvatarPicker({ avatarUrl, displayName, size = DEFAULT_SIZE, test
         {hasAvatar ? 'Tap to change' : 'Tap to add a photo'}
       </Text>
 
-      {/* Action sheet — small, centred card with one row per
-          choice. Plain View instead of a Pressable wrapper around
-          the card so each row owns its own tap handling. */}
-      <Modal visible={sheetOpen} transparent animationType="fade" onRequestClose={closeSheet}>
-        <View className="flex-1 justify-end bg-black/50 sm:items-center sm:justify-center">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss"
-            onPress={closeSheet}
-            className="absolute inset-0"
+      {/* Action sheet — uses the shared DrawerSheet so the look
+          matches the conversation overflow + friend unfriend/block
+          menus elsewhere in the app. */}
+      <DrawerSheet visible={sheetOpen} onClose={closeSheet} dismissLabel="Dismiss">
+        <View className="px-4 pb-2 pt-3">
+          <Text variant="muted" className="text-center text-sm">
+            Profile picture
+          </Text>
+        </View>
+        <View className="px-2 pb-6">
+          {Platform.OS !== 'web' ? (
+            <SheetRow Icon={Camera} label="Take a photo" onPress={onPickCamera} color={cardFg} />
+          ) : null}
+          <SheetRow
+            Icon={ImagePlus}
+            label="Choose from library"
+            onPress={onPickLibrary}
+            color={cardFg}
           />
-          <View className="w-full max-w-md rounded-t-3xl bg-card p-4 pb-8 sm:rounded-3xl sm:pb-4">
-            <Text className="px-2 pb-3 pt-1 text-sm font-semibold text-card-foreground">
-              Profile picture
-            </Text>
-
-            {Platform.OS !== 'web' ? (
-              <SheetRow Icon={Camera} label="Take a photo" onPress={onPickCamera} color={cardFg} />
-            ) : null}
+          {hasAvatar ? (
             <SheetRow
-              Icon={ImagePlus}
-              label="Choose from library"
-              onPress={onPickLibrary}
+              Icon={Trash2}
+              label="Remove photo"
+              destructive
+              onPress={onRemove}
               color={cardFg}
             />
-            {hasAvatar ? (
-              <SheetRow
-                Icon={Trash2}
-                label="Remove photo"
-                destructive
-                onPress={onRemove}
-                color={cardFg}
-              />
-            ) : null}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Cancel"
-              onPress={closeSheet}
-              className="mt-2 items-center rounded-2xl bg-muted py-3">
-              <Text className="text-sm font-semibold text-card-foreground">Cancel</Text>
-            </Pressable>
-          </View>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            onPress={closeSheet}
+            className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
+            <Text variant="muted" className="text-sm">
+              Cancel
+            </Text>
+          </Pressable>
         </View>
-      </Modal>
+      </DrawerSheet>
     </View>
   );
 }
@@ -289,7 +285,7 @@ function SheetRow({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      className="flex-row items-center gap-3 rounded-2xl px-3 py-3 active:bg-muted">
+      className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
       <Icon size={20} color={tint} />
       <Text
         className={`text-base ${
