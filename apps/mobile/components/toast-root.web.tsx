@@ -44,8 +44,22 @@ export function ToastRoot() {
   // drawer overlays render on top of toasts. Returning null on the
   // SSR / pre-mount pass avoids hydration warnings.
   if (typeof document === 'undefined') return null;
+  // `style` attaches to sonner's toaster section. Forcing the
+  // max safe int as zIndex via inline style overrides the
+  // sonner.css default (999_999_999) — RN-web Modal renders into
+  // a portal whose children inherit position: fixed with a high
+  // implicit z-index, which on certain stacking-context paths
+  // ended up painting over the toast even though the static CSS
+  // value was nominally higher. Inline style guarantees the
+  // toast is drawn above any modal portal at body root.
   return createPortal(
-    <Toaster theme={mode} position="top-right" richColors closeButton />,
+    <Toaster
+      theme={mode}
+      position="top-right"
+      richColors
+      closeButton
+      style={{ zIndex: 2147483647 }}
+    />,
     document.body
   );
 }

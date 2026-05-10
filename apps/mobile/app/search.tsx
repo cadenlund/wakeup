@@ -28,6 +28,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ConversationRow } from '@/components/conversation-row';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
+import { Toast, toastConfig, TOAST_TOP_OFFSET } from '@/components/toast-config';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -338,6 +339,12 @@ export default function SearchModalScreen() {
           />
         )}
       </View>
+      {/* Native iOS modal overlays the React tree — toasts mounted
+          at the root layout sit BEHIND this screen's chrome. The
+          react-native-toast-message lib stacks refs and uses the
+          last-mounted instance, so this Toast wins while the
+          modal is open. Web isn't affected (sonner via portal). */}
+      {Platform.OS !== 'web' ? <Toast config={toastConfig} topOffset={TOAST_TOP_OFFSET} /> : null}
     </ModalScreenShell>
   );
 }
