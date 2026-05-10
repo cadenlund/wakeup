@@ -27,6 +27,8 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { ConversationRow } from '@/components/conversation-row';
 import { FriendRow } from '@/components/friend-row';
+import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List, type ListRef } from '@/components/ui/list';
@@ -35,16 +37,10 @@ import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import { getGetV1ConversationsQueryKey } from '@/lib/api/hooks/conversations/conversations';
-import {
-  getGetV1FriendsQueryKey,
-  getGetV1FriendsRequestsQueryKey,
-  useDeleteV1FriendsRequestsId,
-  useGetV1Friends,
-  useGetV1FriendsRequests,
-  usePostV1FriendsRequests,
-} from '@/lib/api/hooks/friends/friends';
+import { useGetV1Friends, useGetV1FriendsRequests } from '@/lib/api/hooks/friends/friends';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
+import { useFriendActions } from '@/lib/api/use-friend-actions';
 import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
@@ -65,14 +61,6 @@ const DEBOUNCE_MS = 200;
 const MIN_CHARS = 2;
 
 type SectionId = 'users' | 'conversations' | 'messages';
-
-// Caller's relationship to a user surfaced in the search hits.
-// Drives the trailing affordance per row (tap to DM, Add friend
-// button, Unsend button, or a dim "request received" chip).
-type FriendStatus =
-  | { kind: 'friend' }
-  | { kind: 'outgoing'; requestId: string }
-  | { kind: 'incoming'; requestId: string };
 
 type Row =
   | { kind: 'header'; key: string; title: string; count: number }
@@ -168,37 +156,11 @@ export default function SearchModalScreen() {
     return m;
   }, [friendsData, requestsData]);
 
-  // Send + cancel mutations for the user-row affordances. Both
-  // invalidate /v1/friends/requests on settle so the row's status
-  // chip flips after the round-trip lands. Toast wrapping comes
-  // from the global mutation cache (lib/api/query-client.ts).
-  const sendRequest = usePostV1FriendsRequests({
-    mutation: {
-      onSettled: () => {
-        void qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() });
-        void qc.invalidateQueries({ queryKey: getGetV1FriendsQueryKey() });
-      },
-    },
-  });
-  const cancelRequest = useDeleteV1FriendsRequestsId({
-    mutation: {
-      onSettled: () => {
-        void qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() });
-      },
-    },
-  });
-  const onAddFriend = React.useCallback(
-    (username: string) => {
-      sendRequest.mutate({ data: { username } });
-    },
-    [sendRequest]
-  );
-  const onUnsendRequest = React.useCallback(
-    (requestId: string) => {
-      cancelRequest.mutate({ id: requestId });
-    },
-    [cancelRequest]
-  );
+  // Send + cancel friend-request actions live in the shared
+  // useFriendActions hook so toast vocabulary + cache invalidation
+  // are identical here and on the friends tab. Per-row pending
+  // checks scoped via isAddingFor / isCancelingFor.
+  const friendActions = useFriendActions();
 
   const goCancel = React.useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -368,14 +330,7 @@ export default function SearchModalScreen() {
                 myUserId={me?.id}
                 presenceByUser={presenceByUser}
                 friendStatusByUser={friendStatusByUser}
-                onAddFriend={onAddFriend}
-                onUnsendRequest={onUnsendRequest}
-                addPendingForUserId={
-                  sendRequest.isPending ? sendRequest.variables?.data.username : undefined
-                }
-                cancelPendingForRequestId={
-                  cancelRequest.isPending ? cancelRequest.variables?.id : undefined
-                }
+                friendActions={friendActions}
                 onOpenConversation={dismissThenGoToConversation}
                 onExpandSection={expandSection}
               />
@@ -426,11 +381,12 @@ function buildRows(
       out.push({ kind: 'user', key: `user:${u.id ?? `idx-${i}`}`, user: u });
     });
     if (!showAll && users.length > VISIBLE_PER_SECTION) {
+      const more = users.length - VISIBLE_PER_SECTION;
       out.push({
         kind: 'show-all',
         key: 'show-all:users',
         section: 'users',
-        label: `Show all ${users.length} people`,
+        label: `Show ${more} more ${more === 1 ? 'user' : 'users'}`,
       });
     }
   }
@@ -453,11 +409,12 @@ function buildRows(
       });
     });
     if (!showAll && conversations.length > VISIBLE_PER_SECTION) {
+      const more = conversations.length - VISIBLE_PER_SECTION;
       out.push({
         kind: 'show-all',
         key: 'show-all:conversations',
         section: 'conversations',
-        label: `Show all ${conversations.length} chats`,
+        label: `Show ${more} more ${more === 1 ? 'chat' : 'chats'}`,
       });
     }
   }
@@ -480,11 +437,12 @@ function buildRows(
       });
     });
     if (!showAll && messages.length > VISIBLE_PER_SECTION) {
+      const more = messages.length - VISIBLE_PER_SECTION;
       out.push({
         kind: 'show-all',
         key: 'show-all:messages',
         section: 'messages',
-        label: `Show all ${messages.length} messages`,
+        label: `Show ${more} more ${more === 1 ? 'message' : 'messages'}`,
       });
     }
   }
@@ -501,10 +459,7 @@ function RenderedRow({
   myUserId,
   presenceByUser,
   friendStatusByUser,
-  onAddFriend,
-  onUnsendRequest,
-  addPendingForUserId,
-  cancelPendingForRequestId,
+  friendActions,
   onOpenConversation,
   onExpandSection,
 }: {
@@ -516,10 +471,7 @@ function RenderedRow({
   myUserId: string | undefined;
   presenceByUser: Map<string, string>;
   friendStatusByUser: Map<string, FriendStatus>;
-  onAddFriend: (username: string) => void;
-  onUnsendRequest: (requestId: string) => void;
-  addPendingForUserId: string | undefined;
-  cancelPendingForRequestId: string | undefined;
+  friendActions: ReturnType<typeof useFriendActions>;
   onOpenConversation: (conversationId: string) => void;
   onExpandSection: (section: SectionId) => void;
 }) {
@@ -562,15 +514,18 @@ function RenderedRow({
             hidePresence
             onPress={onTap}
             trailing={
-              <SearchUserTrailing
-                opening={opening}
+              <FriendStatusAction
                 status={status}
                 username={u.username}
-                userId={u.id}
-                onAddFriend={onAddFriend}
-                onUnsendRequest={onUnsendRequest}
-                addPendingForUserId={addPendingForUserId}
-                cancelPendingForRequestId={cancelPendingForRequestId}
+                busyLabel={opening ? 'Opening…' : undefined}
+                onAdd={friendActions.sendFriendRequest}
+                onCancel={friendActions.cancelFriendRequest}
+                isAdding={friendActions.isAddingFor(u.username)}
+                isCanceling={friendActions.isCancelingFor(
+                  status?.kind === 'outgoing' ? status.requestId : undefined
+                )}
+                incomingMode="hint"
+                testID={u.id ? `search-${u.id}` : undefined}
               />
             }
           />
@@ -657,90 +612,12 @@ function MessageHitRow({
   );
 }
 
-// Trailing affordance for a user row in the search results,
-// driven by the caller's friendship state with that user:
-//
-//   - already friends: nothing (the row tap opens the DM).
-//   - outgoing pending: small dim "Unsend" button → cancels.
-//   - incoming pending: dim "Wants to be friends" hint (no
-//     accept here; that lives on the friends tab so users learn
-//     one canonical surface for incoming requests).
-//   - none: primary "Add friend" pill → POST /friends/requests.
-//   - opening (DM is being created on tap): dim "Opening…" hint
-//     replaces everything else.
-function SearchUserTrailing({
-  opening,
-  status,
-  username,
-  userId,
-  onAddFriend,
-  onUnsendRequest,
-  addPendingForUserId,
-  cancelPendingForRequestId,
-}: {
-  opening: boolean;
-  status: FriendStatus | undefined;
-  username: string | undefined;
-  userId: string | undefined;
-  onAddFriend: (username: string) => void;
-  onUnsendRequest: (requestId: string) => void;
-  addPendingForUserId: string | undefined;
-  cancelPendingForRequestId: string | undefined;
-}) {
-  if (opening) {
-    return (
-      <Text variant="muted" className="text-xs">
-        Opening…
-      </Text>
-    );
-  }
-  if (status?.kind === 'friend') return null;
-  if (status?.kind === 'incoming') {
-    return (
-      <Text variant="muted" className="text-xs">
-        Sent you a request
-      </Text>
-    );
-  }
-  if (status?.kind === 'outgoing') {
-    const pending = cancelPendingForRequestId === status.requestId;
-    return (
-      <Pressable
-        onPress={() => onUnsendRequest(status.requestId)}
-        disabled={pending}
-        accessibilityRole="button"
-        accessibilityLabel="Unsend friend request"
-        testID={userId ? `search-unsend-${userId}` : 'search-unsend'}
-        className="rounded-md border border-border px-3 py-1.5 active:bg-muted">
-        <Text variant="muted" className="text-xs font-medium">
-          {pending ? 'Unsending…' : 'Unsend'}
-        </Text>
-      </Pressable>
-    );
-  }
-  // No relationship — render the Add Friend pill. Disabled when
-  // the username is missing (defensive — shouldn't happen) or a
-  // send mutation is already in flight for THIS user.
-  if (!username) return null;
-  const pending = addPendingForUserId === username;
-  return (
-    <Pressable
-      onPress={() => onAddFriend(username)}
-      disabled={pending}
-      accessibilityRole="button"
-      accessibilityLabel={`Send friend request to ${username}`}
-      testID={userId ? `search-add-${userId}` : 'search-add'}
-      className="rounded-md bg-primary px-3 py-1.5 active:opacity-80">
-      <Text className="text-xs font-semibold text-primary-foreground">
-        {pending ? 'Adding…' : 'Add friend'}
-      </Text>
-    </Pressable>
-  );
-}
-
 // Tap target appended to a section that has more results than
 // VISIBLE_PER_SECTION shows. Click promotes the section into the
-// expanded set and the rest of the hits render in place.
+// expanded set and the rest of the hits render in place. Renders
+// as a centered ghost-button strip so the affordance reads as a
+// secondary action (matches the friends-tab section affordances)
+// instead of a list row.
 function ShowAllRow({
   label,
   isFocused,
@@ -751,13 +628,11 @@ function ShowAllRow({
   onPress: () => void;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      className={`px-4 py-3 active:bg-muted ${isFocused ? 'bg-primary/10' : ''}`}>
-      <Text className="text-sm font-medium text-primary">{label}</Text>
-    </Pressable>
+    <View className={`px-4 py-2 ${isFocused ? 'bg-primary/10' : ''}`}>
+      <Button size="sm" variant="ghost" onPress={onPress} accessibilityLabel={label}>
+        <Text className="text-primary">{label}</Text>
+      </Button>
+    </View>
   );
 }
 

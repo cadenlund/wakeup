@@ -30,7 +30,6 @@
 // pull-to-refresh because the search query already runs live off
 // every keystroke (debounced).
 import {
-  Check,
   ChevronDown,
   ChevronRight,
   MoreHorizontal,
@@ -46,6 +45,7 @@ import { ActivityIndicator, Pressable, RefreshControl, View } from 'react-native
 import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendRow } from '@/components/friend-row';
+import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
 import { Button } from '@/components/ui/button';
 import { DrawerSheet } from '@/components/ui/drawer-sheet';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -71,6 +71,7 @@ import {
 } from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
+import { useFriendActions } from '@/lib/api/use-friend-actions';
 import type {
   InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendRequestsResponse,
@@ -192,6 +193,12 @@ export default function FriendsScreen() {
   const declineRequest = usePostV1FriendsRequestsIdDecline();
   const unfriend = useDeleteV1FriendsUserId();
   const blockUser = usePostV1FriendsUserIdBlock();
+  // Shared friend-action hook — drives the trailing affordance on
+  // outgoing-request rows (Unsend) and supplies the per-row pending
+  // flag so the right pill spins. Same source of truth as the
+  // global search modal so a user who unsends from one surface
+  // sees the row clear from the other after invalidation lands.
+  const friendActions = useFriendActions();
 
   // Pending action set keyed by friendship id (for accept/decline) or
   // user id (for unfriend/block) so the row can show a disabled state
@@ -531,6 +538,7 @@ export default function FriendsScreen() {
           onDecline={onDeclineRequest}
           onOpenMenu={setMenuTarget}
           onOpenDM={onOpenDMWithFriend}
+          friendActions={friendActions}
           menuOpen={!!menuTarget}
           onToggleSection={toggleSection}
           refreshing={refreshing}
@@ -605,6 +613,7 @@ function SectionsPane({
   onDecline,
   onOpenMenu,
   onOpenDM,
+  friendActions,
   menuOpen,
   onToggleSection,
   refreshing,
@@ -617,6 +626,7 @@ function SectionsPane({
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
   onOpenDM: (friendUserId: string) => void;
+  friendActions: ReturnType<typeof useFriendActions>;
   // True while the bottom-sheet action menu is open. Threaded
   // through to RenderedRow so a Pressable's onPress can't race the
   // long-press → menu transition (CR #134).
@@ -682,6 +692,7 @@ function SectionsPane({
           onDecline={onDecline}
           onOpenMenu={onOpenMenu}
           onOpenDM={onOpenDM}
+          friendActions={friendActions}
           menuOpen={menuOpen}
           onToggleSection={onToggleSection}
         />
@@ -832,6 +843,7 @@ function RenderedRow({
   onDecline,
   onOpenMenu,
   onOpenDM,
+  friendActions,
   menuOpen,
   onToggleSection,
 }: {
@@ -841,6 +853,7 @@ function RenderedRow({
   onDecline: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
   onOpenDM: (friendUserId: string) => void;
+  friendActions: ReturnType<typeof useFriendActions>;
   menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
 }) {
@@ -879,63 +892,44 @@ function RenderedRow({
       const u = row.friendship.user;
       const fid = row.friendship.id;
       const inFlight = fid ? pendingAction.has(fid) : false;
-      const trailing =
-        row.direction === 'incoming' ? (
-          <RequestActions
-            disabled={inFlight}
-            onAccept={() => onAccept(row.friendship)}
-            onDecline={() => onDecline(row.friendship)}
-          />
-        ) : (
-          <Text variant="muted" className="text-xs">
-            Pending
-          </Text>
-        );
+      // Same trailing affordance as the global search modal —
+      // FriendStatusAction renders the right pill per status.
+      // Friends-tab incoming requests use the icon-button pair
+      // (accept/decline both inline) since this is THE surface
+      // for resolving requests; the search modal uses a hint.
+      const status: FriendStatus | undefined = fid
+        ? row.direction === 'incoming'
+          ? { kind: 'incoming', requestId: fid }
+          : { kind: 'outgoing', requestId: fid }
+        : undefined;
       return (
         <FriendRow
           displayName={u?.display_name}
           username={u?.username}
           avatarUrl={u?.avatar_url}
           hidePresence
-          trailing={trailing}
+          trailing={
+            <FriendStatusAction
+              status={status}
+              username={u?.username}
+              // Outgoing rows are the only state where Add fires;
+              // these rows are pending requests so the username
+              // path is dead. Wire to the shared hook for safety.
+              onAdd={friendActions.sendFriendRequest}
+              onCancel={friendActions.cancelFriendRequest}
+              isAdding={friendActions.isAddingFor(u?.username)}
+              isCanceling={friendActions.isCancelingFor(fid)}
+              onAccept={() => fid && onAccept(row.friendship)}
+              onDecline={() => fid && onDecline(row.friendship)}
+              acceptDisabled={inFlight}
+              incomingMode="actions"
+              testID={fid ? `friend-request-${fid}` : undefined}
+            />
+          }
         />
       );
     }
   }
-}
-
-function RequestActions({
-  disabled,
-  onAccept,
-  onDecline,
-}: {
-  disabled: boolean;
-  onAccept: () => void;
-  onDecline: () => void;
-}) {
-  const fg = useThemeColor('foreground');
-  return (
-    <>
-      <Button
-        size="icon"
-        variant="outline"
-        disabled={disabled}
-        onPress={onDecline}
-        accessibilityLabel="Decline friend request"
-        testID="friend-request-decline">
-        <X size={16} color={fg} />
-      </Button>
-      <Button
-        size="icon"
-        variant="default"
-        disabled={disabled}
-        onPress={onAccept}
-        accessibilityLabel="Accept friend request"
-        testID="friend-request-accept">
-        <Check size={16} color="#fff" />
-      </Button>
-    </>
-  );
 }
 
 function RowMenuButton({ disabled, onPress }: { disabled: boolean; onPress: () => void }) {
