@@ -271,10 +271,10 @@ export default function SearchModalScreen() {
   const tappableRowIndices = React.useMemo(() => {
     const out: number[] = [];
     rows.forEach((r, i) => {
-      if (isTappableRow(r)) out.push(i);
+      if (isTappableRow(r, friendStatusByUser, me?.id)) out.push(i);
     });
     return out;
-  }, [rows]);
+  }, [rows, friendStatusByUser, me?.id]);
 
   const [focusedRowIdx, setFocusedRowIdx] = React.useState<number | null>(null);
   // Whenever results change, snap focus to the first tappable row
@@ -389,8 +389,21 @@ export default function SearchModalScreen() {
   );
 }
 
-function isTappableRow(r: Row): boolean {
-  if (r.kind === 'user') return !!r.user.id;
+function isTappableRow(
+  r: Row,
+  friendStatusByUser: Map<string, FriendStatus>,
+  myUserId: string | undefined
+): boolean {
+  if (r.kind === 'user') {
+    // The rendered user row only allows the row tap when the
+    // peer is an accepted friend AND not self. Mirror that here
+    // so ↓ + Enter on a non-friend hit doesn't drive ensureDM
+    // into a 403 / self-DM branch the rendered Pressable would
+    // have refused.
+    if (!r.user.id) return false;
+    if (myUserId && r.user.id === myUserId) return false;
+    return friendStatusByUser.get(r.user.id)?.kind === 'friend';
+  }
   if (r.kind === 'conversation') return !!r.conversation.id;
   if (r.kind === 'message') return !!r.message.conversation_id;
   if (r.kind === 'show-all') return true;

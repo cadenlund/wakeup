@@ -3868,7 +3868,13 @@ export interface paths {
         delete: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /**
+                     * @description Idempotency key (UUID v7); enables safe retries
+                     * @example 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c
+                     */
+                    "Idempotency-Key"?: string;
+                };
                 path: {
                     /**
                      * @description Friendship id (UUID v7)

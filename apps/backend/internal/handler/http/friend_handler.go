@@ -56,6 +56,7 @@ func (h *FriendHandler) Mount(r chi.Router) {
 		r.Post("/requests", h.SendRequest)
 		r.Post("/requests/{id}/accept", h.AcceptRequest)
 		r.Post("/requests/{id}/decline", h.DeclineRequest)
+		r.Delete("/requests/{id}", h.CancelRequest)
 		r.Delete("/{user_id}", h.Unfriend)
 		r.Post("/{user_id}/block", h.Block)
 		r.Delete("/{user_id}/block", h.Unblock)
@@ -253,7 +254,8 @@ func (h *FriendHandler) AcceptRequest(w http.ResponseWriter, r *http.Request) {
 // @Tags         friends
 // @Produce      json
 // @Security     CookieAuth
-// @Param        id   path     string  true  "Friendship id (UUID v7)"  example("0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c")
+// @Param        id               path     string  true   "Friendship id (UUID v7)"                          example("0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c")
+// @Param        Idempotency-Key  header   string  false  "Idempotency key (UUID v7); enables safe retries"  example("0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c")
 // @Success      204  "No Content"
 // @Header       204  {string}  X-Request-ID  "Echoed request id"
 // @Failure      400  {object}  ErrorResponse "Malformed friendship id"

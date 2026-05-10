@@ -536,8 +536,12 @@ func TestBlock_ClearsDirectKeepsGroup(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed direct: %v", err)
 	}
-	_, _ = st.convs.AddMember(ctx, directID, a.ID, domain.MemberRoleMember)
-	_, _ = st.convs.AddMember(ctx, directID, b.ID, domain.MemberRoleMember)
+	if _, err := st.convs.AddMember(ctx, directID, a.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed direct member a: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, directID, b.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed direct member b: %v", err)
+	}
 	groupName := "still ours"
 	groupID := uuid.Must(uuid.NewV7())
 	if _, err := st.convs.CreateConversation(ctx, convrepo.CreateParams{
@@ -545,8 +549,12 @@ func TestBlock_ClearsDirectKeepsGroup(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed group: %v", err)
 	}
-	_, _ = st.convs.AddMember(ctx, groupID, a.ID, domain.MemberRoleAdmin)
-	_, _ = st.convs.AddMember(ctx, groupID, b.ID, domain.MemberRoleMember)
+	if _, err := st.convs.AddMember(ctx, groupID, a.ID, domain.MemberRoleAdmin); err != nil {
+		t.Fatalf("seed group member a: %v", err)
+	}
+	if _, err := st.convs.AddMember(ctx, groupID, b.ID, domain.MemberRoleMember); err != nil {
+		t.Fatalf("seed group member b: %v", err)
+	}
 
 	if _, err := st.svc.Block(ctx, a.ID, b.ID); err != nil {
 		t.Fatalf("Block: %v", err)

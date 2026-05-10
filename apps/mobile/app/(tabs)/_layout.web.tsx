@@ -154,6 +154,9 @@ export default function TabsWebLayout() {
   // already at the top of the stack).
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Holding the chord fires keydown on every OS-level repeat;
+      // skipping repeats prevents stacking router.push calls.
+      if (e.repeat) return;
       const isMod = e.metaKey || e.ctrlKey;
       if (isMod && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();

@@ -223,8 +223,12 @@ func TestEditMessage_NonOwnerForbidden(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
 	a, ua := h.AuthClient(t)
-	bClient, _ := h.AuthClient(t)
-	_, ub := h.AuthClient(t)
+	// `bClient` is the editor; ub is BOTH that client's user AND
+	// the conversation's other member. The previous form used a
+	// stranger client that wasn't a conv member — that exercises
+	// the not-a-member branch, not the not-the-owner branch we
+	// actually want to lock in here.
+	bClient, ub := h.AuthClient(t)
 	h.MakeFriendship(t, ua, ub)
 	cid := requireCreateConversation(t, h, a, map[string]any{
 		"type": "direct", "member_ids": []uuid.UUID{ub.ID},

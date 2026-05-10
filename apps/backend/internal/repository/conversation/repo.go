@@ -129,7 +129,9 @@ SELECT DISTINCT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
 FROM conversations c
 JOIN conversation_members caller ON caller.conversation_id = c.id AND caller.user_id = $1
-LEFT JOIN conversation_members other_m ON other_m.conversation_id = c.id
+LEFT JOIN conversation_members other_m
+  ON other_m.conversation_id = c.id
+ AND other_m.user_id <> $1
 LEFT JOIN users other_u ON other_u.id = other_m.user_id
 WHERE c.type = 'group'
   AND (

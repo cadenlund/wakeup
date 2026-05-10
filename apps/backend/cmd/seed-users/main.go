@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/argon2id"
@@ -155,11 +156,11 @@ func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
 	}
-	// pgx wraps under fmt.Errorf("%w") — substring match on the
-	// SQLSTATE label is good enough for a seed tool.
-	msg := err.Error()
-	return strings.Contains(msg, "23505") ||
-		strings.Contains(strings.ToLower(msg), "duplicate key")
+	// Canonical pgx/v5 detection: unwrap to *pgconn.PgError and
+	// check the SQLSTATE code. Substring matching on err.Error()
+	// works but breaks if the message format ever changes.
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func fatal(logger *slog.Logger, msg string, err error) {

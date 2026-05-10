@@ -52,7 +52,10 @@ function Avatar({ source, fallbackName, size = 40, className, testID }: AvatarPr
   // Subtract the ring from the inner image dimension so the outer
   // box stays the same `size` callers asked for — keeps row
   // alignment stable instead of growing every avatar by 2px.
-  const inner = size - RING_WIDTH * 2;
+  // Clamp to a positive minimum so a tiny `size` (less than the
+  // ring's contribution) doesn't produce zero/negative width or
+  // text metrics.
+  const inner = Math.max(1, size - RING_WIDTH * 2);
   const innerDim = { width: inner, height: inner, borderRadius: inner / 2 };
   const outerDim = { width: size, height: size, borderRadius: size / 2 };
   const hasImage = !!source;

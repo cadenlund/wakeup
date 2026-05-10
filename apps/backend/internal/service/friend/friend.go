@@ -217,30 +217,23 @@ func (s *Service) AcceptRequest(ctx context.Context, actor uuid.UUID, friendship
 // the client a clear "you sent this" vs "they sent this" affordance
 // without inferring the relationship from the actor.
 //
+// The repo's DeletePendingByRequester is one atomic SQL statement —
+// status='pending' AND requester_id=actor are checked at row-lock
+// time, so an in-flight Accept by the addressee can't slip a row
+// out from under us between a read and a delete. ErrNotFound from
+// the repo is the "no longer cancelable" case; we surface it as
+// Conflict (the more specific 409 the client already handles for
+// stale request states).
+//
 // Errors:
-//   - row missing                  → apierror.NotFound
-//   - row not pending              → apierror.Conflict
-//   - actor is not the requester   → apierror.Forbidden
+//   - row no longer cancelable (already accepted, declined, never
+//     existed, or owned by a different requester) → apierror.Conflict
 func (s *Service) CancelRequest(ctx context.Context, actor, friendshipID uuid.UUID) error {
-	f, err := s.friends.GetByID(ctx, friendshipID)
-	if err != nil {
+	if err := s.friends.DeletePendingByRequester(ctx, friendshipID, actor); err != nil {
 		if errors.Is(err, friendrepo.ErrNotFound) {
-			return apierror.NotFound("friend request")
+			return apierror.Conflict("friend request is not pending or not owned by you")
 		}
-		return apierror.Internal("get friend request").WithCause(err)
-	}
-	if f.RequesterID != actor {
-		return apierror.Forbidden("only the requester can cancel this request")
-	}
-	if f.Status != domain.FriendshipPending {
-		return apierror.Conflict("friend request is not pending")
-	}
-	if err := s.friends.Delete(ctx, friendshipID); err != nil {
-		if errors.Is(err, friendrepo.ErrNotFound) {
-			// Already gone — idempotent.
-			return nil
-		}
-		return apierror.Internal("delete friend request").WithCause(err)
+		return apierror.Internal("cancel friend request").WithCause(err)
 	}
 	return nil
 }
