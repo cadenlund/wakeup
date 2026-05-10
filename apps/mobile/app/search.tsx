@@ -40,6 +40,7 @@ import { ConversationRow } from '@/components/conversation-row';
 import { FriendActionMenu, FriendRowMenuButton } from '@/components/friend-action-menu';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
+import { RelationshipBadge } from '@/components/relationship-badge';
 import { MuteSheet } from '@/components/mute-sheet';
 import { Toast, toastConfig } from '@/components/toast-config';
 import { Button } from '@/components/ui/button';
@@ -935,17 +936,45 @@ function RenderedRow({
             </Text>
           );
         } else if (isFriend) {
-          // Trailing 3-dots opens the same Unfriend / Block sheet
-          // the friends tab uses — gives the search modal feature
-          // parity with the section list.
+          // "Friend" badge + 3-dots Unfriend/Block sheet — same
+          // primitives the friends tab uses, with an explicit
+          // relationship label so the row reads as "this person is
+          // already in your graph" at a glance.
           trailing = (
-            <FriendRowMenuButton
-              disabled={inFlight}
-              onPress={() => onOpenFriendMenu(u)}
-              testID={u.id ? `search-${u.id}-menu` : undefined}
-            />
+            <View className="flex-row items-center gap-2">
+              <RelationshipBadge label="Friend" />
+              <FriendRowMenuButton
+                disabled={inFlight}
+                onPress={() => onOpenFriendMenu(u)}
+                testID={u.id ? `search-${u.id}-menu` : undefined}
+              />
+            </View>
+          );
+        } else if (status?.kind === 'outgoing') {
+          // Pending outgoing — "Added" badge alongside the existing
+          // Unsend pill (FriendStatusAction renders that for the
+          // outgoing kind). Mirrors the friends-tab search vocab.
+          trailing = (
+            <View className="flex-row items-center gap-2">
+              <RelationshipBadge label="Added" />
+              <FriendStatusAction
+                status={status}
+                username={u.username}
+                busyLabel={opening ? 'Opening…' : undefined}
+                onAdd={friendActions.sendFriendRequest}
+                onCancel={friendActions.cancelFriendRequest}
+                isAdding={friendActions.isAddingFor(u.username)}
+                isCanceling={friendActions.isCancelingFor(status.requestId)}
+                incomingMode="hint"
+                testID={u.id ? `search-${u.id}` : undefined}
+              />
+            </View>
           );
         } else {
+          // Status is now 'incoming' or undefined (friend and
+          // outgoing handled above). FriendStatusAction renders
+          // the "Sent you a request" hint for incoming and the
+          // "Add friend" pill when there's no relationship.
           trailing = (
             <FriendStatusAction
               status={status}
@@ -954,9 +983,7 @@ function RenderedRow({
               onAdd={friendActions.sendFriendRequest}
               onCancel={friendActions.cancelFriendRequest}
               isAdding={friendActions.isAddingFor(u.username)}
-              isCanceling={friendActions.isCancelingFor(
-                status?.kind === 'outgoing' ? status.requestId : undefined
-              )}
+              isCanceling={false}
               incomingMode="hint"
               testID={u.id ? `search-${u.id}` : undefined}
             />

@@ -38,6 +38,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { FriendActionMenu, FriendRowMenuButton } from '@/components/friend-action-menu';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
+import { RelationshipBadge } from '@/components/relationship-badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -571,6 +572,7 @@ export default function FriendsScreen() {
           onAcceptRequest={onAcceptRequest}
           onDeclineRequest={onDeclineRequest}
           onOpenMenu={setMenuTarget}
+          onOpenDM={onOpenDMWithFriend}
           pendingAction={pendingAction}
           onEndReached={() => {
             if (searchQ.hasNextPage && !searchQ.isFetchingNextPage) {
@@ -801,6 +803,7 @@ function SearchPane({
   onAcceptRequest,
   onDeclineRequest,
   onOpenMenu,
+  onOpenDM,
   pendingAction,
   onEndReached,
   isFetchingNextPage,
@@ -814,6 +817,7 @@ function SearchPane({
   onAcceptRequest: (f: Friendship) => void;
   onDeclineRequest: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
+  onOpenDM: (friendUserId: string) => void;
   pendingAction: Set<string>;
   onEndReached: () => void;
   isFetchingNextPage: boolean;
@@ -868,6 +872,7 @@ function SearchPane({
           onAcceptRequest={onAcceptRequest}
           onDeclineRequest={onDeclineRequest}
           onOpenMenu={onOpenMenu}
+          onOpenDM={onOpenDM}
           pendingAction={pendingAction}
         />
       )}
@@ -919,6 +924,7 @@ function SearchResultRow({
   onAcceptRequest,
   onDeclineRequest,
   onOpenMenu,
+  onOpenDM,
   pendingAction,
 }: {
   row: SearchRow;
@@ -926,6 +932,7 @@ function SearchResultRow({
   onAcceptRequest: (f: Friendship) => void;
   onDeclineRequest: (f: Friendship) => void;
   onOpenMenu: (u: UserRow) => void;
+  onOpenDM: (friendUserId: string) => void;
   pendingAction: Set<string>;
 }) {
   const u = row.user;
@@ -940,18 +947,41 @@ function SearchResultRow({
       </Text>
     );
   } else if (row.status?.kind === 'friend') {
-    // Already a friend — surface the same trailing 3-dots menu the
-    // section list shows so the user can unfriend / block from
-    // here without leaving the search. Without this the row felt
-    // dead (no Add pill, no actions) when the matched user was
-    // already in the friend graph.
+    // Already a friend — show a "Friend" badge alongside the
+    // 3-dots menu so the row reads as "this person is already in
+    // your graph." Without the badge the action affordance alone
+    // feels ambiguous (Instagram-style "Following" badge in their
+    // search list).
     const inFlight = u.id ? pendingAction.has(u.id) : false;
     trailing = (
-      <FriendRowMenuButton
-        disabled={inFlight}
-        onPress={() => onOpenMenu(u)}
-        testID={u.id ? `friend-search-${u.id}-menu` : undefined}
-      />
+      <View className="flex-row items-center gap-2">
+        <RelationshipBadge label="Friend" />
+        <FriendRowMenuButton
+          disabled={inFlight}
+          onPress={() => onOpenMenu(u)}
+          testID={u.id ? `friend-search-${u.id}-menu` : undefined}
+        />
+      </View>
+    );
+  } else if (row.status?.kind === 'outgoing') {
+    // Pending outgoing request — "Added" badge mirrors what the
+    // user said ("when u search that says friend or added"), with
+    // the existing Unsend pill kept as the actionable affordance.
+    const fid = row.status.requestId;
+    trailing = (
+      <View className="flex-row items-center gap-2">
+        <RelationshipBadge label="Added" />
+        <FriendStatusAction
+          status={row.status}
+          username={u.username}
+          onAdd={friendActions.sendFriendRequest}
+          onCancel={friendActions.cancelFriendRequest}
+          isAdding={friendActions.isAddingFor(u.username)}
+          isCanceling={friendActions.isCancelingFor(fid)}
+          incomingMode="actions"
+          testID={u.id ? `friend-search-${u.id}` : undefined}
+        />
+      </View>
     );
   } else {
     const fid = row.status?.requestId;
@@ -983,14 +1013,21 @@ function SearchResultRow({
   // Presence is friends-only — show the dot for friend rows so a
   // search hit reads like the section list. Strangers / pending /
   // self leave it hidden because their presence isn't subscribed.
-  const showPresence = row.status?.kind === 'friend';
+  const isFriend = row.status?.kind === 'friend';
+  // Tapping a friend hit opens the DM, mirroring the section
+  // list's row-tap behaviour. Non-friends, pending requests, and
+  // self leave the row tap-disabled — actions live in the trailing
+  // affordance for those cases.
+  const userId = u.id;
+  const onPress = isFriend && userId ? () => onOpenDM(userId) : undefined;
   return (
     <FriendRow
       displayName={u.display_name}
       username={u.username}
       avatarUrl={u.avatar_url}
-      presence={showPresence ? row.presence : undefined}
-      hidePresence={!showPresence}
+      presence={isFriend ? row.presence : undefined}
+      hidePresence={!isFriend}
+      onPress={onPress}
       trailing={trailing}
     />
   );
