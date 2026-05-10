@@ -20,7 +20,15 @@
 // Modal route — back / Cancel pops via canGoBack with a chats-tab
 // fallback, mirroring conversations/new's deep-link handling.
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ConciergeBell, MessageCircle, Search, Users as UsersIcon, X } from 'lucide-react-native';
+import {
+  ChevronDown,
+  ChevronRight,
+  ConciergeBell,
+  MessageCircle,
+  Search,
+  Users as UsersIcon,
+  X,
+} from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 import { FullWindowOverlay } from 'react-native-screens';
@@ -65,7 +73,14 @@ const MIN_CHARS = 2;
 type SectionId = 'users' | 'conversations' | 'messages';
 
 type Row =
-  | { kind: 'header'; key: string; title: string; count: number }
+  | {
+      kind: 'header';
+      key: string;
+      title: string;
+      count: number;
+      section: SectionId;
+      collapsed: boolean;
+    }
   | { kind: 'user'; key: string; user: InternalHandlerHttpUserResponse }
   | { kind: 'conversation'; key: string; conversation: InternalHandlerHttpSearchConversationRow }
   | { kind: 'message'; key: string; message: InternalHandlerHttpSearchMessageRow }
@@ -216,8 +231,16 @@ export default function SearchModalScreen() {
   // Reset on every new query so a section that was expanded for
   // one search doesn't carry over to the next.
   const [expandedSections, setExpandedSections] = React.useState<Set<SectionId>>(new Set());
+  // Section collapse — separate from `expandedSections` (which is
+  // about the truncate-to-5 cap). Tapping the chevron header
+  // hides every row in the section without losing its state, so
+  // the user can scan the other sections without scrolling past
+  // long results. Reset on every new query alongside the expand
+  // state so a fresh search starts everything visible.
+  const [collapsedSections, setCollapsedSections] = React.useState<Set<SectionId>>(new Set());
   React.useEffect(() => {
     setExpandedSections(new Set());
+    setCollapsedSections(new Set());
   }, [debouncedQuery]);
   const expandSection = React.useCallback((section: SectionId) => {
     setExpandedSections((prev) => {
@@ -227,10 +250,18 @@ export default function SearchModalScreen() {
       return next;
     });
   }, []);
+  const toggleSection = React.useCallback((section: SectionId) => {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  }, []);
 
   const rows = React.useMemo<Row[]>(
-    () => buildRows(data, expandedSections),
-    [data, expandedSections]
+    () => buildRows(data, expandedSections, collapsedSections),
+    [data, expandedSections, collapsedSections]
   );
 
   // Indices of tappable rows (skip headers — they're not actions).
@@ -336,6 +367,7 @@ export default function SearchModalScreen() {
                 friendActions={friendActions}
                 onOpenConversation={dismissThenGoToConversation}
                 onExpandSection={expandSection}
+                onToggleSection={toggleSection}
               />
             )}
           />
@@ -382,32 +414,44 @@ function stepFocus(
 
 function buildRows(
   data: InternalHandlerHttpSearchResponse | undefined,
-  expanded: Set<SectionId>
+  expanded: Set<SectionId>,
+  collapsed: Set<SectionId>
 ): Row[] {
   if (!data) return [];
   const out: Row[] = [];
 
   const users = data.users ?? [];
   if (users.length > 0) {
+    const isCollapsed = collapsed.has('users');
     const showAll = expanded.has('users');
     const visible = showAll ? users : users.slice(0, VISIBLE_PER_SECTION);
-    out.push({ kind: 'header', key: 'h:users', title: 'People', count: users.length });
-    visible.forEach((u, i) => {
-      out.push({ kind: 'user', key: `user:${u.id ?? `idx-${i}`}`, user: u });
+    out.push({
+      kind: 'header',
+      key: 'h:users',
+      title: 'People',
+      count: users.length,
+      section: 'users',
+      collapsed: isCollapsed,
     });
-    if (!showAll && users.length > VISIBLE_PER_SECTION) {
-      const more = users.length - VISIBLE_PER_SECTION;
-      out.push({
-        kind: 'show-all',
-        key: 'show-all:users',
-        section: 'users',
-        label: `Show ${more} more ${more === 1 ? 'user' : 'users'}`,
+    if (!isCollapsed) {
+      visible.forEach((u, i) => {
+        out.push({ kind: 'user', key: `user:${u.id ?? `idx-${i}`}`, user: u });
       });
+      if (!showAll && users.length > VISIBLE_PER_SECTION) {
+        const more = users.length - VISIBLE_PER_SECTION;
+        out.push({
+          kind: 'show-all',
+          key: 'show-all:users',
+          section: 'users',
+          label: `Show ${more} more ${more === 1 ? 'user' : 'users'}`,
+        });
+      }
     }
   }
 
   const conversations = data.conversations ?? [];
   if (conversations.length > 0) {
+    const isCollapsed = collapsed.has('conversations');
     const showAll = expanded.has('conversations');
     const visible = showAll ? conversations : conversations.slice(0, VISIBLE_PER_SECTION);
     out.push({
@@ -415,27 +459,32 @@ function buildRows(
       key: 'h:conversations',
       title: 'Chats',
       count: conversations.length,
+      section: 'conversations',
+      collapsed: isCollapsed,
     });
-    visible.forEach((c, i) => {
-      out.push({
-        kind: 'conversation',
-        key: `conv:${c.id ?? `idx-${i}`}`,
-        conversation: c,
+    if (!isCollapsed) {
+      visible.forEach((c, i) => {
+        out.push({
+          kind: 'conversation',
+          key: `conv:${c.id ?? `idx-${i}`}`,
+          conversation: c,
+        });
       });
-    });
-    if (!showAll && conversations.length > VISIBLE_PER_SECTION) {
-      const more = conversations.length - VISIBLE_PER_SECTION;
-      out.push({
-        kind: 'show-all',
-        key: 'show-all:conversations',
-        section: 'conversations',
-        label: `Show ${more} more ${more === 1 ? 'chat' : 'chats'}`,
-      });
+      if (!showAll && conversations.length > VISIBLE_PER_SECTION) {
+        const more = conversations.length - VISIBLE_PER_SECTION;
+        out.push({
+          kind: 'show-all',
+          key: 'show-all:conversations',
+          section: 'conversations',
+          label: `Show ${more} more ${more === 1 ? 'chat' : 'chats'}`,
+        });
+      }
     }
   }
 
   const messages = data.messages ?? [];
   if (messages.length > 0) {
+    const isCollapsed = collapsed.has('messages');
     const showAll = expanded.has('messages');
     const visible = showAll ? messages : messages.slice(0, VISIBLE_PER_SECTION);
     out.push({
@@ -443,22 +492,26 @@ function buildRows(
       key: 'h:messages',
       title: 'Messages',
       count: messages.length,
+      section: 'messages',
+      collapsed: isCollapsed,
     });
-    visible.forEach((m, i) => {
-      out.push({
-        kind: 'message',
-        key: `msg:${m.id ?? `idx-${i}`}`,
-        message: m,
+    if (!isCollapsed) {
+      visible.forEach((m, i) => {
+        out.push({
+          kind: 'message',
+          key: `msg:${m.id ?? `idx-${i}`}`,
+          message: m,
+        });
       });
-    });
-    if (!showAll && messages.length > VISIBLE_PER_SECTION) {
-      const more = messages.length - VISIBLE_PER_SECTION;
-      out.push({
-        kind: 'show-all',
-        key: 'show-all:messages',
-        section: 'messages',
-        label: `Show ${more} more ${more === 1 ? 'message' : 'messages'}`,
-      });
+      if (!showAll && messages.length > VISIBLE_PER_SECTION) {
+        const more = messages.length - VISIBLE_PER_SECTION;
+        out.push({
+          kind: 'show-all',
+          key: 'show-all:messages',
+          section: 'messages',
+          label: `Show ${more} more ${more === 1 ? 'message' : 'messages'}`,
+        });
+      }
     }
   }
 
@@ -477,6 +530,7 @@ function RenderedRow({
   friendActions,
   onOpenConversation,
   onExpandSection,
+  onToggleSection,
 }: {
   row: Row;
   isFocused: boolean;
@@ -489,12 +543,20 @@ function RenderedRow({
   friendActions: ReturnType<typeof useFriendActions>;
   onOpenConversation: (conversationId: string) => void;
   onExpandSection: (section: SectionId) => void;
+  onToggleSection: (section: SectionId) => void;
 }) {
   // Headers don't get the keyboard-focus highlight — only tappable
   // rows do, otherwise arrowing past a section title would land
   // the focus ring on a non-actionable strip.
   if (row.kind === 'header') {
-    return <SectionHeader title={row.title} count={row.count} />;
+    return (
+      <SectionHeader
+        title={row.title}
+        count={row.count}
+        collapsed={row.collapsed}
+        onToggle={() => onToggleSection(row.section)}
+      />
+    );
   }
   if (row.kind === 'show-all') {
     return (
@@ -660,16 +722,38 @@ function ShowAllRow({
   );
 }
 
-function SectionHeader({ title, count }: { title: string; count: number }) {
+function SectionHeader({
+  title,
+  count,
+  collapsed,
+  onToggle,
+}: {
+  title: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const mutedFg = useThemeColor('muted-foreground');
+  // Same chevron convention the friends tab uses for its
+  // disclosure headers — ChevronRight when closed, ChevronDown
+  // when open. Keeps the two collapse surfaces visually identical.
+  const Caret = collapsed ? ChevronRight : ChevronDown;
   return (
-    <View className="flex-row items-baseline justify-between border-b border-border bg-muted/30 px-4 py-2">
-      <Text variant="muted" className="text-xs font-semibold uppercase tracking-wider">
+    <Pressable
+      onPress={onToggle}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}, ${count} ${count === 1 ? 'item' : 'items'}`}
+      accessibilityState={{ expanded: !collapsed }}
+      testID={`search-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
+      className="flex-row items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 active:bg-muted">
+      <Caret size={14} color={mutedFg} />
+      <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}
       </Text>
       <Text variant="muted" className="text-xs">
         {count}
       </Text>
-    </View>
+    </Pressable>
   );
 }
 
