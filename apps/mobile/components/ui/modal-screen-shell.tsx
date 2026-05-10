@@ -11,6 +11,7 @@
 // chats-tab fallback).
 import * as React from 'react';
 import { Platform, Pressable, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const isWeb = Platform.OS === 'web';
 
@@ -46,8 +47,20 @@ export function ModalScreenShell({ onClose, maxHeightVh = 80, testID, children }
 
   // Native: the route's `presentation: 'modal'` gives us the iOS
   // bottom-sheet with system chrome (rounded top, status bar
-  // padding, drag-to-dismiss); just pass through.
-  if (!isWeb) return <>{children}</>;
+  // padding, drag-to-dismiss); just pass through. Android's
+  // 'modal' presentation, by contrast, animates fullscreen with
+  // no status-bar inset — so the search input + close button get
+  // covered by the system clock / battery icons. Pad the top by
+  // the insets value when running on Android. (Hook is also
+  // called on iOS to keep call order stable, but the value is 0
+  // there because the system chrome already inset us.)
+  const insets = useSafeAreaInsets();
+  if (!isWeb) {
+    if (Platform.OS === 'android') {
+      return <View style={{ flex: 1, paddingTop: insets.top }}>{children}</View>;
+    }
+    return <>{children}</>;
+  }
 
   // Web: backdrop + centered card. Pinned to the viewport via
   // `position: fixed` so it overlays whatever route is rendered
