@@ -46,6 +46,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
+import { Button } from '@/components/ui/button';
 import { DrawerSheet } from '@/components/ui/drawer-sheet';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
@@ -98,7 +99,15 @@ type Row =
     }
   | { kind: 'friend'; key: string; friendship: Friendship; presence?: string }
   | { kind: 'request'; key: string; friendship: Friendship; direction: 'incoming' | 'outgoing' }
+  | { kind: 'show-all'; key: string; section: 'incoming' | 'outgoing'; label: string }
   | { kind: 'empty'; key: string; subtitle: string };
+
+// Top-N each request section truncates to before showing a
+// "Show N more requests" row. Friends section is uncapped — at
+// realistic scale users scroll their friends list, but they
+// rarely have so many pending requests that scanning the list
+// is a problem. Mirrors the global-search modal pattern.
+const VISIBLE_REQUESTS = 5;
 
 // Search-mode row variant — backend returns search hits in a flat
 // list, no headers. `status` matches the shared FriendStatusAction
@@ -331,6 +340,22 @@ export default function FriendsScreen() {
   // — fine for now; persistence under STORAGE_KEYS lands when there
   // are more user-prefs to keep with it.
   const [collapsedSections, setCollapsedSections] = React.useState<Set<SectionId>>(new Set());
+  // "Show all" expansion for the request sections — independent of
+  // the chevron-collapse state above. Default is truncated to top
+  // VISIBLE_REQUESTS; tapping the show-all row promotes the
+  // section here and the rest of the rows render. Friends section
+  // is uncapped so it doesn't appear here.
+  const [expandedRequestSections, setExpandedRequestSections] = React.useState<
+    Set<'incoming' | 'outgoing'>
+  >(new Set());
+  const expandRequestSection = React.useCallback((section: 'incoming' | 'outgoing') => {
+    setExpandedRequestSections((prev) => {
+      if (prev.has(section)) return prev;
+      const next = new Set(prev);
+      next.add(section);
+      return next;
+    });
+  }, []);
   // Track the section that was just toggled (in either direction)
   // so the post-render effect can scroll its header to the top.
   // Without this, FlashList preserves the prior scroll offset:
@@ -359,6 +384,8 @@ export default function FriendsScreen() {
 
     if (incoming.length > 0) {
       const collapsed = collapsedSections.has('incoming');
+      const showAll = expandedRequestSections.has('incoming');
+      const visible = showAll ? incoming : incoming.slice(0, VISIBLE_REQUESTS);
       out.push({
         kind: 'header',
         key: 'h:incoming',
@@ -368,7 +395,7 @@ export default function FriendsScreen() {
         collapsed,
       });
       if (!collapsed) {
-        incoming.forEach((f, i) => {
+        visible.forEach((f, i) => {
           out.push({
             kind: 'request',
             key: `req:in:${f.id ?? f.user?.id ?? `idx-${i}`}`,
@@ -376,11 +403,22 @@ export default function FriendsScreen() {
             direction: 'incoming',
           });
         });
+        if (!showAll && incoming.length > VISIBLE_REQUESTS) {
+          const more = incoming.length - VISIBLE_REQUESTS;
+          out.push({
+            kind: 'show-all',
+            key: 'show-all:incoming',
+            section: 'incoming',
+            label: `Show ${more} more ${more === 1 ? 'request' : 'requests'}`,
+          });
+        }
       }
     }
 
     if (outgoing.length > 0) {
       const collapsed = collapsedSections.has('outgoing');
+      const showAll = expandedRequestSections.has('outgoing');
+      const visible = showAll ? outgoing : outgoing.slice(0, VISIBLE_REQUESTS);
       out.push({
         kind: 'header',
         key: 'h:outgoing',
@@ -390,7 +428,7 @@ export default function FriendsScreen() {
         collapsed,
       });
       if (!collapsed) {
-        outgoing.forEach((f, i) => {
+        visible.forEach((f, i) => {
           out.push({
             kind: 'request',
             key: `req:out:${f.id ?? f.user?.id ?? `idx-${i}`}`,
@@ -398,6 +436,15 @@ export default function FriendsScreen() {
             direction: 'outgoing',
           });
         });
+        if (!showAll && outgoing.length > VISIBLE_REQUESTS) {
+          const more = outgoing.length - VISIBLE_REQUESTS;
+          out.push({
+            kind: 'show-all',
+            key: 'show-all:outgoing',
+            section: 'outgoing',
+            label: `Show ${more} more ${more === 1 ? 'request' : 'requests'}`,
+          });
+        }
       }
     }
 
@@ -430,11 +477,11 @@ export default function FriendsScreen() {
     }
 
     return out;
-  }, [friendsData, requestsData, presenceByUser, collapsedSections]);
+  }, [friendsData, requestsData, presenceByUser, collapsedSections, expandedRequestSections]);
 
   const searchRows = React.useMemo<SearchRow[]>(() => {
     const users = searchData?.users ?? [];
-    return users
+    const mapped = users
       .filter((u) => u.id) // backend guarantees this; defensive
       .map<SearchRow>((u) => {
         if (me?.id && u.id === me.id) {
@@ -444,6 +491,26 @@ export default function FriendsScreen() {
         if (status) return { user: u, status };
         return { user: u };
       });
+    // Prioritise friends > pending requests > strangers in the
+    // search results — typing a name is almost always "find my
+    // friend X" and seeing strangers above the friend match is
+    // the wrong answer. Backend search is sorted by created_at
+    // DESC; we re-sort here without changing the order within
+    // each tier (stable on backend's response order).
+    const tier = (r: SearchRow) => {
+      if (r.isSelf) return 4; // self at the bottom — opens nothing
+      if (r.status?.kind === 'friend') return 0;
+      if (r.status?.kind === 'incoming' || r.status?.kind === 'outgoing') return 1;
+      return 2; // strangers
+    };
+    return mapped
+      .map((r, idx) => ({ r, idx }))
+      .sort((a, b) => {
+        const t = tier(a.r) - tier(b.r);
+        if (t !== 0) return t;
+        return a.idx - b.idx;
+      })
+      .map(({ r }) => r);
   }, [searchData, me, friendStatusByUserId]);
 
   const isInitialLoad =
@@ -492,6 +559,7 @@ export default function FriendsScreen() {
           friendActions={friendActions}
           menuOpen={!!menuTarget}
           onToggleSection={toggleSection}
+          onExpandRequestSection={expandRequestSection}
           refreshing={refreshing}
           onRefresh={onRefresh}
           justToggledRef={justToggledRef}
@@ -567,6 +635,7 @@ function SectionsPane({
   friendActions,
   menuOpen,
   onToggleSection,
+  onExpandRequestSection,
   refreshing,
   onRefresh,
   justToggledRef,
@@ -583,6 +652,7 @@ function SectionsPane({
   // long-press → menu transition (CR #134).
   menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
+  onExpandRequestSection: (section: 'incoming' | 'outgoing') => void;
   refreshing: boolean;
   onRefresh: () => void;
   justToggledRef: React.MutableRefObject<SectionId | null>;
@@ -646,6 +716,7 @@ function SectionsPane({
           friendActions={friendActions}
           menuOpen={menuOpen}
           onToggleSection={onToggleSection}
+          onExpandRequestSection={onExpandRequestSection}
         />
       )}
       refreshControl={refreshControl}
@@ -816,6 +887,7 @@ function RenderedRow({
   friendActions,
   menuOpen,
   onToggleSection,
+  onExpandRequestSection,
 }: {
   row: Row;
   pendingAction: Set<string>;
@@ -826,6 +898,7 @@ function RenderedRow({
   friendActions: ReturnType<typeof useFriendActions>;
   menuOpen: boolean;
   onToggleSection: (id: SectionId) => void;
+  onExpandRequestSection: (section: 'incoming' | 'outgoing') => void;
 }) {
   switch (row.kind) {
     case 'header':
@@ -839,6 +912,8 @@ function RenderedRow({
       );
     case 'empty':
       return <SectionEmpty subtitle={row.subtitle} />;
+    case 'show-all':
+      return <ShowAllRow label={row.label} onPress={() => onExpandRequestSection(row.section)} />;
     case 'friend': {
       const u = row.friendship.user;
       const userId = u?.id;
@@ -1017,6 +1092,20 @@ function SectionHeader({
         {count}
       </Text>
     </Pressable>
+  );
+}
+
+// Tap target appended to a request section that's been truncated
+// to VISIBLE_REQUESTS rows. Click promotes the section into the
+// expanded set and the rest of the rows render in place.
+// Mirrors the global-search modal's <ShowAllRow> visual.
+function ShowAllRow({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <View className="px-4 py-2">
+      <Button size="sm" variant="ghost" onPress={onPress} accessibilityLabel={label}>
+        <Text className="text-primary">{label}</Text>
+      </Button>
+    </View>
   );
 }
 
