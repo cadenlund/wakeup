@@ -151,8 +151,8 @@ function ConversationRow({
             accessibilityRole="button"
             accessibilityLabel={`More options for ${title}`}
             testID={testID ? `${testID}-more` : undefined}
-            hitSlop={10}
-            className="rounded-full p-1 active:bg-muted">
+            hitSlop={6}
+            className="h-8 w-8 items-center justify-center rounded-md active:bg-muted">
             <MoreVertical size={18} color={mutedFg} />
           </Pressable>
         ) : null}

@@ -32,7 +32,7 @@
 import {
   ChevronDown,
   ChevronRight,
-  MoreHorizontal,
+  MoreVertical,
   Search,
   ShieldOff,
   UserMinus,
@@ -913,7 +913,7 @@ function RowMenuButton({ disabled, onPress }: { disabled: boolean; onPress: () =
       testID="friend-row-menu"
       hitSlop={6}
       className="h-8 w-8 items-center justify-center rounded-md active:bg-muted">
-      <MoreHorizontal size={18} color={mutedFg} />
+      <MoreVertical size={18} color={mutedFg} />
     </Pressable>
   );
 }

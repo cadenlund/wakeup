@@ -385,7 +385,7 @@ function SelectedStrip({
             accessibilityRole="button"
             accessibilityLabel={`Remove ${handle}`}
             testID={`conversation-new-pill-${u.id}`}
-            className="flex-row items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1.5 active:bg-muted">
+            className="flex-row items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-1.5 active:bg-muted">
             <Avatar source={u.avatar_url} fallbackName={handle} size={20} />
             <Text className="text-sm">{handle}</Text>
             <X size={12} color={mutedFg} />
