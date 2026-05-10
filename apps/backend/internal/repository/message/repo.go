@@ -81,6 +81,17 @@ WHERE conversation_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $4`
 
+// countByConversationSQL mirrors listByConversationSQL minus the
+// keyset cursor + LIMIT — returns the absolute number of
+// messages in the conversation that match an optional body
+// substring filter. Drives the thread-screen scroll-to hints.
+const countByConversationSQL = `-- name: CountByConversation :one
+SELECT COUNT(*)
+FROM messages
+WHERE conversation_id = $1
+  AND deleted_at IS NULL
+  AND ($2::text = '' OR body ILIKE '%' || $2::text || '%')`
+
 const addAttachmentSQL = `-- name: AddAttachment :exec
 INSERT INTO message_attachments (message_id, attachment_id)
 VALUES ($1, $2)
@@ -136,6 +147,33 @@ WHERE m.deleted_at IS NULL
   )
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $3`
+
+// countSearchInUserConversationsSQL mirrors searchInUserConversationsSQL
+// without the LIMIT — returns the absolute number of matching
+// messages across every page. Drives the "showing 10 of N"
+// hint on the search modal.
+const countSearchInUserConversationsSQL = `-- name: CountSearchInUserConversations :one
+SELECT COUNT(*)
+FROM messages m
+JOIN conversation_members cm ON cm.conversation_id = m.conversation_id AND cm.user_id = $1
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.deleted_at IS NULL
+  AND m.body ILIKE '%' || $2::text || '%'
+  AND (
+    c.type <> 'direct'
+    OR NOT EXISTS (
+      SELECT 1
+      FROM conversation_members other
+      WHERE other.conversation_id = c.id
+        AND other.user_id <> $1
+        AND EXISTS (
+          SELECT 1 FROM friendships f
+          WHERE f.status = 'blocked'
+            AND ((f.requester_id = $1 AND f.addressee_id = other.user_id)
+              OR (f.requester_id = other.user_id AND f.addressee_id = $1))
+        )
+    )
+  )`
 
 const countUnreadForUserSQL = `-- name: CountUnreadForUser :one
 WITH last_read AS (
@@ -284,6 +322,18 @@ func (q *Queries) ListByConversation(ctx context.Context, p ListByConversationPa
 	return out, nil
 }
 
+// CountByConversation returns the absolute number of non-deleted
+// messages in the conversation matching the optional body
+// substring. Drives the thread-screen "X of N" total. Pass an
+// empty query to count every message.
+func (q *Queries) CountByConversation(ctx context.Context, conversationID uuid.UUID, query string) (int, error) {
+	var n int
+	if err := q.db.QueryRow(ctx, countByConversationSQL, conversationID, strings.TrimSpace(query)).Scan(&n); err != nil {
+		return 0, fmt.Errorf("message: count by conversation: %w", err)
+	}
+	return n, nil
+}
+
 // AddAttachment links an attachment to a message. Idempotent — a
 // re-link is a no-op (PK collision is swallowed).
 func (q *Queries) AddAttachment(ctx context.Context, messageID, attachmentID uuid.UUID) error {
@@ -372,6 +422,18 @@ func (q *Queries) SearchInUserConversations(ctx context.Context, userID uuid.UUI
 		return nil, fmt.Errorf("message: search rows: %w", err)
 	}
 	return out, nil
+}
+
+// CountSearchInUserConversations returns the absolute count of
+// matching messages for the same WHERE clause as
+// SearchInUserConversations — what the UI uses for the
+// "showing 10 of N" hint on the search modal.
+func (q *Queries) CountSearchInUserConversations(ctx context.Context, userID uuid.UUID, query string) (int, error) {
+	var n int
+	if err := q.db.QueryRow(ctx, countSearchInUserConversationsSQL, userID, query).Scan(&n); err != nil {
+		return 0, fmt.Errorf("message: count search in user convs: %w", err)
+	}
+	return n, nil
 }
 
 // CountUnreadForUser returns the total number of unread messages

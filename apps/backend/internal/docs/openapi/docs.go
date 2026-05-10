@@ -5056,6 +5056,10 @@ const docTemplate = `{
                 "next_cursor": {
                     "type": "string",
                     "example": "eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 42
                 }
             }
         },
@@ -5309,6 +5313,10 @@ const docTemplate = `{
                 "next_cursor": {
                     "type": "string",
                     "example": "eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 42
                 }
             }
         },
@@ -5514,6 +5522,10 @@ const docTemplate = `{
                 "next_cursor": {
                     "type": "string",
                     "example": "eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 42
                 }
             }
         },
@@ -5871,17 +5883,26 @@ const docTemplate = `{
                         "$ref": "#/definitions/internal_handler_http.SearchConversationRow"
                     }
                 },
+                "conversations_total": {
+                    "type": "integer"
+                },
                 "messages": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_handler_http.SearchMessageRow"
                     }
                 },
+                "messages_total": {
+                    "type": "integer"
+                },
                 "users": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_handler_http.UserResponse"
                     }
+                },
+                "users_total": {
+                    "type": "integer"
                 }
             }
         },
@@ -6094,6 +6115,10 @@ const docTemplate = `{
                 "next_cursor": {
                     "type": "string",
                     "example": "eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 1024
                 }
             }
         },

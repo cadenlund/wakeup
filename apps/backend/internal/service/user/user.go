@@ -120,25 +120,34 @@ type SearchParams struct {
 }
 
 // SearchResult is the paginated payload returned by Search.
+// Total is the absolute count of users matching the search across
+// every page, fetched via a parallel COUNT(*) — what the UI uses
+// for the "showing N of M" hint.
 type SearchResult struct {
 	Users      []domain.User
+	Total      int
 	NextCursor *string
 	HasMore    bool
 }
 
 // Search returns up to limit users whose username/display_name match q
-// (case-insensitive prefix; trigram). Empty q returns the catalog in
+// (case-insensitive substring). Empty q returns the catalog in
 // (created_at DESC, id DESC) order. The pagination envelope is the §6.4
-// keyset shape — never offset.
+// keyset shape — never offset. The total count is fetched in
+// parallel so the slice and the count return on the same response.
 func (s *Service) Search(ctx context.Context, p SearchParams) (SearchResult, error) {
 	overFetched, err := s.users.ListByPrefix(ctx, p.Query, p.CallerID, p.Cursor, p.Limit)
 	if err != nil {
 		return SearchResult{}, apierror.Internal("search users").WithCause(err)
 	}
+	total, err := s.users.CountByPrefix(ctx, p.Query, p.CallerID)
+	if err != nil {
+		return SearchResult{}, apierror.Internal("count users").WithCause(err)
+	}
 	data, next, hasMore := pagination.Page(overFetched, p.Limit, func(u domain.User) pagination.Cursor {
 		return pagination.Cursor{Timestamp: u.CreatedAt, ID: u.ID}
 	})
-	return SearchResult{Users: data, NextCursor: next, HasMore: hasMore}, nil
+	return SearchResult{Users: data, Total: total, NextCursor: next, HasMore: hasMore}, nil
 }
 
 // UpdateProfile patches the user's writable profile fields.

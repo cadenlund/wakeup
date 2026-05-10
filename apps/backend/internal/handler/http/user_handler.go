@@ -121,7 +121,7 @@ func (h *UserHandler) Search(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toUserListResponse(res.Users, res.NextCursor, res.HasMore, h.presign))
+	WriteJSON(w, http.StatusOK, toUserListResponse(res.Users, res.Total, res.NextCursor, res.HasMore, h.presign))
 }
 
 // GetByID returns the public profile for the given user id.

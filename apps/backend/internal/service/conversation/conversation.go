@@ -340,8 +340,12 @@ type ListParams struct {
 }
 
 // ListResult is the paginated payload returned by List.
+// Total is the absolute count of the user's conversations across every
+// page so the UI can render "showing N of M" hints without paginating
+// through every cursor.
 type ListResult struct {
 	Conversations []domain.Conversation
+	Total         int
 	NextCursor    *string
 	HasMore       bool
 }
@@ -371,10 +375,14 @@ func (s *Service) List(ctx context.Context, p ListParams) (ListResult, error) {
 	if err != nil {
 		return ListResult{}, apierror.Internal("list conversations").WithCause(err)
 	}
+	total, err := s.convs.CountConversationsByUser(ctx, p.UserID)
+	if err != nil {
+		return ListResult{}, apierror.Internal("count conversations").WithCause(err)
+	}
 	data, next, hasMore := pagination.Page(rows, p.Limit, func(c domain.Conversation) pagination.Cursor {
 		return pagination.Cursor{Timestamp: c.LastMessageAt, ID: c.ID}
 	})
-	return ListResult{Conversations: data, NextCursor: next, HasMore: hasMore}, nil
+	return ListResult{Conversations: data, Total: total, NextCursor: next, HasMore: hasMore}, nil
 }
 
 // UpdateParams is the input to Update. Only group conversations can be

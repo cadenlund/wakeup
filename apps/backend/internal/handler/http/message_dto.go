@@ -25,9 +25,13 @@ type MessageResponse struct {
 }
 
 // MessageListResponse is the §6.4 paginated envelope for
-// GET /v1/conversations/{id}/messages.
+// GET /v1/conversations/{id}/messages. Total is the absolute
+// non-deleted message count (matching the `q` filter when set) across
+// every page so the UI can render "showing N of M" hints without
+// paging through every cursor.
 type MessageListResponse struct {
 	Data       []MessageResponse `json:"data"`
+	Total      int               `json:"total"        example:"42"`
 	NextCursor *string           `json:"next_cursor"  example:"eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="`
 	HasMore    bool              `json:"has_more"     example:"true"`
 }

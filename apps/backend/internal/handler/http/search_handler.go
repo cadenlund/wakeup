@@ -55,9 +55,12 @@ func (h *SearchHandler) Mount(r chi.Router) {
 // the mobile UI couldn't tell whether to render "no matches" vs hide
 // the section entirely (CodeRabbit on PR #107).
 type SearchResponse struct {
-	Users         *[]UserResponse          `json:"users,omitempty"`
-	Conversations *[]SearchConversationRow `json:"conversations,omitempty"`
-	Messages      *[]SearchMessageRow      `json:"messages,omitempty"`
+	Users              *[]UserResponse          `json:"users,omitempty"`
+	UsersTotal         *int                     `json:"users_total,omitempty"`
+	Conversations      *[]SearchConversationRow `json:"conversations,omitempty"`
+	ConversationsTotal *int                     `json:"conversations_total,omitempty"`
+	Messages           *[]SearchMessageRow      `json:"messages,omitempty"`
+	MessagesTotal      *int                     `json:"messages_total,omitempty"`
 }
 
 // SearchConversationRow is the slim conversation shape for unified
@@ -134,6 +137,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 			users = append(users, toUserResponse(u, h.presign))
 		}
 		out.Users = &users
+		out.UsersTotal = &res.UsersTotal
 	}
 	if requested[searchsvc.TypeConversations] {
 		convs := make([]SearchConversationRow, 0, len(res.Conversations))
@@ -152,6 +156,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 			convs = append(convs, row)
 		}
 		out.Conversations = &convs
+		out.ConversationsTotal = &res.ConversationsTotal
 	}
 	if requested[searchsvc.TypeMessages] {
 		msgs := make([]SearchMessageRow, 0, len(res.Messages))
@@ -165,6 +170,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		out.Messages = &msgs
+		out.MessagesTotal = &res.MessagesTotal
 	}
 	WriteJSON(w, http.StatusOK, out)
 }

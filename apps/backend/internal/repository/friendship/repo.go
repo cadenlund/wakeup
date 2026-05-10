@@ -100,6 +100,15 @@ WHERE status = 'accepted'
 ORDER BY accepted_at DESC, id DESC
 LIMIT $4`
 
+// countAcceptedByUserSQL mirrors listAcceptedByUserSQL minus the
+// keyset cursor — returns the absolute count of accepted friend
+// rows touching the user. Drives the friends-tab "X of N" hint.
+const countAcceptedByUserSQL = `-- name: CountAcceptedByUser :one
+SELECT COUNT(*)
+FROM friendships
+WHERE status = 'accepted'
+  AND (requester_id = $1 OR addressee_id = $1)`
+
 const listAllAcceptedFriendIDsSQL = `-- name: ListAllAcceptedFriendIDs :many
 SELECT CASE WHEN requester_id = $1 THEN addressee_id ELSE requester_id END AS friend_id
 FROM friendships
@@ -305,6 +314,18 @@ func (q *Queries) ListAcceptedByUser(ctx context.Context, userID uuid.UUID, curs
 		return nil, fmt.Errorf("friendship: list accepted rows: %w", rowsErr)
 	}
 	return out, nil
+}
+
+// CountAcceptedByUser returns the absolute number of accepted
+// friendships touching the user. Same WHERE clause as
+// ListAcceptedByUser minus the keyset cursor — drives the
+// friends-tab "X of N" hint.
+func (q *Queries) CountAcceptedByUser(ctx context.Context, userID uuid.UUID) (int, error) {
+	var n int
+	if err := q.db.QueryRow(ctx, countAcceptedByUserSQL, userID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("friendship: count accepted: %w", err)
+	}
+	return n, nil
 }
 
 // ListPendingByUser returns every pending friendship where the user is

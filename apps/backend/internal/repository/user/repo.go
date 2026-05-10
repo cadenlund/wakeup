@@ -97,6 +97,30 @@ SET avatar_url = NULL
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING avatar_url`
 
+// countByPrefixSQL mirrors listByPrefixSQL's WHERE clause minus the
+// keyset cursor filter so it returns the absolute population
+// matching the search — what the UI uses for "showing N of M"
+// hints. The cursor is intentionally absent because the cursor
+// filters mid-page, not the population.
+const countByPrefixSQL = `-- name: CountByPrefix :one
+SELECT COUNT(*)
+FROM users
+WHERE deleted_at IS NULL
+  AND (
+    $1::text = ''
+    OR username ILIKE '%' || $1::text || '%' ESCAPE '\'
+    OR display_name ILIKE '%' || $1::text || '%' ESCAPE '\'
+  )
+  AND (
+    $2::uuid IS NULL
+    OR NOT EXISTS (
+      SELECT 1 FROM friendships f
+      WHERE f.status = 'blocked'
+        AND ((f.requester_id = $2::uuid AND f.addressee_id = users.id)
+          OR (f.requester_id = users.id AND f.addressee_id = $2::uuid))
+    )
+  )`
+
 // listByPrefixSQL hides users on either side of a 'blocked' friendship
 // row from the caller — both directions, so blocking is symmetric in
 // search visibility (Discord/Instagram convention). When $5 is NULL
@@ -366,6 +390,9 @@ func (q *Queries) ClearAvatar(ctx context.Context, id uuid.UUID) (string, error)
 //
 // Always over-fetches limit+1 so the service layer can use pagination.Page
 // to compute next_cursor + has_more.
+//
+// Use CountByPrefix alongside this to fetch the absolute total
+// across pages (for "showing 25 of 1000" UX).
 func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uuid.UUID, cursor *pagination.Cursor, limit int) ([]domain.User, error) {
 	if limit <= 0 {
 		limit = pagination.DefaultLimit
@@ -400,6 +427,18 @@ func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uui
 		return nil, fmt.Errorf("user: list by prefix rows: %w", rowsErr)
 	}
 	return users, nil
+}
+
+// CountByPrefix returns the absolute count of users matching the
+// substring search — same WHERE clause as ListByPrefix but no
+// keyset cursor filter (cursor pages the slice, not the
+// population). Used for the "X of N" hint above paginated lists.
+func (q *Queries) CountByPrefix(ctx context.Context, prefix string, callerID *uuid.UUID) (int, error) {
+	var n int
+	if err := q.db.QueryRow(ctx, countByPrefixSQL, escapeLikePrefix(prefix), callerID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("user: count by prefix: %w", err)
+	}
+	return n, nil
 }
 
 // ListByIDs fetches every user whose ID appears in ids. Results are NOT
