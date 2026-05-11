@@ -30,6 +30,7 @@ import { MessageList } from '@/components/message-list';
 import { MuteSheet } from '@/components/mute-sheet';
 import { Text } from '@/components/ui/text';
 import { ThemedBackButton } from '@/components/ui/themed-back-button';
+import { TypingIndicator } from '@/components/typing-indicator';
 import { WSReconnectBanner } from '@/components/ws-reconnect-banner';
 import { setActiveConversation } from '@/lib/banner/active-conversation';
 import { useRefetchMessagesOnReconnect } from '@/lib/ws/use-refetch-on-reconnect';
@@ -330,6 +331,7 @@ function ThreadBody({
           onRetrySend={retry}
         />
       </View>
+      <TypingIndicator conversationId={conversationId} members={members} isGroup={isGroup} />
       <Composer
         onSend={send}
         pending={isPending}

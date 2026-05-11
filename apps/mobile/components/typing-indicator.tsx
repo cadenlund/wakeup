@@ -1,15 +1,15 @@
 // Phase 6.4 — typing indicator for the conversation thread.
 //
 // Renders the WS-fed typing state (`useTypingUserIds`) as an
-// incoming-style message bubble: same chrome as `<MessageBubble>`'s
-// "theirs" side — `bg-muted`, `rounded-2xl rounded-bl-sm`, the same
-// row/gutter layout — so it reads as a real bubble at the bottom of
-// the thread (it's the message list's `ListFooterComponent`, so it
-// scrolls with the messages and the list naturally makes room).
-// Inside: a staggered three-dot pulse. In a DM the dots stand alone
-// (you know the peer); in a group they get a "{name}" / "{a} and
-// {b}" / "Several people" label above, like a sender label. Renders
-// nothing when nobody's typing.
+// incoming-style message bubble: the "theirs"-side chrome —
+// `rounded-2xl rounded-bl-sm`, the group avatar gutter — but on
+// `bg-muted` (one shade off the thread background) so the bubble
+// actually reads against the near-white surface. Sits below the
+// message list, above the composer; the list is `flex-1` so it
+// shrinks to make room when the bubble appears. Inside: a staggered
+// three-dot pulse. In a DM the dots stand alone (you know the peer);
+// in a group they get a "{name}" / "{a} and {b}" / "Several people"
+// label above, like a sender label. Renders nothing when quiet.
 import * as React from 'react';
 import { AccessibilityInfo, Animated, View } from 'react-native';
 
