@@ -191,17 +191,19 @@ export function MessageList({
 
   // Each member's read-pointer position in the loaded window (-1 if
   // their last_read_message_id is null or older than what's loaded).
-  // Self excluded — own pointer isn't a "receipt".
+  // Includes self — in a group, "Seen by …" is public, so your own
+  // read state shows up like everyone else's. Use-site exclusions
+  // (a message's own sender; self in a DM) happen where it's read.
   const readPointerIdxByUser = React.useMemo(() => {
     const m = new Map<string, number>();
     for (const row of members) {
       const uid = row.user?.id;
-      if (!uid || uid === myUserId) continue;
+      if (!uid) continue;
       const readId = row.last_read_message_id;
       m.set(uid, readId ? (msgIdxById.get(readId) ?? -1) : -1);
     }
     return m;
-  }, [members, msgIdxById, myUserId]);
+  }, [members, msgIdxById]);
 
   // Per-message read-receipt caption:
   //   - DM: a single caption under your last delivered sent message
@@ -210,10 +212,11 @@ export function MessageList({
   //   - Group: under EVERY message at a member's read frontier —
   //     "Seen by Ada" / "Seen by Ada and Ben" / "Seen by Ada, Ben
   //     and 2 others". A member only shows at their frontier (older
-  //     messages are implicitly read); the message's own sender is
-  //     never listed for their message.
+  //     messages are implicitly read). "Seen by" is public, so you
+  //     (the viewer) are listed too — only the message's own sender
+  //     is filtered out (you don't "see" what you sent).
   // Members with a NULL read pointer never opened the thread and
-  // contribute nothing. Self is skipped (own receipts are noise).
+  // contribute nothing.
   const receiptByMessageId = React.useMemo(() => {
     const out = new Map<string, string>();
     if (messages.length === 0) return out;
@@ -223,7 +226,7 @@ export function MessageList({
       for (const row of members) {
         const uid = row.user?.id;
         const readId = row.last_read_message_id;
-        if (!uid || !readId || uid === myUserId || !row.user) continue;
+        if (!uid || !readId || !row.user) continue;
         const arr = frontier.get(readId);
         if (arr) arr.push(row.user);
         else frontier.set(readId, [row.user]);
@@ -425,16 +428,19 @@ export function MessageList({
         const onLongPress =
           m.id && !isPlaceholder
             ? (rect: { x: number; y: number; width: number; height: number } | undefined) => {
-                // Who's read this message — every member (≠ self,
-                // ≠ this message's sender) whose read pointer is at
-                // or past this message. The popover lists them.
+                // Who's read this message — every member whose read
+                // pointer is at or past it, minus the message's own
+                // sender. In a group the list is public so the
+                // viewer is included; in a DM only the peer counts
+                // (the popover renders it as "Seen"/"Delivered").
                 const msgIdx = msgIdxById.get(m.id as string) ?? -1;
                 const seenBy =
                   msgIdx < 0
                     ? []
                     : members.flatMap((row) => {
                         const u = row.user;
-                        if (!u?.id || u.id === myUserId || u.id === m.sender_id) return [];
+                        if (!u?.id || u.id === m.sender_id) return [];
+                        if (!isGroup && u.id === myUserId) return [];
                         const ptr = readPointerIdxByUser.get(u.id) ?? -1;
                         if (ptr < msgIdx) return [];
                         return [
