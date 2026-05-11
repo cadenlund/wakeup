@@ -47,6 +47,7 @@ import type {
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { useMarkReadOnFocus } from '@/lib/use-mark-read';
+import type { LocalSendStatus } from '@/lib/use-send-message';
 
 type Message = InternalHandlerHttpMessageResponse;
 
@@ -64,9 +65,23 @@ type Props = {
   // message's sender_id into a display name + avatar without an
   // extra users fetch.
   members: InternalHandlerHttpConversationMemberRow[];
+  // Per-bubble send status from useSendMessage. Absence of an
+  // entry == delivered. Sending / failed both render an inline
+  // status hint under the bubble; failed adds the retry tap.
+  sendStatusByTempId: Map<string, { status: LocalSendStatus; body: string }>;
+  // Re-fires a failed send for `tempId` reusing the same
+  // Idempotency-Key. Wired to the inline "Retry" affordance.
+  onRetrySend: (tempId: string) => void;
 };
 
-export function MessageList({ conversationId, myUserId, isGroup, members }: Props) {
+export function MessageList({
+  conversationId,
+  myUserId,
+  isGroup,
+  members,
+  sendStatusByTempId,
+  onRetrySend,
+}: Props) {
   const fg = useThemeColor('foreground');
   const mutedFg = useThemeColor('muted-foreground');
 
@@ -218,6 +233,11 @@ export function MessageList({ conversationId, myUserId, isGroup, members }: Prop
             createdAt={item.created_at}
             isDeleted={item.is_deleted}
             mine={mine}
+            // Per-bubble send status only applies to "mine" rows
+            // — the recipient never has a local send state for
+            // someone else's message.
+            sendStatus={mine && item.id ? sendStatusByTempId.get(item.id)?.status : undefined}
+            onRetrySend={mine && item.id ? () => onRetrySend(item.id as string) : undefined}
             // Read-receipt avatars only appear under "mine" bubbles
             // in group threads (per §6.3 spec). The bubble component
             // ignores `readBy` for non-mine rows.

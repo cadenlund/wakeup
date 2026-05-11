@@ -153,17 +153,12 @@ export default function ConversationThreadScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         className="flex-1 bg-background">
         {convId ? (
-          <>
-            <View className="flex-1">
-              <MessageList
-                conversationId={convId}
-                myUserId={me?.id}
-                isGroup={isGroup}
-                members={conversation?.members ?? []}
-              />
-            </View>
-            <ThreadComposer conversationId={convId} myUserId={me?.id} />
-          </>
+          <ThreadBody
+            conversationId={convId}
+            myUserId={me?.id}
+            isGroup={isGroup}
+            members={conversation?.members ?? []}
+          />
         ) : null}
       </KeyboardAvoidingView>
 
@@ -238,17 +233,36 @@ function computeTitle(
   return c.name?.trim() || 'Group';
 }
 
-// Tiny wrapper so the send-mutation only mounts once per
-// conversation route. Hoisting useSendMessage into the parent
-// component would re-run on every screen render; this trims the
-// re-render cost to the composer subtree.
-function ThreadComposer({
+// Mounts the send-mutation once per conversation route and shares
+// the same hook output across the message list (per-bubble status
+// + retry) and the composer (send + isPending). Hoisting into the
+// parent screen would re-run the hook on every screen-level
+// render (header sheet open/close, conv detail invalidation, etc.).
+function ThreadBody({
   conversationId,
   myUserId,
+  isGroup,
+  members,
 }: {
   conversationId: string;
   myUserId: string | undefined;
+  isGroup: boolean;
+  members: InternalHandlerHttpConversationResponse['members'];
 }) {
-  const { send, isPending } = useSendMessage(conversationId, myUserId);
-  return <Composer onSend={send} pending={isPending} testID="thread-composer" />;
+  const { send, retry, statusByTempId, isPending } = useSendMessage(conversationId, myUserId);
+  return (
+    <>
+      <View className="flex-1">
+        <MessageList
+          conversationId={conversationId}
+          myUserId={myUserId}
+          isGroup={isGroup}
+          members={members ?? []}
+          sendStatusByTempId={statusByTempId}
+          onRetrySend={retry}
+        />
+      </View>
+      <Composer onSend={send} pending={isPending} testID="thread-composer" />
+    </>
+  );
 }

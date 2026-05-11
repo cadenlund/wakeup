@@ -10,12 +10,14 @@
 // we still draw a placeholder so the conversation history stays
 // coherent (gaps would make a reply chain unreadable).
 import * as React from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import type { InternalHandlerHttpUserResponse } from '@/lib/api/model';
 import { formatRelative } from '@/lib/relative-time';
+import { useThemeColor } from '@/lib/theme/use-theme-color';
+import type { LocalSendStatus } from '@/lib/use-send-message';
 import { cn } from '@/lib/utils';
 
 type Props = {
@@ -42,6 +44,12 @@ type Props = {
   // as a row of tiny avatars under the bubble (iMessage convention:
   // only the latest read position per recipient is shown).
   readBy?: InternalHandlerHttpUserResponse[];
+  // Send-pipeline status from useSendMessage. `undefined` = the
+  // message is delivered (server-issued row); `'sending'` shows
+  // a small spinner + "Sending…" caption; `'failed'` swaps in a
+  // tappable "Not sent · Retry" affordance that calls onRetrySend.
+  sendStatus?: LocalSendStatus;
+  onRetrySend?: () => void;
   testID?: string;
 };
 
@@ -56,10 +64,14 @@ export function MessageBubble({
   showSenderLabel,
   showAvatar,
   readBy,
+  sendStatus,
+  onRetrySend,
   testID,
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
   const time = formatRelative(createdAt);
+  const mutedFg = useThemeColor('muted-foreground');
+  const destructive = useThemeColor('destructive');
   // edited_at is in the backend response but v1 has no message-edit
   // UI (deferred to v2 — §6.5 context menu lands a stub only), so
   // we don't surface an "edited" indicator yet. The prop stays
@@ -120,6 +132,29 @@ export function MessageBubble({
               return <Avatar key={u.id} source={u.avatar_url} fallbackName={name} size={14} />;
             })}
           </View>
+        ) : null}
+
+        {mine && sendStatus === 'sending' ? (
+          <View className="mt-0.5 flex-row items-center gap-1 px-1">
+            <ActivityIndicator size="small" color={mutedFg} />
+            <Text variant="muted" className="text-[10px]">
+              Sending…
+            </Text>
+          </View>
+        ) : null}
+
+        {mine && sendStatus === 'failed' ? (
+          <Pressable
+            onPress={onRetrySend}
+            accessibilityRole="button"
+            accessibilityLabel="Retry send"
+            testID={testID ? `${testID}-retry` : undefined}
+            hitSlop={6}
+            className="mt-0.5 flex-row items-center gap-1 px-1 active:opacity-70">
+            <Text style={{ color: destructive }} className="text-[10px] font-medium">
+              Not sent · Retry
+            </Text>
+          </Pressable>
         ) : null}
       </View>
     </View>
