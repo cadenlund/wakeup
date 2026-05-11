@@ -38,3 +38,8 @@ appId: app.wakeup.client
     timeout: 10000
 - assertVisible: 'No conversations yet'
 - takeScreenshot: composer-chats-empty
+# Re-assert after the screenshot so the flow ends on a hard
+# assertion — `takeScreenshot` doesn't itself check anything, so
+# without this final assertion a CI failure post-screenshot would
+# slip through silently.
+- assertVisible: 'No conversations yet'
