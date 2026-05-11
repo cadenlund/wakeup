@@ -95,7 +95,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, MessageListResponse{
-		Data: toMessageList(res.Messages), NextCursor: res.NextCursor, HasMore: res.HasMore,
+		Data: toMessageList(res.Messages), Total: res.Total, NextCursor: res.NextCursor, HasMore: res.HasMore,
 	})
 }
 

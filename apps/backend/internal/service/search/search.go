@@ -73,11 +73,17 @@ func New(cfg Config) (*Service, error) {
 }
 
 // Result is the §6.2 unified-search payload. Sections the caller didn't
-// opt into (via the `types` query param) come back as nil.
+// opt into (via the `types` query param) come back as nil. The
+// `*Total` fields are the absolute population counts across every
+// page — the slices are capped at PerTypeLimit (10) so the UI can
+// render "showing 10 of 1000" hints and offer a drill-down.
 type Result struct {
-	Users         []domain.User
-	Conversations []domain.Conversation
-	Messages      []domain.Message
+	Users              []domain.User
+	UsersTotal         int
+	Conversations      []domain.Conversation
+	ConversationsTotal int
+	Messages           []domain.Message
+	MessagesTotal      int
 }
 
 // Params is the input to Search.
@@ -119,18 +125,29 @@ func (s *Service) Search(ctx context.Context, p Params) (Result, error) {
 				return Result{}, err
 			}
 			res.Users = users.Users
+			res.UsersTotal = users.Total
 		case TypeConversations:
 			convs, err := s.convs.SearchByUserAndName(ctx, p.UserID, q, PerTypeLimit)
 			if err != nil {
 				return Result{}, apierror.Internal("search conversations").WithCause(err)
 			}
 			res.Conversations = convs
+			total, err := s.convs.CountSearchByUserAndName(ctx, p.UserID, q)
+			if err != nil {
+				return Result{}, apierror.Internal("count search conversations").WithCause(err)
+			}
+			res.ConversationsTotal = total
 		case TypeMessages:
 			msgs, err := s.msgs.SearchInUserConversations(ctx, p.UserID, q, PerTypeLimit)
 			if err != nil {
 				return Result{}, apierror.Internal("search messages").WithCause(err)
 			}
 			res.Messages = msgs
+			total, err := s.msgs.CountSearchInUserConversations(ctx, p.UserID, q)
+			if err != nil {
+				return Result{}, apierror.Internal("count search messages").WithCause(err)
+			}
+			res.MessagesTotal = total
 		}
 	}
 	return res, nil

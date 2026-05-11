@@ -124,6 +124,37 @@ ORDER BY (m.pinned_at IS NOT NULL) DESC,
          c.id DESC
 LIMIT $4`
 
+// countConversationsByUserSQL mirrors listConversationsByUserSQL's
+// WHERE clause without the keyset cursor — returns the absolute
+// number of conversations the caller is in (after the
+// blocked-DM filter). Drives the chats-tab "showing X of N" hint.
+const countConversationsByUserSQL = `-- name: CountConversationsByUser :one
+SELECT COUNT(*)
+FROM conversations c
+JOIN conversation_members m ON m.conversation_id = c.id
+WHERE m.user_id = $1
+  AND (
+    c.type <> 'direct'
+    OR NOT EXISTS (
+      SELECT 1
+      FROM conversation_members other
+      WHERE other.conversation_id = c.id
+        AND other.user_id <> $1
+        AND EXISTS (
+          SELECT 1 FROM friendships f
+          WHERE f.status = 'blocked'
+            AND ((f.requester_id = $1 AND f.addressee_id = other.user_id)
+              OR (f.requester_id = other.user_id AND f.addressee_id = $1))
+        )
+    )
+  )`
+
+// Member-name match excludes blocked-pair members so a group
+// doesn't surface just because a blocked user's display_name /
+// username happens to contain the query. The group itself stays
+// searchable by its own name; only the per-member contribution
+// to the OR-match is gated. Symmetric block: caller blocking the
+// member, OR the member blocking the caller, both apply.
 const searchByUserAndNameSQL = `-- name: SearchByUserAndName :many
 SELECT DISTINCT c.id, c.type, c.name, c.avatar_url, c.created_by,
        c.created_at, c.updated_at, c.last_message_at
@@ -132,6 +163,12 @@ JOIN conversation_members caller ON caller.conversation_id = c.id AND caller.use
 LEFT JOIN conversation_members other_m
   ON other_m.conversation_id = c.id
  AND other_m.user_id <> $1
+ AND NOT EXISTS (
+   SELECT 1 FROM friendships f
+   WHERE f.status = 'blocked'
+     AND ((f.requester_id = $1 AND f.addressee_id = other_m.user_id)
+       OR (f.requester_id = other_m.user_id AND f.addressee_id = $1))
+ )
 LEFT JOIN users other_u ON other_u.id = other_m.user_id
 WHERE c.type = 'group'
   AND (
@@ -141,6 +178,31 @@ WHERE c.type = 'group'
   )
 ORDER BY c.last_message_at DESC, c.id DESC
 LIMIT $3`
+
+// countSearchByUserAndNameSQL mirrors searchByUserAndNameSQL's
+// WHERE clause without the LIMIT — returns the absolute number of
+// matching group conversations the user is in. Drives the
+// "showing 10 of N" hint on the search modal.
+const countSearchByUserAndNameSQL = `-- name: CountSearchByUserAndName :one
+SELECT COUNT(DISTINCT c.id)
+FROM conversations c
+JOIN conversation_members caller ON caller.conversation_id = c.id AND caller.user_id = $1
+LEFT JOIN conversation_members other_m
+  ON other_m.conversation_id = c.id
+ AND other_m.user_id <> $1
+ AND NOT EXISTS (
+   SELECT 1 FROM friendships f
+   WHERE f.status = 'blocked'
+     AND ((f.requester_id = $1 AND f.addressee_id = other_m.user_id)
+       OR (f.requester_id = other_m.user_id AND f.addressee_id = $1))
+ )
+LEFT JOIN users other_u ON other_u.id = other_m.user_id
+WHERE c.type = 'group'
+  AND (
+    c.name ILIKE '%' || $2::text || '%'
+    OR other_u.display_name ILIKE '%' || $2::text || '%'
+    OR other_u.username ILIKE '%' || $2::text || '%'
+  )`
 
 const getDirectByPairSQL = `-- name: GetDirectByPair :one
 SELECT c.id, c.type, c.name, c.avatar_url, c.created_by,
@@ -346,6 +408,18 @@ func (q *Queries) ListConversationsByUser(ctx context.Context, userID uuid.UUID,
 	return out, nil
 }
 
+// CountConversationsByUser returns the absolute number of
+// conversations the user is in, after the blocked-DM filter.
+// Same WHERE clause as ListConversationsByUser minus the keyset
+// cursor — drives the chats-tab "X of N" hint.
+func (q *Queries) CountConversationsByUser(ctx context.Context, userID uuid.UUID) (int, error) {
+	var n int
+	if err := q.db.QueryRow(ctx, countConversationsByUserSQL, userID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("conversation: count by user: %w", err)
+	}
+	return n, nil
+}
+
 // SearchByUserAndName returns up to limit group conversations the
 // caller is a member of where either the conversation name OR any
 // member's display_name / username contains the query (case-
@@ -376,6 +450,18 @@ func (q *Queries) SearchByUserAndName(ctx context.Context, userID uuid.UUID, que
 		return nil, fmt.Errorf("conversation: search rows: %w", err)
 	}
 	return out, nil
+}
+
+// CountSearchByUserAndName returns the absolute count of matching
+// group conversations for the same WHERE clause as
+// SearchByUserAndName — the LIMIT-free population the UI uses for
+// the "X of N" hint.
+func (q *Queries) CountSearchByUserAndName(ctx context.Context, userID uuid.UUID, query string) (int, error) {
+	var n int
+	if err := q.db.QueryRow(ctx, countSearchByUserAndNameSQL, userID, query).Scan(&n); err != nil {
+		return 0, fmt.Errorf("conversation: count search by name: %w", err)
+	}
+	return n, nil
 }
 
 // GetDirectByPair returns the (at most one) direct conversation between

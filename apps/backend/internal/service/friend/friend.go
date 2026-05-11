@@ -277,8 +277,11 @@ type ListFriendsParams struct {
 }
 
 // ListFriendsResult is the paginated payload returned by ListFriends.
+// Total is the absolute friend count across every page, so the UI can
+// render "showing N of M" hints without paging through every cursor.
 type ListFriendsResult struct {
 	Friendships []domain.Friendship
+	Total       int
 	NextCursor  *string
 	HasMore     bool
 }
@@ -289,6 +292,10 @@ func (s *Service) ListFriends(ctx context.Context, p ListFriendsParams) (ListFri
 	if err != nil {
 		return ListFriendsResult{}, apierror.Internal("list friends").WithCause(err)
 	}
+	total, err := s.friends.CountAcceptedByUser(ctx, p.UserID)
+	if err != nil {
+		return ListFriendsResult{}, apierror.Internal("count friends").WithCause(err)
+	}
 	data, next, hasMore := pagination.Page(rows, p.Limit, func(f domain.Friendship) pagination.Cursor {
 		// AcceptedAt is non-nil for accepted rows by definition.
 		ts := f.CreatedAt
@@ -297,7 +304,7 @@ func (s *Service) ListFriends(ctx context.Context, p ListFriendsParams) (ListFri
 		}
 		return pagination.Cursor{Timestamp: ts, ID: f.ID}
 	})
-	return ListFriendsResult{Friendships: data, NextCursor: next, HasMore: hasMore}, nil
+	return ListFriendsResult{Friendships: data, Total: total, NextCursor: next, HasMore: hasMore}, nil
 }
 
 // ListAcceptedFriendIDs returns every accepted friend's user_id,

@@ -38,9 +38,12 @@ type ConversationMemberRow struct {
 
 // ConversationListResponse is the §6.4 paginated envelope for
 // GET /v1/conversations. Members are included — keeps the list view
-// renderable without N follow-up calls.
+// renderable without N follow-up calls. Total is the absolute
+// conversation count across every page so the UI can render
+// "showing N of M" hints without paging through every cursor.
 type ConversationListResponse struct {
 	Data       []ConversationResponse `json:"data"`
+	Total      int                    `json:"total"        example:"42"`
 	NextCursor *string                `json:"next_cursor"  example:"eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="`
 	HasMore    bool                   `json:"has_more"     example:"true"`
 }

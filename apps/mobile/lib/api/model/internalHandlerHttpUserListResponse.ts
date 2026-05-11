@@ -11,4 +11,5 @@ export interface InternalHandlerHttpUserListResponse {
   data?: InternalHandlerHttpUserResponse[];
   has_more?: boolean;
   next_cursor?: string;
+  total?: number;
 }

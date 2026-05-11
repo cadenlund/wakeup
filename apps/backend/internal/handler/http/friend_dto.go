@@ -20,8 +20,12 @@ type FriendshipResponse struct {
 }
 
 // FriendListResponse is the §6.4 paginated envelope for GET /v1/friends.
+// Total is the absolute friend count across every page so the UI can
+// render "showing N of M" hints and trigger drill-downs without paging
+// through every cursor.
 type FriendListResponse struct {
 	Data       []FriendshipResponse `json:"data"`
+	Total      int                  `json:"total"        example:"42"`
 	NextCursor *string              `json:"next_cursor"  example:"eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="`
 	HasMore    bool                 `json:"has_more"     example:"true"`
 }

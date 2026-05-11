@@ -8,7 +8,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { MessageCircle } from 'lucide-react-native';
 import * as React from 'react';
 import { View } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import { Text } from '@/components/ui/text';
 import { ThemedBackButton } from '@/components/ui/themed-back-button';
@@ -30,13 +30,33 @@ export default function ConversationThreadScreen() {
 
   // The list cache already has the row we want; pull it from there
   // before falling back to a per-id fetch, so the thread title
-  // appears immediately on the push transition.
+  // appears immediately on the push transition. Walk every cached
+  // /v1/conversations query — the chats tab uses an infinite-query
+  // shape (`pages[].data[]`).
   const qc = useQueryClient();
   const cachedRow = React.useMemo<InternalHandlerHttpConversationResponse | undefined>(() => {
-    const list = qc.getQueryData<InternalHandlerHttpConversationListResponse>(
-      getGetV1ConversationsQueryKey({ limit: 100 })
-    );
-    return list?.data?.find((c) => c.id === id);
+    if (!id) return undefined;
+    const prefix = getGetV1ConversationsQueryKey()[0];
+    type CachedList =
+      | InternalHandlerHttpConversationListResponse
+      | InfiniteData<InternalHandlerHttpConversationListResponse>;
+    const isInfinite = (
+      d: CachedList
+    ): d is InfiniteData<InternalHandlerHttpConversationListResponse> =>
+      Array.isArray((d as InfiniteData<InternalHandlerHttpConversationListResponse>).pages);
+    for (const [, data] of qc.getQueriesData<CachedList>({ queryKey: [prefix] })) {
+      if (!data) continue;
+      if (isInfinite(data)) {
+        for (const page of data.pages) {
+          const hit = page.data?.find((c) => c.id === id);
+          if (hit) return hit;
+        }
+      } else {
+        const hit = data.data?.find((c) => c.id === id);
+        if (hit) return hit;
+      }
+    }
+    return undefined;
   }, [qc, id]);
 
   const detailQ = useGetV1ConversationsId(id ?? '', {

@@ -11,4 +11,5 @@ export interface InternalHandlerHttpFriendListResponse {
   data?: InternalHandlerHttpFriendshipResponse[];
   has_more?: boolean;
   next_cursor?: string;
+  total?: number;
 }

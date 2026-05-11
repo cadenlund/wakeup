@@ -6200,6 +6200,8 @@ export interface components {
             has_more?: boolean;
             /** @example eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0= */
             next_cursor?: string;
+            /** @example 42 */
+            total?: number;
         };
         "internal_handler_http.ConversationMemberResponse": {
             /** @example 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c */
@@ -6312,6 +6314,8 @@ export interface components {
             has_more?: boolean;
             /** @example eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0= */
             next_cursor?: string;
+            /** @example 42 */
+            total?: number;
         };
         "internal_handler_http.FriendRequestsResponse": {
             incoming?: components["schemas"]["internal_handler_http.FriendshipResponse"][];
@@ -6402,6 +6406,8 @@ export interface components {
             has_more?: boolean;
             /** @example eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0= */
             next_cursor?: string;
+            /** @example 42 */
+            total?: number;
         };
         "internal_handler_http.MessageReadRow": {
             /** @example 2026-05-02T10:43:11.221Z */
@@ -6542,8 +6548,11 @@ export interface components {
         };
         "internal_handler_http.SearchResponse": {
             conversations?: components["schemas"]["internal_handler_http.SearchConversationRow"][];
+            conversations_total?: number;
             messages?: components["schemas"]["internal_handler_http.SearchMessageRow"][];
+            messages_total?: number;
             users?: components["schemas"]["internal_handler_http.UserResponse"][];
+            users_total?: number;
         };
         "internal_handler_http.SendFriendRequestRequest": {
             /** @example baron */
@@ -6630,6 +6639,8 @@ export interface components {
             has_more?: boolean;
             /** @example eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0= */
             next_cursor?: string;
+            /** @example 1024 */
+            total?: number;
         };
         "internal_handler_http.UserResponse": {
             /** @example https://wakeup.app/avatars/caden.png */

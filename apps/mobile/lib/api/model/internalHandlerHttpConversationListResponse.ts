@@ -11,4 +11,5 @@ export interface InternalHandlerHttpConversationListResponse {
   data?: InternalHandlerHttpConversationResponse[];
   has_more?: boolean;
   next_cursor?: string;
+  total?: number;
 }

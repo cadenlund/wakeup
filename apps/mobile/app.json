@@ -20,6 +20,14 @@
           "photosPermission": "Wakeup uses your photo library so you can pick a profile picture.",
           "cameraPermission": "Wakeup uses your camera so you can take a profile picture."
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "experiments": {

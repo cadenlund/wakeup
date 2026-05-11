@@ -112,7 +112,7 @@ func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, ConversationListResponse{
-		Data: rendered, NextCursor: res.NextCursor, HasMore: res.HasMore,
+		Data: rendered, Total: res.Total, NextCursor: res.NextCursor, HasMore: res.HasMore,
 	})
 }
 

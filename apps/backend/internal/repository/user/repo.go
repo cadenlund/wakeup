@@ -97,6 +97,30 @@ SET avatar_url = NULL
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING avatar_url`
 
+// countByPrefixSQL mirrors listByPrefixSQL's WHERE clause minus the
+// keyset cursor filter so it returns the absolute population
+// matching the search — what the UI uses for "showing N of M"
+// hints. The cursor is intentionally absent because the cursor
+// filters mid-page, not the population.
+const countByPrefixSQL = `-- name: CountByPrefix :one
+SELECT COUNT(*)
+FROM users
+WHERE deleted_at IS NULL
+  AND (
+    $1::text = ''
+    OR username ILIKE '%' || $1::text || '%' ESCAPE '\'
+    OR display_name ILIKE '%' || $1::text || '%' ESCAPE '\'
+  )
+  AND (
+    $2::uuid IS NULL
+    OR NOT EXISTS (
+      SELECT 1 FROM friendships f
+      WHERE f.status = 'blocked'
+        AND ((f.requester_id = $2::uuid AND f.addressee_id = users.id)
+          OR (f.requester_id = users.id AND f.addressee_id = $2::uuid))
+    )
+  )`
+
 // listByPrefixSQL hides users on either side of a 'blocked' friendship
 // row from the caller — both directions, so blocking is symmetric in
 // search visibility (Discord/Instagram convention). When $5 is NULL
@@ -108,26 +132,63 @@ RETURNING avatar_url`
 // for a friend by partial name. Matches the contained-anywhere
 // behavior the conversation search uses for group member names so
 // the two sections feel consistent.
+//
+// rel_tier ranks the result set "friends → pending → everyone else"
+// so the first page of a search always starts with people the
+// caller has a relationship with, regardless of trigram score.
+// The LEFT JOIN attaches at most one friendships row per user (the
+// pair-unique index guarantees that), and the CASE maps it into a
+// {0,1,2} tier. When $5 is NULL (admin path) the JOIN matches
+// nothing and every user lands in tier 2, which collapses the
+// ORDER BY into the legacy (created_at DESC, id DESC) shape.
+//
+// Keyset pagination with (tier ASC, created_at DESC, id DESC):
+// "the row after the cursor" is one of three states, expressed as
+// the OR-block below. $6 is the cursor tier — NULL on the first
+// page disables the keyset filter entirely.
 const listByPrefixSQL = `-- name: ListByPrefix :many
-SELECT id, username, display_name, email, password_hash, avatar_url, bio, status_emoji, color_scheme, role, onboarded_at, created_at, updated_at, deleted_at
-FROM users
-WHERE deleted_at IS NULL
-  AND (
-    $1::text = ''
-    OR username ILIKE '%' || $1::text || '%' ESCAPE '\'
-    OR display_name ILIKE '%' || $1::text || '%' ESCAPE '\'
-  )
-  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
-  AND (
-    $5::uuid IS NULL
-    OR NOT EXISTS (
-      SELECT 1 FROM friendships f
-      WHERE f.status = 'blocked'
-        AND ((f.requester_id = $5::uuid AND f.addressee_id = users.id)
-          OR (f.requester_id = users.id AND f.addressee_id = $5::uuid))
+WITH ranked AS (
+  SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.avatar_url,
+         u.bio, u.status_emoji, u.color_scheme, u.role, u.onboarded_at,
+         u.created_at, u.updated_at, u.deleted_at,
+         CASE
+           WHEN $5::uuid IS NULL THEN 2
+           WHEN f.status = 'accepted' THEN 0
+           WHEN f.status = 'pending' THEN 1
+           ELSE 2
+         END AS rel_tier
+  FROM users u
+  LEFT JOIN friendships f
+    ON (
+         (f.requester_id = $5::uuid AND f.addressee_id = u.id)
+         OR (f.requester_id = u.id AND f.addressee_id = $5::uuid)
+       )
+   AND f.status IN ('accepted', 'pending')
+  WHERE u.deleted_at IS NULL
+    AND (
+      $1::text = ''
+      OR u.username ILIKE '%' || $1::text || '%' ESCAPE '\'
+      OR u.display_name ILIKE '%' || $1::text || '%' ESCAPE '\'
     )
-  )
-ORDER BY created_at DESC, id DESC
+    AND (
+      $5::uuid IS NULL
+      OR NOT EXISTS (
+        SELECT 1 FROM friendships fb
+        WHERE fb.status = 'blocked'
+          AND ((fb.requester_id = $5::uuid AND fb.addressee_id = u.id)
+            OR (fb.requester_id = u.id AND fb.addressee_id = $5::uuid))
+      )
+    )
+)
+SELECT id, username, display_name, email, password_hash, avatar_url, bio,
+       status_emoji, color_scheme, role, onboarded_at,
+       created_at, updated_at, deleted_at, rel_tier
+FROM ranked
+WHERE $6::int IS NULL
+   OR rel_tier > $6::int
+   OR (rel_tier = $6::int AND created_at < $2::timestamptz)
+   OR (rel_tier = $6::int AND created_at = $2::timestamptz AND id < $3::uuid)
+ORDER BY rel_tier ASC, created_at DESC, id DESC
 LIMIT $4`
 
 // escapeLikePrefix backslash-escapes the LIKE metacharacters \, %, and _
@@ -355,18 +416,35 @@ func (q *Queries) ClearAvatar(ctx context.Context, id uuid.UUID) (string, error)
 	return *prev, nil
 }
 
-// ListByPrefix returns up to limit users whose username or display_name
-// starts with q (case-insensitive). q="" returns all non-deleted users
-// in (created_at DESC, id DESC) order. Pass cursor=nil for the first page.
+// SearchHit pairs a user with the caller's relationship tier
+// (0 = accepted friend, 1 = pending in either direction, 2 = no
+// relationship / admin path). The service uses Tier to build the
+// keyset cursor and the mobile client gets friends-first order
+// without doing any client-side sort.
+type SearchHit struct {
+	User domain.User
+	Tier int
+}
+
+// ListByPrefix returns up to limit search hits whose username or
+// display_name contains the query (case-insensitive substring).
+// Results are ordered "friends → pending → everyone else" then by
+// (created_at DESC, id DESC) within each tier, so the first page
+// always surfaces the caller's people first regardless of trigram
+// score. Pass cursor=nil for the first page; subsequent pages
+// supply a cursor whose Tier field comes from the previous page's
+// last row.
 //
 // callerID, when non-nil, hides users on either side of a 'blocked'
 // friendship row with that caller — symmetric block visibility so
-// neither party finds the other in search. Pass nil for callers that
-// should bypass the filter (admin user lookup, internal system paths).
+// neither party finds the other in search. Pass nil for callers
+// that should bypass the filter (admin user lookup, internal
+// system paths); the SQL CASE collapses all rows to tier 2 in
+// that branch, which mirrors the legacy ordering.
 //
-// Always over-fetches limit+1 so the service layer can use pagination.Page
-// to compute next_cursor + has_more.
-func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uuid.UUID, cursor *pagination.Cursor, limit int) ([]domain.User, error) {
+// Always over-fetches limit+1 so the service layer can use
+// pagination.Page to compute next_cursor + has_more.
+func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uuid.UUID, cursor *pagination.Cursor, limit int) ([]SearchHit, error) {
 	if limit <= 0 {
 		limit = pagination.DefaultLimit
 	}
@@ -374,32 +452,63 @@ func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uui
 
 	var ts *time.Time
 	var id *uuid.UUID
+	var tier *int
 	if cursor != nil {
 		ts = &cursor.Timestamp
 		id = &cursor.ID
+		tier = cursor.Tier
 	}
 
 	// Escape LIKE metachars so a search for "100%" matches the literal
 	// string "100%" instead of becoming a wildcard. The SQL has an explicit
 	// `ESCAPE '\'` clause to honor the escapes.
-	rows, err := q.db.Query(ctx, listByPrefixSQL, escapeLikePrefix(prefix), ts, id, overFetch, callerID)
+	rows, err := q.db.Query(ctx, listByPrefixSQL, escapeLikePrefix(prefix), ts, id, overFetch, callerID, tier)
 	if err != nil {
 		return nil, fmt.Errorf("user: list by prefix: %w", err)
 	}
 	defer rows.Close()
 
-	users := make([]domain.User, 0, overFetch)
+	hits := make([]SearchHit, 0, overFetch)
 	for rows.Next() {
-		u, scanErr := scanUser(rows)
-		if scanErr != nil {
+		var u domain.User
+		var relTier int
+		if scanErr := rows.Scan(
+			&u.ID,
+			&u.Username,
+			&u.DisplayName,
+			&u.Email,
+			&u.PasswordHash,
+			&u.AvatarURL,
+			&u.Bio,
+			&u.StatusEmoji,
+			&u.ColorScheme,
+			&u.Role,
+			&u.OnboardedAt,
+			&u.CreatedAt,
+			&u.UpdatedAt,
+			&u.DeletedAt,
+			&relTier,
+		); scanErr != nil {
 			return nil, fmt.Errorf("user: list by prefix scan: %w", scanErr)
 		}
-		users = append(users, u)
+		hits = append(hits, SearchHit{User: u, Tier: relTier})
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
 		return nil, fmt.Errorf("user: list by prefix rows: %w", rowsErr)
 	}
-	return users, nil
+	return hits, nil
+}
+
+// CountByPrefix returns the absolute count of users matching the
+// substring search — same WHERE clause as ListByPrefix but no
+// keyset cursor filter (cursor pages the slice, not the
+// population). Used for the "X of N" hint above paginated lists.
+func (q *Queries) CountByPrefix(ctx context.Context, prefix string, callerID *uuid.UUID) (int, error) {
+	var n int
+	if err := q.db.QueryRow(ctx, countByPrefixSQL, escapeLikePrefix(prefix), callerID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("user: count by prefix: %w", err)
+	}
+	return n, nil
 }
 
 // ListByIDs fetches every user whose ID appears in ids. Results are NOT

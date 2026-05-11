@@ -32,11 +32,16 @@ import {
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 import { FullWindowOverlay } from 'react-native-screens';
+
 import { useQueryClient } from '@tanstack/react-query';
 
+import { ConversationActionMenu } from '@/components/conversation-action-menu';
 import { ConversationRow } from '@/components/conversation-row';
+import { FriendActionMenu, FriendRowMenuButton } from '@/components/friend-action-menu';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
+import { RelationshipBadge } from '@/components/relationship-badge';
+import { MuteSheet } from '@/components/mute-sheet';
 import { Toast, toastConfig } from '@/components/toast-config';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -46,16 +51,29 @@ import { ModalScreenShell } from '@/components/ui/modal-screen-shell';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
-import { getGetV1ConversationsQueryKey } from '@/lib/api/hooks/conversations/conversations';
-import { useGetV1Friends, useGetV1FriendsRequests } from '@/lib/api/hooks/friends/friends';
+import {
+  getGetV1FriendsQueryKey,
+  getGetV1FriendsRequestsQueryKey,
+  useDeleteV1FriendsUserId,
+  useGetV1FriendsRequests,
+  usePostV1FriendsRequestsIdAccept,
+  usePostV1FriendsUserIdBlock,
+} from '@/lib/api/hooks/friends/friends';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import { useFriendActions } from '@/lib/api/use-friend-actions';
+import {
+  flatten,
+  useInfiniteConversations,
+  useInfiniteFriends,
+  useInfiniteUsers,
+} from '@/lib/api/use-infinite';
+import { haptics } from '@/lib/haptics';
+import { useConversationPinMute } from '@/lib/use-conversation-pin-mute';
 import type {
-  InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
-  InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendRequestsResponse,
+  InternalHandlerHttpFriendshipResponse,
   InternalHandlerHttpPresenceListResponse,
   InternalHandlerHttpSearchConversationRow,
   InternalHandlerHttpSearchMessageRow,
@@ -63,7 +81,7 @@ import type {
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
-import { conversationDisplay } from '@/lib/conversation-display';
+import { conversationDisplay, isCurrentlyMuted } from '@/lib/conversation-display';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { toast } from '@/lib/toast';
 
@@ -84,7 +102,10 @@ type Row =
   | { kind: 'user'; key: string; user: InternalHandlerHttpUserResponse }
   | { kind: 'conversation'; key: string; conversation: InternalHandlerHttpSearchConversationRow }
   | { kind: 'message'; key: string; message: InternalHandlerHttpSearchMessageRow }
-  | { kind: 'show-all'; key: string; section: SectionId; label: string };
+  // `more` is the absolute remaining count for screen-reader and
+  // analytics. The visible label is rendered from total, but a11y
+  // wants the delta phrased as "X more results below."
+  | { kind: 'show-all'; key: string; section: SectionId; label: string; more: number };
 
 // Top-N each section truncates to before showing a "Show all" row.
 // Backend caps the unified-search response at 10 per section, so
@@ -104,13 +125,19 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 export default function SearchModalScreen() {
   const router = useRouter();
-  const qc = useQueryClient();
   const [rawQuery, setRawQuery] = React.useState('');
   const debouncedQuery = useDebouncedValue(rawQuery.trim(), DEBOUNCE_MS);
   const enabled = debouncedQuery.length >= MIN_CHARS;
 
+  // Unified search drives only the conversations + messages
+  // sections — those endpoints don't have a per-section paginated
+  // counterpart, so the unified 10-cap is what we render. People
+  // search has its own paginated endpoint (/v1/users), and
+  // splitting it out lets the tier sort run across the FULL
+  // matching set instead of the unified-search top-10 (which is
+  // ranked by trigram score and may not include any friends).
   const searchQ = useGetV1Search(
-    { q: debouncedQuery, types: 'users,conversations,messages' },
+    { q: debouncedQuery, types: 'conversations,messages' },
     { query: { enabled, staleTime: 30_000 } }
   );
   const data = searchQ.data as InternalHandlerHttpSearchResponse | undefined;
@@ -132,16 +159,26 @@ export default function SearchModalScreen() {
     return m;
   }, [presenceData]);
 
-  const conversationsCache = qc.getQueryData<InternalHandlerHttpConversationListResponse>(
-    getGetV1ConversationsQueryKey({ limit: 100 })
-  );
+  // Hydrate the conversations infinite-query cache so a search hit
+  // for a chat the user just scrolled past in the chats tab can
+  // render the same StackedAvatars + member-count subtitle without
+  // re-fetching. The chats tab is the ONLY producer of this cache;
+  // when it hasn't been visited yet, the map stays empty and each
+  // ConversationRow falls back to the slim search-row payload below.
+  const fullConversationsQ = useInfiniteConversations({
+    query: { staleTime: 30_000 },
+  });
   const fullConversationById = React.useMemo(() => {
     const m = new Map<string, InternalHandlerHttpConversationResponse>();
-    for (const c of conversationsCache?.data ?? []) {
+    const { data: convs } = flatten<
+      InternalHandlerHttpConversationResponse,
+      { data?: InternalHandlerHttpConversationResponse[] }
+    >(fullConversationsQ.data?.pages);
+    for (const c of convs) {
       if (c.id) m.set(c.id, c);
     }
     return m;
-  }, [conversationsCache]);
+  }, [fullConversationsQ.data]);
 
   const ensureDM = useEnsureDirectConversation();
   const [openingFor, setOpeningFor] = React.useState<string | null>(null);
@@ -150,9 +187,9 @@ export default function SearchModalScreen() {
   // the search on it (results still show for non-friends), but
   // we use it to decide whether each user-section row gets a
   // "tap to message" action, an "Add friend" button, or an
-  // "Unsend" button for an outgoing request.
-  const friendsQ = useGetV1Friends({ limit: 100 }, { query: { staleTime: 30_000 } });
-  const friendsData = friendsQ.data as InternalHandlerHttpFriendListResponse | undefined;
+  // "Unsend" button for an outgoing request. The infinite-query
+  // cache shares with the friends tab so we don't re-fetch.
+  const friendsQ = useInfiniteFriends({ query: { staleTime: 30_000 } });
   const requestsQ = useGetV1FriendsRequests({ query: { staleTime: 30_000 } });
   const requestsData = requestsQ.data as InternalHandlerHttpFriendRequestsResponse | undefined;
 
@@ -161,7 +198,11 @@ export default function SearchModalScreen() {
   // friendship.id so the unsend button can DELETE the right row.
   const friendStatusByUser = React.useMemo(() => {
     const m = new Map<string, FriendStatus>();
-    for (const f of friendsData?.data ?? []) {
+    const { data: friends } = flatten<
+      InternalHandlerHttpFriendshipResponse,
+      { data?: InternalHandlerHttpFriendshipResponse[] }
+    >(friendsQ.data?.pages);
+    for (const f of friends) {
       if (f.user?.id) m.set(f.user.id, { kind: 'friend' });
     }
     for (const r of requestsData?.outgoing ?? []) {
@@ -171,7 +212,7 @@ export default function SearchModalScreen() {
       if (r.user?.id && r.id) m.set(r.user.id, { kind: 'incoming', requestId: r.id });
     }
     return m;
-  }, [friendsData, requestsData]);
+  }, [friendsQ.data, requestsData]);
 
   // Send + cancel friend-request actions live in the shared
   // useFriendActions hook so cache invalidation + toast vocab
@@ -179,6 +220,117 @@ export default function SearchModalScreen() {
   // screen via <FullWindowOverlay> below so they render on top
   // of the iOS modal chrome.
   const friendActions = useFriendActions();
+
+  // Friend "more actions" menu — Unfriend / Block. Mirrors the
+  // friends-tab implementation so a user can manage relationships
+  // straight from a search hit.
+  const qc = useQueryClient();
+  const unfriend = useDeleteV1FriendsUserId();
+  const blockUser = usePostV1FriendsUserIdBlock();
+  const acceptRequest = usePostV1FriendsRequestsIdAccept();
+  const [friendMenuTarget, setFriendMenuTarget] =
+    React.useState<InternalHandlerHttpUserResponse | null>(null);
+  const [pendingFriendAction, setPendingFriendAction] = React.useState<Set<string>>(new Set());
+  const markFriendPending = React.useCallback((id: string) => {
+    setPendingFriendAction((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+  const unmarkFriendPending = React.useCallback((id: string) => {
+    setPendingFriendAction((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+  const invalidateRelationships = React.useCallback(async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: getGetV1FriendsQueryKey() }),
+      qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() }),
+    ]);
+  }, [qc]);
+  const onUnfriend = React.useCallback(
+    async (user: InternalHandlerHttpUserResponse) => {
+      const userId = user.id;
+      if (!userId) return;
+      markFriendPending(userId);
+      setFriendMenuTarget(null);
+      try {
+        await unfriend.mutateAsync({ userId });
+        await invalidateRelationships();
+        const handle = user.username ? `@${user.username}` : 'this user';
+        toast.info('Unfriended', `${handle} is no longer in your friends.`);
+      } catch (err) {
+        const msg =
+          err instanceof APIError && err.message ? err.message : "Couldn't unfriend right now.";
+        toast.error(msg);
+      } finally {
+        unmarkFriendPending(userId);
+      }
+    },
+    [unfriend, invalidateRelationships, markFriendPending, unmarkFriendPending]
+  );
+  const onBlock = React.useCallback(
+    async (user: InternalHandlerHttpUserResponse) => {
+      const userId = user.id;
+      if (!userId) return;
+      markFriendPending(userId);
+      setFriendMenuTarget(null);
+      try {
+        await blockUser.mutateAsync({ userId });
+        await invalidateRelationships();
+        const handle = user.username ? `@${user.username}` : 'this user';
+        toast.info('Blocked', `${handle} can't message or add you.`);
+      } catch (err) {
+        const msg =
+          err instanceof APIError && err.message ? err.message : "Couldn't block right now.";
+        toast.error(msg);
+      } finally {
+        unmarkFriendPending(userId);
+      }
+    },
+    [blockUser, invalidateRelationships, markFriendPending, unmarkFriendPending]
+  );
+
+  // Accept/decline a pending incoming request. Wired into the
+  // keyboard activation path (Enter on a pending row in the
+  // People section fires Accept) and the row-tap on incoming
+  // rows that surface the trailing icon pair.
+  const onAcceptIncoming = React.useCallback(
+    async (requestId: string, handle: string | undefined) => {
+      try {
+        await acceptRequest.mutateAsync({ id: requestId });
+        await invalidateRelationships();
+        toast.success("You're now friends", handle ? `Say hi to ${handle}.` : undefined);
+      } catch (err) {
+        const msg =
+          err instanceof APIError && err.message
+            ? err.message
+            : "Couldn't accept this request right now.";
+        toast.error(msg);
+      }
+    },
+    [acceptRequest, invalidateRelationships]
+  );
+
+  // Conversation "more actions" — Pin / Mute. Reuses the same
+  // optimistic mutation hook the chats tab uses so a long-press +
+  // pin from a search hit lands the same row swap on both surfaces.
+  const [activeConvAction, setActiveConvAction] = React.useState<{
+    id: string;
+    title: string;
+    isPinned: boolean;
+    isMuted: boolean;
+    screen: 'menu' | 'mute';
+  } | null>(null);
+  const closeConvMenu = React.useCallback(() => setActiveConvAction(null), []);
+  const openConvMute = React.useCallback(
+    () => setActiveConvAction((s) => (s ? { ...s, screen: 'mute' } : s)),
+    []
+  );
+  const { togglePin, setMute, unmute } = useConversationPinMute();
 
   const goCancel = React.useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -242,6 +394,11 @@ export default function SearchModalScreen() {
     setExpandedSections(new Set());
     setCollapsedSections(new Set());
   }, [debouncedQuery]);
+  // After "Show all N" expands a section, the post-render effect
+  // below scrolls that section's header to the top of the viewport
+  // so the newly-revealed rows are visible without the user having
+  // to hunt for them.
+  const justExpandedRef = React.useRef<SectionId | null>(null);
   const expandSection = React.useCallback((section: SectionId) => {
     setExpandedSections((prev) => {
       if (prev.has(section)) return prev;
@@ -249,19 +406,82 @@ export default function SearchModalScreen() {
       next.add(section);
       return next;
     });
+    justExpandedRef.current = section;
   }, []);
   const toggleSection = React.useCallback((section: SectionId) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
-      if (next.has(section)) next.delete(section);
-      else next.add(section);
+      if (next.has(section)) {
+        next.delete(section);
+      } else {
+        next.add(section);
+        // Collapsing also drops the show-all expansion for the
+        // section. Two reasons:
+        //   1. UX: re-opening the chevron should reset to the
+        //      cap-5 + "Show all N" affordance, not silently
+        //      restore a 1000-row drill-down state.
+        //   2. Correctness: when usersExpanded stays true behind
+        //      a collapsed section, the rows under it aren't
+        //      rendered but the FlashList is suddenly very short,
+        //      so onEndReached keeps firing fetchNextPage on
+        //      every render and the drill-down query cascades
+        //      every page in the background.
+        setExpandedSections((prevExp) => {
+          if (!prevExp.has(section)) return prevExp;
+          const nextExp = new Set(prevExp);
+          nextExp.delete(section);
+          return nextExp;
+        });
+      }
       return next;
     });
   }, []);
 
+  // People search runs against /v1/users from the moment the user
+  // types — the friend-tier sort needs the FULL matching set to
+  // place friends first (the unified-search top-10 is ranked by
+  // trigram score and often returns zero friends). Drilling for
+  // more pages just keeps appending rows below; the cap-5 default
+  // happens client-side after the sort.
+  const usersExpanded = expandedSections.has('users');
+  const conversationsTotal = data?.conversations_total ?? data?.conversations?.length ?? 0;
+  const messagesTotal = data?.messages_total ?? data?.messages?.length ?? 0;
+  const usersDrillQ = useInfiniteUsers(
+    { q: debouncedQuery },
+    {
+      query: { enabled, staleTime: 30_000 },
+    }
+  );
+  const { data: drilledUsers, total: usersTotal } = React.useMemo(
+    () =>
+      flatten<InternalHandlerHttpUserResponse, { data?: InternalHandlerHttpUserResponse[] }>(
+        usersDrillQ.data?.pages
+      ),
+    [usersDrillQ.data]
+  );
+
   const rows = React.useMemo<Row[]>(
-    () => buildRows(data, expandedSections, collapsedSections),
-    [data, expandedSections, collapsedSections]
+    () =>
+      buildRows({
+        data,
+        usersTotal,
+        conversationsTotal,
+        messagesTotal,
+        drilledUsers,
+        usersExpanded,
+        expanded: expandedSections,
+        collapsed: collapsedSections,
+      }),
+    [
+      data,
+      usersTotal,
+      conversationsTotal,
+      messagesTotal,
+      usersExpanded,
+      drilledUsers,
+      expandedSections,
+      collapsedSections,
+    ]
   );
 
   // Indices of tappable rows (skip headers — they're not actions).
@@ -277,48 +497,114 @@ export default function SearchModalScreen() {
   }, [rows, friendStatusByUser, me?.id]);
 
   const [focusedRowIdx, setFocusedRowIdx] = React.useState<number | null>(null);
-  // Whenever results change, snap focus to the first tappable row
-  // so Enter immediately activates the most relevant hit.
+  // When results change, keep focus on the same row if it's still
+  // tappable; otherwise snap to the first tappable row. The earlier
+  // "always reset to first tappable" combined with the
+  // scrollToIndex effect below caused a nasty auto-scroll on
+  // expand: 1000 stranger users (non-tappable) followed by a group
+  // chat (tappable) meant tappableRowIndices[0] was the group, and
+  // FlashList scrolled the whole modal down to it.
   React.useEffect(() => {
-    setFocusedRowIdx(tappableRowIndices[0] ?? null);
+    setFocusedRowIdx((prev) => {
+      if (prev != null && tappableRowIndices.includes(prev)) return prev;
+      return tappableRowIndices[0] ?? null;
+    });
   }, [tappableRowIndices]);
 
   // Activate the row at a given index (Enter, or programmatic).
-  // Different row kinds have different tap callbacks; this routes
-  // each kind to its own handler so we don't duplicate the
-  // "ensure DM / open thread" logic that already lives there.
+  // Each row kind has a "primary action" — Enter does what the
+  // most-prominent visual affordance on that row would do:
+  //
+  //   header           → toggle the chevron (expand/collapse)
+  //   user (friend)    → open DM
+  //   user (outgoing)  → unsend the pending request
+  //   user (incoming)  → accept the request
+  //   user (none)      → send a friend request
+  //   conversation     → open the thread
+  //   message          → open the parent conversation
+  //   show-all         → expand the section
   const activateRow = React.useCallback(
     (rowIdx: number | null) => {
       if (rowIdx == null) return;
       const row = rows[rowIdx];
       if (!row) return;
-      if (row.kind === 'user' && row.user.id) {
-        void onTapUser(row.user);
-      } else if (row.kind === 'conversation' && row.conversation.id) {
+      if (row.kind === 'header') {
+        toggleSection(row.section);
+        return;
+      }
+      if (row.kind === 'user') {
+        const u = row.user;
+        if (!u.id) return;
+        if (me?.id && u.id === me.id) return;
+        const status = friendStatusByUser.get(u.id);
+        if (status?.kind === 'friend') {
+          void onTapUser(u);
+        } else if (status?.kind === 'outgoing') {
+          friendActions.cancelFriendRequest(status.requestId);
+        } else if (status?.kind === 'incoming') {
+          void onAcceptIncoming(
+            status.requestId,
+            u.username ? `@${u.username}` : (u.display_name ?? undefined)
+          );
+        } else if (u.username) {
+          friendActions.sendFriendRequest(u.username);
+        }
+        return;
+      }
+      if (row.kind === 'conversation' && row.conversation.id) {
         dismissThenGoToConversation(row.conversation.id);
-      } else if (row.kind === 'message' && row.message.conversation_id) {
+        return;
+      }
+      if (row.kind === 'message' && row.message.conversation_id) {
         dismissThenGoToConversation(row.message.conversation_id);
-      } else if (row.kind === 'show-all') {
+        return;
+      }
+      if (row.kind === 'show-all') {
         expandSection(row.section);
       }
     },
-    [rows, onTapUser, dismissThenGoToConversation, expandSection]
+    [
+      rows,
+      me?.id,
+      friendStatusByUser,
+      friendActions,
+      onAcceptIncoming,
+      onTapUser,
+      dismissThenGoToConversation,
+      expandSection,
+      toggleSection,
+    ]
   );
 
   // Web-only keyboard nav: ↑/↓ cycles tappable rows, Enter activates.
   // Listener is on capture phase so a focused TextInput in the
   // header can't swallow the events. Native gets nothing — touch
-  // UX uses tap-to-select directly.
+  // UX uses tap-to-select directly. The scrollToIndex call lives
+  // INSIDE this handler (not in a useEffect on focusedRowIdx) so
+  // only user-driven arrow presses cause the viewport to follow —
+  // a data-change-driven focus reset never scrolls the list.
   const listRef = React.useRef<ListRef<Row>>(null);
   React.useEffect(() => {
     if (Platform.OS !== 'web' || tappableRowIndices.length === 0) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setFocusedRowIdx((prev) => stepFocus(prev, tappableRowIndices, 1));
+        setFocusedRowIdx((prev) => {
+          const next = stepFocus(prev, tappableRowIndices, 1);
+          if (next != null) {
+            listRef.current?.scrollToIndex({ index: next, viewPosition: 0.5 });
+          }
+          return next;
+        });
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setFocusedRowIdx((prev) => stepFocus(prev, tappableRowIndices, -1));
+        setFocusedRowIdx((prev) => {
+          const next = stepFocus(prev, tappableRowIndices, -1);
+          if (next != null) {
+            listRef.current?.scrollToIndex({ index: next, viewPosition: 0.5 });
+          }
+          return next;
+        });
       } else if (e.key === 'Enter') {
         e.preventDefault();
         activateRow(focusedRowIdx);
@@ -328,13 +614,32 @@ export default function SearchModalScreen() {
     return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [tappableRowIndices, focusedRowIdx, activateRow]);
 
-  // Keep the focused row in view as the user arrows around — without
-  // this, ArrowDown past the last visible row leaves the highlight
-  // off-screen.
+  const mutedFg = useThemeColor('muted-foreground');
+
+  // After "Show all N" lands, scroll the just-expanded section's
+  // header to the top of the viewport so the newly-revealed rows
+  // are visible without the user having to hunt for them. The
+  // ref is cleared unconditionally so a stale value can't fire
+  // after a re-render.
   React.useEffect(() => {
-    if (focusedRowIdx == null) return;
-    listRef.current?.scrollToIndex({ index: focusedRowIdx, viewPosition: 0.5 });
-  }, [focusedRowIdx]);
+    const section = justExpandedRef.current;
+    justExpandedRef.current = null;
+    if (!section) return;
+    const idx = rows.findIndex((r) => r.kind === 'header' && r.section === section);
+    if (idx < 0) return;
+    listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0 });
+  }, [rows]);
+
+  // FlashList 2.0.2 stickyHeaderIndices paints the sticky overlay
+  // on top of the inline header at scrollY=0, doubling the first
+  // section header. Gate sticky behind a small scroll so the
+  // inline header has left the viewport before the overlay takes
+  // over.
+  const [stickyEnabled, setStickyEnabled] = React.useState(false);
+  const stickyHeaderIndices = React.useMemo(() => {
+    if (!stickyEnabled) return undefined;
+    return rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0);
+  }, [stickyEnabled, rows]);
 
   return (
     <ModalScreenShell onClose={goCancel} testID="search-modal-shell">
@@ -343,10 +648,21 @@ export default function SearchModalScreen() {
 
         {!enabled ? (
           <SearchHint />
-        ) : searchQ.isFetching && rows.length === 0 ? (
+        ) : // Block on the friend graph load too — without it, user
+        // hits render in stranger order, then jump-reorder once
+        // friendsQ lands. The graph is shared with the friends-tab
+        // cache (staleTime 30s), so this gate only fires the FIRST
+        // time the modal mounts in a fresh session.
+        (searchQ.isFetching || usersDrillQ.isFetching || friendsQ.isLoading) &&
+          rows.length === 0 ? (
           <SearchLoading />
-        ) : searchQ.isError && rows.length === 0 ? (
-          <SearchError onRetry={() => searchQ.refetch()} />
+        ) : (searchQ.isError || usersDrillQ.isError) && rows.length === 0 ? (
+          <SearchError
+            onRetry={() => {
+              void searchQ.refetch();
+              void usersDrillQ.refetch();
+            }}
+          />
         ) : rows.length === 0 ? (
           <SearchNoResults />
         ) : (
@@ -354,6 +670,43 @@ export default function SearchModalScreen() {
             ref={listRef}
             data={rows}
             keyExtractor={(item) => item.key}
+            // FlashList recycles view instances across rows in the
+            // same pool. Without an explicit type-tag, a 'header'
+            // slot could be reused for a 'user' row on scroll and
+            // show stale text. Tagging by `kind` keeps headers,
+            // users, conversations, messages, and show-all rows in
+            // separate pools so each renders with the right shape.
+            getItemType={(item) => item.kind}
+            // FlashList v2's default maintainVisibleContentPosition
+            // anchors to phantom prior content on first paint and
+            // can land the modal scrolled mid-list. Force it off
+            // and pin initial render to index 0.
+            maintainVisibleContentPosition={{ disabled: true }}
+            initialScrollIndex={0}
+            // Sticky chevron headers — gated behind a small scroll
+            // so the inline header has left the viewport before
+            // the overlay takes over (FlashList 2.0.2 duplicate
+            // bug). undefined disables sticky entirely.
+            stickyHeaderIndices={stickyHeaderIndices}
+            scrollEventThrottle={32}
+            onScroll={(e) => {
+              const y = e.nativeEvent.contentOffset.y;
+              const next = y > 50;
+              if (next !== stickyEnabled) setStickyEnabled(next);
+            }}
+            onEndReachedThreshold={0.5}
+            onEndReached={() => {
+              if (!usersExpanded) return;
+              if (!usersDrillQ.hasNextPage || usersDrillQ.isFetchingNextPage) return;
+              void usersDrillQ.fetchNextPage();
+            }}
+            ListFooterComponent={
+              usersExpanded && usersDrillQ.isFetchingNextPage ? (
+                <View className="items-center py-4">
+                  <ActivityIndicator color={mutedFg} />
+                </View>
+              ) : null
+            }
             renderItem={({ item, index }) => (
               <RenderedRow
                 row={item}
@@ -368,11 +721,72 @@ export default function SearchModalScreen() {
                 onOpenConversation={dismissThenGoToConversation}
                 onExpandSection={expandSection}
                 onToggleSection={toggleSection}
+                onOpenFriendMenu={setFriendMenuTarget}
+                onOpenConvMenu={(c) =>
+                  setActiveConvAction({
+                    id: c.id,
+                    title: c.title,
+                    isPinned: c.isPinned,
+                    isMuted: c.isMuted,
+                    screen: 'menu',
+                  })
+                }
+                pendingFriendAction={pendingFriendAction}
               />
             )}
           />
         )}
       </View>
+
+      {/* Friend "more actions" sheet — opens for friend rows that
+          surface the trailing 3-dots button. Same vocabulary as the
+          friends tab: Unfriend / Block. */}
+      <FriendActionMenu
+        target={friendMenuTarget}
+        pendingAction={pendingFriendAction}
+        onClose={() => setFriendMenuTarget(null)}
+        onUnfriend={onUnfriend}
+        onBlock={onBlock}
+      />
+      {/* Conversation pin / mute menu — same primitives the chats
+          tab uses, so a search-modal pin lands the same optimistic
+          row swap. */}
+      <ConversationActionMenu
+        visible={activeConvAction?.screen === 'menu'}
+        title={activeConvAction?.title ?? ''}
+        isPinned={activeConvAction?.isPinned ?? false}
+        isMuted={activeConvAction?.isMuted ?? false}
+        onTogglePin={() => {
+          if (!activeConvAction) return;
+          togglePin(activeConvAction.id, activeConvAction.isPinned);
+          closeConvMenu();
+        }}
+        onMutePress={openConvMute}
+        onUnmute={() => {
+          if (!activeConvAction) return;
+          unmute(activeConvAction.id);
+          closeConvMenu();
+        }}
+        onClose={closeConvMenu}
+        testID="search-conv-action-menu"
+      />
+      <MuteSheet
+        visible={activeConvAction?.screen === 'mute'}
+        isMuted={activeConvAction?.isMuted ?? false}
+        onPickUntil={(until) => {
+          if (!activeConvAction) return;
+          setMute(activeConvAction.id, until);
+          closeConvMenu();
+        }}
+        onUnmute={() => {
+          if (!activeConvAction) return;
+          unmute(activeConvAction.id);
+          closeConvMenu();
+        }}
+        onClose={closeConvMenu}
+        testID="search-mute-sheet"
+      />
+
       {/* iOS native Modal hides the root <ToastRoot> behind the
           modal chrome. <FullWindowOverlay> from react-native-
           screens mounts a UIView at the WINDOW level — it sits
@@ -394,15 +808,25 @@ function isTappableRow(
   friendStatusByUser: Map<string, FriendStatus>,
   myUserId: string | undefined
 ): boolean {
+  // Section headers are keyboard-targetable so ↑/↓ can land on
+  // them and Enter toggles the chevron (expand/collapse). Without
+  // this, arrowing past a non-tappable People section full of
+  // strangers landed on the Chats header below — and Enter did
+  // nothing useful there. Now the header itself is the activation
+  // surface.
+  if (r.kind === 'header') return true;
   if (r.kind === 'user') {
-    // The rendered user row only allows the row tap when the
-    // peer is an accepted friend AND not self. Mirror that here
-    // so ↓ + Enter on a non-friend hit doesn't drive ensureDM
-    // into a 403 / self-DM branch the rendered Pressable would
-    // have refused.
+    // Every non-self user row is keyboard-focusable; the
+    // activation routes by status (friend → DM, outgoing →
+    // unsend, incoming → accept, none → add). Strangers need a
+    // username because the Add endpoint targets one — skip rows
+    // without it.
     if (!r.user.id) return false;
     if (myUserId && r.user.id === myUserId) return false;
-    return friendStatusByUser.get(r.user.id)?.kind === 'friend';
+    const status = friendStatusByUser.get(r.user.id);
+    if (status?.kind === 'friend') return true;
+    if (status?.kind === 'outgoing' || status?.kind === 'incoming') return true;
+    return r.user.username != null;
   }
   if (r.kind === 'conversation') return !!r.conversation.id;
   if (r.kind === 'message') return !!r.message.conversation_id;
@@ -425,45 +849,78 @@ function stepFocus(
   return tappableIndices[next];
 }
 
-function buildRows(
-  data: InternalHandlerHttpSearchResponse | undefined,
-  expanded: Set<SectionId>,
-  collapsed: Set<SectionId>
-): Row[] {
-  if (!data) return [];
+// Backend orders /v1/users by (friend → pending → stranger) tier, then
+// by (created_at DESC, id DESC) within each tier — see the SQL in
+// apps/backend/internal/repository/user/repo.go. The client no longer
+// re-sorts; an earlier client-side tier sort couldn't reach friends
+// that lived past the first page, and removing it keeps the pagination
+// cursor coherent (the cursor encodes tier on the backend side now).
+
+function buildRows({
+  data,
+  usersTotal,
+  conversationsTotal,
+  messagesTotal,
+  drilledUsers,
+  usersExpanded,
+  expanded,
+  collapsed,
+}: {
+  data: InternalHandlerHttpSearchResponse | undefined;
+  usersTotal: number;
+  conversationsTotal: number;
+  messagesTotal: number;
+  // /v1/users-paginated user matches. Already ordered
+  // friends → pending → strangers by the backend's rel_tier
+  // ranking; the client renders the slice as-is.
+  drilledUsers: InternalHandlerHttpUserResponse[];
+  // True once the user taps "Show all N people"; the modal then
+  // renders every loaded page and lets the FlashList drive
+  // fetchNextPage on scroll.
+  usersExpanded: boolean;
+  expanded: Set<SectionId>;
+  collapsed: Set<SectionId>;
+}): Row[] {
   const out: Row[] = [];
 
-  const users = data.users ?? [];
-  if (users.length > 0) {
+  // People section runs against /v1/users from the start so the
+  // first page already contains the caller's friends — no client
+  // sort needed.
+  // drilledUsers already arrives ordered friends → pending → strangers
+  // per the backend's rel_tier ranking — no client sort needed.
+  const renderedUsers = usersExpanded ? drilledUsers : drilledUsers.slice(0, VISIBLE_PER_SECTION);
+  if (usersTotal > 0 || drilledUsers.length > 0) {
     const isCollapsed = collapsed.has('users');
-    const showAll = expanded.has('users');
-    const visible = showAll ? users : users.slice(0, VISIBLE_PER_SECTION);
     out.push({
       kind: 'header',
       key: 'h:users',
       title: 'People',
-      count: users.length,
+      count: usersTotal,
       section: 'users',
       collapsed: isCollapsed,
     });
     if (!isCollapsed) {
-      visible.forEach((u, i) => {
+      renderedUsers.forEach((u, i) => {
         out.push({ kind: 'user', key: `user:${u.id ?? `idx-${i}`}`, user: u });
       });
-      if (!showAll && users.length > VISIBLE_PER_SECTION) {
-        const more = users.length - VISIBLE_PER_SECTION;
+      // Show-all label uses the absolute total — the user wants
+      // "Show all 1000 people," not "Show 5 more" when there are
+      // 1000 matches behind the unified-search cap.
+      if (!usersExpanded && usersTotal > renderedUsers.length) {
+        const more = usersTotal - renderedUsers.length;
         out.push({
           kind: 'show-all',
           key: 'show-all:users',
           section: 'users',
-          label: `Show ${more} more ${more === 1 ? 'user' : 'users'}`,
+          label: `Show all ${usersTotal} ${usersTotal === 1 ? 'person' : 'people'}`,
+          more,
         });
       }
     }
   }
 
-  const conversations = data.conversations ?? [];
-  if (conversations.length > 0) {
+  const conversations = data?.conversations ?? [];
+  if (conversationsTotal > 0 || conversations.length > 0) {
     const isCollapsed = collapsed.has('conversations');
     const showAll = expanded.has('conversations');
     const visible = showAll ? conversations : conversations.slice(0, VISIBLE_PER_SECTION);
@@ -471,7 +928,7 @@ function buildRows(
       kind: 'header',
       key: 'h:conversations',
       title: 'Chats',
-      count: conversations.length,
+      count: conversationsTotal,
       section: 'conversations',
       collapsed: isCollapsed,
     });
@@ -483,6 +940,10 @@ function buildRows(
           conversation: c,
         });
       });
+      // /v1/conversations doesn't take a `q` filter, so we can't
+      // drill past the unified-search 10-cap for chats. The label
+      // still reads "Show N more" relative to the visible slice
+      // and reveals all 10 when tapped.
       if (!showAll && conversations.length > VISIBLE_PER_SECTION) {
         const more = conversations.length - VISIBLE_PER_SECTION;
         out.push({
@@ -490,13 +951,14 @@ function buildRows(
           key: 'show-all:conversations',
           section: 'conversations',
           label: `Show ${more} more ${more === 1 ? 'chat' : 'chats'}`,
+          more,
         });
       }
     }
   }
 
-  const messages = data.messages ?? [];
-  if (messages.length > 0) {
+  const messages = data?.messages ?? [];
+  if (messagesTotal > 0 || messages.length > 0) {
     const isCollapsed = collapsed.has('messages');
     const showAll = expanded.has('messages');
     const visible = showAll ? messages : messages.slice(0, VISIBLE_PER_SECTION);
@@ -504,7 +966,7 @@ function buildRows(
       kind: 'header',
       key: 'h:messages',
       title: 'Messages',
-      count: messages.length,
+      count: messagesTotal,
       section: 'messages',
       collapsed: isCollapsed,
     });
@@ -523,6 +985,7 @@ function buildRows(
           key: 'show-all:messages',
           section: 'messages',
           label: `Show ${more} more ${more === 1 ? 'message' : 'messages'}`,
+          more,
         });
       }
     }
@@ -544,6 +1007,9 @@ function RenderedRow({
   onOpenConversation,
   onExpandSection,
   onToggleSection,
+  onOpenFriendMenu,
+  onOpenConvMenu,
+  pendingFriendAction,
 }: {
   row: Row;
   isFocused: boolean;
@@ -557,6 +1023,9 @@ function RenderedRow({
   onOpenConversation: (conversationId: string) => void;
   onExpandSection: (section: SectionId) => void;
   onToggleSection: (section: SectionId) => void;
+  onOpenFriendMenu: (user: InternalHandlerHttpUserResponse) => void;
+  onOpenConvMenu: (c: { id: string; title: string; isPinned: boolean; isMuted: boolean }) => void;
+  pendingFriendAction: Set<string>;
 }) {
   // Headers don't get the keyboard-focus highlight — only tappable
   // rows do, otherwise arrowing past a section title would land
@@ -567,6 +1036,7 @@ function RenderedRow({
         title={row.title}
         count={row.count}
         collapsed={row.collapsed}
+        isFocused={isFocused}
         onToggle={() => onToggleSection(row.section)}
       />
     );
@@ -592,6 +1062,7 @@ function RenderedRow({
         const isSelf = !!myUserId && u.id === myUserId;
         const status = u.id ? friendStatusByUser.get(u.id) : undefined;
         const isFriend = status?.kind === 'friend';
+        const inFlight = u.id ? pendingFriendAction.has(u.id) : false;
         // Friends can be tapped to open a DM. Non-friends get the row
         // tap disabled — the affordance lives in the trailing button
         // (Add friend / Unsend / accept-via-friends-tab) so a stray
@@ -599,42 +1070,95 @@ function RenderedRow({
         // Self gets no tap or button — the backend rejects self-DMs
         // and self-friend-requests; we shouldn't surface either.
         const onTap = !opening && !isSelf && isFriend && u.id ? () => onTapUser(u) : undefined;
+        let trailing: React.ReactNode;
+        if (isSelf) {
+          trailing = (
+            <Text variant="muted" className="text-xs">
+              You
+            </Text>
+          );
+        } else if (isFriend) {
+          // "Friend" badge + 3-dots Unfriend/Block sheet — same
+          // primitives the friends tab uses, with an explicit
+          // relationship label so the row reads as "this person is
+          // already in your graph" at a glance.
+          trailing = (
+            <View className="flex-row items-center gap-2">
+              <RelationshipBadge label="Friend" />
+              <FriendRowMenuButton
+                disabled={inFlight}
+                onPress={() => onOpenFriendMenu(u)}
+                testID={u.id ? `search-${u.id}-menu` : undefined}
+              />
+            </View>
+          );
+        } else if (status?.kind === 'outgoing') {
+          // Pending outgoing — "Added" badge alongside the existing
+          // Unsend pill (FriendStatusAction renders that for the
+          // outgoing kind). Mirrors the friends-tab search vocab.
+          trailing = (
+            <View className="flex-row items-center gap-2">
+              <RelationshipBadge label="Added" />
+              <FriendStatusAction
+                status={status}
+                username={u.username}
+                busyLabel={opening ? 'Opening…' : undefined}
+                onAdd={friendActions.sendFriendRequest}
+                onCancel={friendActions.cancelFriendRequest}
+                isAdding={friendActions.isAddingFor(u.username)}
+                isCanceling={friendActions.isCancelingFor(status.requestId)}
+                incomingMode="hint"
+                testID={u.id ? `search-${u.id}` : undefined}
+              />
+            </View>
+          );
+        } else {
+          // Status is now 'incoming' or undefined (friend and
+          // outgoing handled above). FriendStatusAction renders
+          // the "Sent you a request" hint for incoming and the
+          // "Add friend" pill when there's no relationship.
+          trailing = (
+            <FriendStatusAction
+              status={status}
+              username={u.username}
+              busyLabel={opening ? 'Opening…' : undefined}
+              onAdd={friendActions.sendFriendRequest}
+              onCancel={friendActions.cancelFriendRequest}
+              isAdding={friendActions.isAddingFor(u.username)}
+              isCanceling={false}
+              incomingMode="hint"
+              testID={u.id ? `search-${u.id}` : undefined}
+            />
+          );
+        }
+        // Presence is friends-only (§7.2). Show the dot for friend
+        // rows so the search hit reads with the same online/offline
+        // glance the friends-list section gives; strangers /
+        // pending rows still hide it since their presence isn't
+        // subscribed. Status emoji intentionally omitted — search
+        // results stay clean visually (the user only wanted the
+        // presence dot).
+        const presence = isFriend && u.id ? presenceByUser.get(u.id) : undefined;
         return (
           <FriendRow
             displayName={u.display_name}
             username={u.username}
             avatarUrl={u.avatar_url}
-            hidePresence
+            presence={presence}
+            hidePresence={!isFriend}
             onPress={onTap}
-            trailing={
-              isSelf ? (
-                <Text variant="muted" className="text-xs">
-                  You
-                </Text>
-              ) : (
-                <FriendStatusAction
-                  status={status}
-                  username={u.username}
-                  busyLabel={opening ? 'Opening…' : undefined}
-                  onAdd={friendActions.sendFriendRequest}
-                  onCancel={friendActions.cancelFriendRequest}
-                  isAdding={friendActions.isAddingFor(u.username)}
-                  isCanceling={friendActions.isCancelingFor(
-                    status?.kind === 'outgoing' ? status.requestId : undefined
-                  )}
-                  incomingMode="hint"
-                  testID={u.id ? `search-${u.id}` : undefined}
-                />
-              )
-            }
+            trailing={trailing}
           />
         );
       }
       case 'conversation': {
         const c = row.conversation;
         const full = c.id ? fullConversationById.get(c.id) : undefined;
-        if (full) {
+        if (full && full.id) {
           const display = conversationDisplay(full, myUserId, presenceByUser);
+          const isMuted = isCurrentlyMuted(full.muted_until);
+          const isPinned = !!full.pinned_at;
+          const fullId = full.id;
           return (
             <ConversationRow
               title={display.title}
@@ -644,13 +1168,23 @@ function RenderedRow({
               stackedMembers={display.stackedMembers}
               presence={display.presence}
               lastMessageAt={full.last_message_at}
-              onPress={() => {
-                if (full.id) onOpenConversation(full.id);
+              isMuted={isMuted}
+              isPinned={isPinned}
+              mutedUntil={full.muted_until}
+              testID={`search-conversation-${fullId}`}
+              onPress={() => onOpenConversation(fullId)}
+              onMorePress={() => {
+                haptics.tap();
+                onOpenConvMenu({ id: fullId, title: display.title, isPinned, isMuted });
               }}
-              testID={`search-conversation-${full.id}`}
             />
           );
         }
+        // Slim path: search hit for a conversation that isn't in
+        // the chats-tab cache yet (user hasn't opened the tab this
+        // session). No member roster → can't render the pin/mute
+        // sheet meaningfully (it'd flash with stale `false`s);
+        // skip the 3-dots in that case so we don't lie.
         return (
           <ConversationRow
             title={c.name?.trim() || 'Conversation'}
@@ -739,14 +1273,25 @@ function SectionHeader({
   title,
   count,
   collapsed,
+  isFocused,
   onToggle,
 }: {
   title: string;
   count: number;
   collapsed: boolean;
+  // Web keyboard focus — Enter on a focused header toggles the
+  // section. The visual tint mirrors the other rows' focus ring.
+  isFocused?: boolean;
   onToggle: () => void;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
+  // Resolve the card colour to a literal hex/rgb so the sticky
+  // overlay paints with a fully opaque fill — Tailwind's bg-card
+  // class wasn't reliably opaque through FlashList's sticky
+  // wrapper, which left avatar rows visible underneath the
+  // chevron. Focus state still gets a primary tint via the
+  // class, layered on top of the opaque card fill.
+  const cardBg = useThemeColor('card');
   // Same chevron convention the friends tab uses for its
   // disclosure headers — ChevronRight when closed, ChevronDown
   // when open. Keeps the two collapse surfaces visually identical.
@@ -758,7 +1303,8 @@ function SectionHeader({
       accessibilityLabel={`${title}, ${count} ${count === 1 ? 'item' : 'items'}`}
       accessibilityState={{ expanded: !collapsed }}
       testID={`search-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
-      className="flex-row items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 active:bg-muted">
+      style={{ backgroundColor: cardBg }}
+      className={`flex-row items-center gap-2 border-b border-border px-4 py-2 active:bg-muted ${isFocused ? 'bg-primary/10' : ''}`}>
       <Caret size={14} color={mutedFg} />
       <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}

@@ -5,8 +5,13 @@ import (
 )
 
 // UserListResponse is the §6.4 paginated envelope for GET /v1/users.
+// `total` is the absolute count of matching users across every page
+// — what the UI uses for the "showing N of M" hint above paginated
+// lists. The slice is always one page (`data`) plus the cursor +
+// has_more for the next page.
 type UserListResponse struct {
 	Data       []UserResponse `json:"data"`
+	Total      int            `json:"total"              example:"1024"`
 	NextCursor *string        `json:"next_cursor"        example:"eyJpZCI6IjAxOTJmNWEzLTdjMWItN2EzZi05YjFjLTJkM2U0ZjVhNmI3YyIsInRzIjoiMjAyNi0wNS0wMlQwOTozMToyMS44MTBaIn0="`
 	HasMore    bool           `json:"has_more"           example:"true"`
 }
@@ -77,9 +82,10 @@ func toUserResponse(u domain.User, p Presigner) UserResponse {
 }
 
 // toUserListResponse builds the paginated envelope from a service search result.
-func toUserListResponse(users []domain.User, next *string, hasMore bool, p Presigner) UserListResponse {
+func toUserListResponse(users []domain.User, total int, next *string, hasMore bool, p Presigner) UserListResponse {
 	out := UserListResponse{
 		Data:       make([]UserResponse, len(users)),
+		Total:      total,
 		NextCursor: next,
 		HasMore:    hasMore,
 	}

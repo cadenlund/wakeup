@@ -29,25 +29,17 @@
 // three relationship queries at once. Search mode doesn't expose a
 // pull-to-refresh because the search query already runs live off
 // every keystroke (debounced).
-import {
-  ChevronDown,
-  ChevronRight,
-  MoreVertical,
-  Search,
-  ShieldOff,
-  UserMinus,
-  Users,
-  X,
-} from 'lucide-react-native';
+import { ChevronDown, ChevronRight, Search, Users, X } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { FriendActionMenu, FriendRowMenuButton } from '@/components/friend-action-menu';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
+import { RelationshipBadge } from '@/components/relationship-badge';
 import { Button } from '@/components/ui/button';
-import { DrawerSheet } from '@/components/ui/drawer-sheet';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List, type ListRef } from '@/components/ui/list';
@@ -58,25 +50,22 @@ import {
   getGetV1FriendsQueryKey,
   getGetV1FriendsRequestsQueryKey,
   useDeleteV1FriendsUserId,
-  useGetV1Friends,
   useGetV1FriendsRequests,
   usePostV1FriendsRequestsIdAccept,
   usePostV1FriendsRequestsIdDecline,
   usePostV1FriendsUserIdBlock,
 } from '@/lib/api/hooks/friends/friends';
+import { flatten, useInfiniteFriends, useInfiniteUsers } from '@/lib/api/use-infinite';
 import {
   getGetV1PresenceFriendsQueryKey,
   useGetV1PresenceFriends,
 } from '@/lib/api/hooks/presence/presence';
-import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
 import { useFriendActions } from '@/lib/api/use-friend-actions';
 import type {
-  InternalHandlerHttpFriendListResponse,
   InternalHandlerHttpFriendRequestsResponse,
   InternalHandlerHttpFriendshipResponse,
   InternalHandlerHttpPresenceListResponse,
-  InternalHandlerHttpSearchResponse,
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
@@ -117,6 +106,10 @@ type SearchRow = {
   user: UserRow;
   status?: FriendStatus;
   isSelf?: boolean;
+  // Presence is friends-only (§7.2), so only friend rows carry a
+  // value here. Non-friend search hits leave it undefined and the
+  // FriendRow hides the presence dot.
+  presence?: string;
 };
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -132,15 +125,22 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 }
 
 export default function FriendsScreen() {
-  const friendsQ = useGetV1Friends({ limit: 100 }, { query: { staleTime: 30_000 } });
+  // Infinite-scroll friends list (§6.4). Earlier this asked for
+  // limit:100 which capped users with more friends than that and
+  // ignored next_cursor entirely.
+  const friendsQ = useInfiniteFriends({ query: { staleTime: 30_000 } });
   const requestsQ = useGetV1FriendsRequests({ query: { staleTime: 30_000 } });
   const presenceQ = useGetV1PresenceFriends({ query: { staleTime: 15_000 } });
   const meQ = useGetV1AuthMe({ query: { staleTime: 60_000 } });
 
+  const { data: friendsList, total: friendsTotal } = React.useMemo(
+    () => flatten<Friendship, { data?: Friendship[] }>(friendsQ.data?.pages),
+    [friendsQ.data]
+  );
+
   // apiFetch returns the unwrapped JSON body; orval types the response
   // as the {data, status, headers} envelope. Cast to the runtime shape
   // (same pattern as auth-gate.tsx).
-  const friendsData = friendsQ.data as InternalHandlerHttpFriendListResponse | undefined;
   const requestsData = requestsQ.data as InternalHandlerHttpFriendRequestsResponse | undefined;
   const presenceData = presenceQ.data as InternalHandlerHttpPresenceListResponse | undefined;
   const me = meQ.data as { id?: string } | undefined;
@@ -151,11 +151,20 @@ export default function FriendsScreen() {
   const isSearchMode = rawQuery.trim().length >= SEARCH_MIN_CHARS;
   const searchEnabled = debouncedQuery.length >= SEARCH_MIN_CHARS;
 
-  const searchQ = useGetV1Search(
-    { q: debouncedQuery, types: 'users' },
+  // Per-section paginated user search — friends tab needs the FULL
+  // result set (so users with hundreds of matching contacts can still
+  // scroll past the first 10), not the global-search 10-cap. The
+  // /v1/users endpoint runs the same trigram + substring match the
+  // global modal does and supports the keyset cursor we drive
+  // infinite-scroll off of.
+  const searchQ = useInfiniteUsers(
+    { q: debouncedQuery },
     { query: { enabled: searchEnabled, staleTime: 30_000 } }
   );
-  const searchData = searchQ.data as InternalHandlerHttpSearchResponse | undefined;
+  const { data: searchUsers, total: searchTotal } = React.useMemo(
+    () => flatten<UserRow, { data?: UserRow[] }>(searchQ.data?.pages),
+    [searchQ.data]
+  );
 
   const presenceByUser = React.useMemo(() => {
     const m = new Map<string, string>();
@@ -172,7 +181,7 @@ export default function FriendsScreen() {
   // row — same map shape FriendStatusAction consumes elsewhere.
   const friendStatusByUserId = React.useMemo(() => {
     const m = new Map<string, FriendStatus>();
-    for (const f of friendsData?.data ?? []) {
+    for (const f of friendsList) {
       if (f.user?.id) m.set(f.user.id, { kind: 'friend' });
     }
     for (const f of requestsData?.incoming ?? []) {
@@ -182,7 +191,7 @@ export default function FriendsScreen() {
       if (f.user?.id && f.id) m.set(f.user.id, { kind: 'outgoing', requestId: f.id });
     }
     return m;
-  }, [friendsData, requestsData]);
+  }, [friendsList, requestsData]);
 
   // friendActions handles in-flight pending + invalidation, so the
   // row's status flips from `none` → `outgoing` automatically once
@@ -348,6 +357,12 @@ export default function FriendsScreen() {
   const [expandedRequestSections, setExpandedRequestSections] = React.useState<
     Set<'incoming' | 'outgoing'>
   >(new Set());
+  // After "Show N more" expands a section, the post-render scroll
+  // effect in SectionsPane snaps that section's header to the top
+  // of the viewport. Reading this ref is what tells the effect
+  // which section was just expanded; without it, the user stayed
+  // wherever they were and had to hunt for the new rows.
+  const justExpandedRef = React.useRef<'incoming' | 'outgoing' | null>(null);
   const expandRequestSection = React.useCallback((section: 'incoming' | 'outgoing') => {
     setExpandedRequestSections((prev) => {
       if (prev.has(section)) return prev;
@@ -355,6 +370,7 @@ export default function FriendsScreen() {
       next.add(section);
       return next;
     });
+    justExpandedRef.current = section;
   }, []);
   // Track the section that was just toggled (in either direction)
   // so the post-render effect can scroll its header to the top.
@@ -368,15 +384,30 @@ export default function FriendsScreen() {
   const toggleSection = React.useCallback((id: SectionId) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+        // Collapsing also drops the show-all expansion for the
+        // request section, so re-opening the chevron resets to
+        // the cap-5 + "Show N more" affordance. Mirrors the
+        // search modal's behaviour.
+        if (id === 'incoming' || id === 'outgoing') {
+          setExpandedRequestSections((prevExp) => {
+            if (!prevExp.has(id)) return prevExp;
+            const nextExp = new Set(prevExp);
+            nextExp.delete(id);
+            return nextExp;
+          });
+        }
+      }
       return next;
     });
     justToggledRef.current = id;
   }, []);
 
   const sectionRows = React.useMemo<Row[]>(() => {
-    const friends = friendsData?.data ?? [];
+    const friends = friendsList;
     const incoming = requestsData?.incoming ?? [];
     const outgoing = requestsData?.outgoing ?? [];
 
@@ -454,7 +485,11 @@ export default function FriendsScreen() {
       key: 'h:friends',
       sectionId: 'friends',
       title: 'Friends',
-      count: friends.length,
+      // Header count is the absolute friends total from the
+      // backend, not friends.length — with infinite scroll we
+      // haven't necessarily loaded everyone, but the user wants
+      // "you have N friends," not "I've shown you M of N."
+      count: friendsTotal || friends.length,
       collapsed: friendsCollapsed,
     });
     if (!friendsCollapsed) {
@@ -477,10 +512,17 @@ export default function FriendsScreen() {
     }
 
     return out;
-  }, [friendsData, requestsData, presenceByUser, collapsedSections, expandedRequestSections]);
+  }, [
+    friendsList,
+    friendsTotal,
+    requestsData,
+    presenceByUser,
+    collapsedSections,
+    expandedRequestSections,
+  ]);
 
   const searchRows = React.useMemo<SearchRow[]>(() => {
-    const users = searchData?.users ?? [];
+    const users = searchUsers;
     const mapped = users
       .filter((u) => u.id) // backend guarantees this; defensive
       .map<SearchRow>((u) => {
@@ -488,30 +530,30 @@ export default function FriendsScreen() {
           return { user: u, isSelf: true };
         }
         const status = u.id ? friendStatusByUserId.get(u.id) : undefined;
+        if (status?.kind === 'friend') {
+          // Friends carry presence so the search-result row reads
+          // with the same online/offline glance the section list
+          // gives. presenceByUser is keyed by user_id.
+          return { user: u, status, presence: u.id ? presenceByUser.get(u.id) : undefined };
+        }
         if (status) return { user: u, status };
         return { user: u };
       });
-    // Prioritise friends > pending requests > strangers in the
-    // search results — typing a name is almost always "find my
-    // friend X" and seeing strangers above the friend match is
-    // the wrong answer. Backend search is sorted by created_at
-    // DESC; we re-sort here without changing the order within
-    // each tier (stable on backend's response order).
-    const tier = (r: SearchRow) => {
-      if (r.isSelf) return 4; // self at the bottom — opens nothing
-      if (r.status?.kind === 'friend') return 0;
-      if (r.status?.kind === 'incoming' || r.status?.kind === 'outgoing') return 1;
-      return 2; // strangers
-    };
+    // Backend orders /v1/users by rel_tier (friend → pending →
+    // stranger) then created_at — no client re-sort. Self lives in
+    // tier 2 from the backend's POV (it isn't a friendship row),
+    // so push it to the bottom here. Everything else stays in the
+    // server's order so pagination cursors remain coherent.
     return mapped
       .map((r, idx) => ({ r, idx }))
       .sort((a, b) => {
-        const t = tier(a.r) - tier(b.r);
-        if (t !== 0) return t;
+        const ta = a.r.isSelf ? 1 : 0;
+        const tb = b.r.isSelf ? 1 : 0;
+        if (ta !== tb) return ta - tb;
         return a.idx - b.idx;
       })
       .map(({ r }) => r);
-  }, [searchData, me, friendStatusByUserId]);
+  }, [searchUsers, me, friendStatusByUserId, presenceByUser]);
 
   const isInitialLoad =
     !isSearchMode &&
@@ -541,10 +583,19 @@ export default function FriendsScreen() {
           isFetching={searchQ.isFetching}
           isError={searchQ.isError}
           rows={searchRows}
+          total={searchTotal}
           friendActions={friendActions}
           onAcceptRequest={onAcceptRequest}
           onDeclineRequest={onDeclineRequest}
+          onOpenMenu={setMenuTarget}
+          onOpenDM={onOpenDMWithFriend}
           pendingAction={pendingAction}
+          onEndReached={() => {
+            if (searchQ.hasNextPage && !searchQ.isFetchingNextPage) {
+              void searchQ.fetchNextPage();
+            }
+          }}
+          isFetchingNextPage={searchQ.isFetchingNextPage}
         />
       ) : isInitialLoad ? (
         <FriendsLoading />
@@ -563,6 +614,13 @@ export default function FriendsScreen() {
           refreshing={refreshing}
           onRefresh={onRefresh}
           justToggledRef={justToggledRef}
+          justExpandedRef={justExpandedRef}
+          onEndReached={() => {
+            if (friendsQ.hasNextPage && !friendsQ.isFetchingNextPage) {
+              void friendsQ.fetchNextPage();
+            }
+          }}
+          isFetchingNextPage={friendsQ.isFetchingNextPage}
         />
       )}
 
@@ -639,6 +697,9 @@ function SectionsPane({
   refreshing,
   onRefresh,
   justToggledRef,
+  justExpandedRef,
+  onEndReached,
+  isFetchingNextPage,
 }: {
   rows: Row[];
   pendingAction: Set<string>;
@@ -656,27 +717,40 @@ function SectionsPane({
   refreshing: boolean;
   onRefresh: () => void;
   justToggledRef: React.MutableRefObject<SectionId | null>;
+  // Set when the user just tapped "Show N more" — the scroll
+  // effect below snaps that section's header to the top of the
+  // viewport so the newly-revealed rows are visible without the
+  // user having to hunt for them.
+  justExpandedRef: React.MutableRefObject<'incoming' | 'outgoing' | null>;
+  onEndReached: () => void;
+  isFetchingNextPage: boolean;
 }) {
   const listRef = React.useRef<ListRef<Row>>(null);
 
-  // After any section toggle (expand OR collapse), scroll its
-  // header to the top of the viewport. FlashList preserves the
-  // prior scroll offset across data updates, so without this:
-  //   - expand → inserted rows push the header behind the screen
-  //     chrome
-  //   - collapse → removed rows above the offset leave the list
-  //     scrolled into empty space below the now-shorter content
-  // Pinning the tapped header to the top is the predictable shape
-  // either way.
+  // After "Show N more" lands, scroll the just-expanded section's
+  // header to the top of the viewport so the newly-revealed rows
+  // are visible without the user having to hunt for them. The
+  // ref is cleared unconditionally so a stale value from an
+  // earlier mount can't accidentally fire after a re-render.
   React.useEffect(() => {
-    const id = justToggledRef.current;
-    if (!id) return;
-    const idx = rows.findIndex((r) => r.kind === 'header' && r.sectionId === id);
-    if (idx >= 0) {
-      listRef.current?.scrollToIndex({ index: idx, animated: true });
-    }
-    justToggledRef.current = null;
-  }, [rows, justToggledRef]);
+    const section = justExpandedRef.current;
+    justExpandedRef.current = null;
+    if (!section) return;
+    const idx = rows.findIndex((r) => r.kind === 'header' && r.sectionId === section);
+    if (idx < 0) return;
+    listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0 });
+  }, [rows, justExpandedRef]);
+
+  // FlashList 2.0.2 stickyHeaderIndices paints the sticky overlay
+  // ON TOP of the inline header row at scrollY=0, doubling the
+  // first section header. Workaround: only enable sticky once the
+  // user has scrolled past ~50px so the inline header has left
+  // the viewport before the overlay takes over.
+  const [stickyEnabled, setStickyEnabled] = React.useState(false);
+  const stickyHeaderIndices = React.useMemo(() => {
+    if (!stickyEnabled) return undefined;
+    return rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0);
+  }, [stickyEnabled, rows]);
 
   const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
 
@@ -705,6 +779,33 @@ function SectionsPane({
       ref={listRef}
       data={rows}
       keyExtractor={(item) => item.key}
+      // Recycling pools per row kind — without this, FlashList can
+      // reuse a 'header' view slot for a 'friend' row on scroll,
+      // which manifested as every section header reading "Friends"
+      // and the rows under them disappearing when the user toggled
+      // the Friends section.
+      getItemType={(item) => item.kind}
+      // FlashList v2 enables maintainVisibleContentPosition by
+      // default, which on initial load placed the friends tab
+      // scrolled to the bottom of the list (FlashList anchored
+      // to phantom prior content). Force it off and anchor the
+      // initial render at index 0 so the tab always opens at
+      // the top.
+      maintainVisibleContentPosition={{ disabled: true }}
+      initialScrollIndex={0}
+      // Sticky chevron headers — see stickyEnabled state above;
+      // undefined turns sticky off entirely (used at scrollY < 50
+      // to avoid the FlashList 2.0.2 duplicate-header bug).
+      stickyHeaderIndices={stickyHeaderIndices}
+      onEndReachedThreshold={0.5}
+      onEndReached={onEndReached}
+      scrollEventThrottle={32}
+      onScroll={(e) => {
+        const y = e.nativeEvent.contentOffset.y;
+        const next = y > 50;
+        if (next !== stickyEnabled) setStickyEnabled(next);
+      }}
+      ListFooterComponent={isFetchingNextPage ? <SectionsListLoader /> : null}
       renderItem={({ item }) => (
         <RenderedRow
           row={item}
@@ -750,19 +851,29 @@ function SearchPane({
   isFetching,
   isError,
   rows,
+  total,
   friendActions,
   onAcceptRequest,
   onDeclineRequest,
+  onOpenMenu,
+  onOpenDM,
   pendingAction,
+  onEndReached,
+  isFetchingNextPage,
 }: {
   searchEnabled: boolean;
   isFetching: boolean;
   isError: boolean;
   rows: SearchRow[];
+  total: number;
   friendActions: ReturnType<typeof useFriendActions>;
   onAcceptRequest: (f: Friendship) => void;
   onDeclineRequest: (f: Friendship) => void;
+  onOpenMenu: (u: UserRow) => void;
+  onOpenDM: (friendUserId: string) => void;
   pendingAction: Set<string>;
+  onEndReached: () => void;
+  isFetchingNextPage: boolean;
 }) {
   const fg = useThemeColor('muted-foreground');
   if (!searchEnabled) {
@@ -799,19 +910,103 @@ function SearchPane({
     );
   }
   return (
+    <SearchPaneList
+      rows={rows}
+      total={total}
+      friendActions={friendActions}
+      onAcceptRequest={onAcceptRequest}
+      onDeclineRequest={onDeclineRequest}
+      onOpenMenu={onOpenMenu}
+      onOpenDM={onOpenDM}
+      pendingAction={pendingAction}
+      onEndReached={onEndReached}
+      isFetchingNextPage={isFetchingNextPage}
+    />
+  );
+}
+
+function SearchPaneList({
+  rows,
+  total,
+  friendActions,
+  onAcceptRequest,
+  onDeclineRequest,
+  onOpenMenu,
+  onOpenDM,
+  pendingAction,
+  onEndReached,
+  isFetchingNextPage,
+}: {
+  rows: SearchRow[];
+  total: number;
+  friendActions: ReturnType<typeof useFriendActions>;
+  onAcceptRequest: (f: Friendship) => void;
+  onDeclineRequest: (f: Friendship) => void;
+  onOpenMenu: (u: UserRow) => void;
+  onOpenDM: (friendUserId: string) => void;
+  pendingAction: Set<string>;
+  onEndReached: () => void;
+  isFetchingNextPage: boolean;
+}) {
+  return (
     <List
       data={rows}
       keyExtractor={(r, i) => r.user.id ?? r.user.username ?? `idx-${i}`}
+      onEndReachedThreshold={0.5}
+      onEndReached={onEndReached}
+      ListFooterComponent={
+        <SearchListFooter loading={isFetchingNextPage} loaded={rows.length} total={total} />
+      }
       renderItem={({ item }) => (
         <SearchResultRow
           row={item}
           friendActions={friendActions}
           onAcceptRequest={onAcceptRequest}
           onDeclineRequest={onDeclineRequest}
+          onOpenMenu={onOpenMenu}
+          onOpenDM={onOpenDM}
           pendingAction={pendingAction}
         />
       )}
     />
+  );
+}
+
+function SearchListFooter({
+  loading,
+  loaded,
+  total,
+}: {
+  loading: boolean;
+  loaded: number;
+  total: number;
+}) {
+  const mutedFg = useThemeColor('muted-foreground');
+  if (loading) {
+    return (
+      <View className="items-center py-4">
+        <ActivityIndicator color={mutedFg} />
+      </View>
+    );
+  }
+  // Keep the "Showing N of M" footer rendered even when N === M so
+  // the user sees the final count (CodeRabbit on PR #138).
+  if (total <= 0) return null;
+  return (
+    <View className="items-center py-3">
+      <Text variant="muted" className="text-xs">
+        Showing {loaded} of {total}
+      </Text>
+    </View>
+  );
+}
+
+function SectionsListLoader() {
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <View className="items-center py-4">
+      <ActivityIndicator color={mutedFg} />
+    </View>
   );
 }
 
@@ -820,12 +1015,16 @@ function SearchResultRow({
   friendActions,
   onAcceptRequest,
   onDeclineRequest,
+  onOpenMenu,
+  onOpenDM,
   pendingAction,
 }: {
   row: SearchRow;
   friendActions: ReturnType<typeof useFriendActions>;
   onAcceptRequest: (f: Friendship) => void;
   onDeclineRequest: (f: Friendship) => void;
+  onOpenMenu: (u: UserRow) => void;
+  onOpenDM: (friendUserId: string) => void;
   pendingAction: Set<string>;
 }) {
   const u = row.user;
@@ -839,8 +1038,45 @@ function SearchResultRow({
         You
       </Text>
     );
+  } else if (row.status?.kind === 'friend') {
+    // Already a friend — show a "Friend" badge alongside the
+    // 3-dots menu so the row reads as "this person is already in
+    // your graph." Without the badge the action affordance alone
+    // feels ambiguous (Instagram-style "Following" badge in their
+    // search list).
+    const inFlight = u.id ? pendingAction.has(u.id) : false;
+    trailing = (
+      <View className="flex-row items-center gap-2">
+        <RelationshipBadge label="Friend" />
+        <FriendRowMenuButton
+          disabled={inFlight}
+          onPress={() => onOpenMenu(u)}
+          testID={u.id ? `friend-search-${u.id}-menu` : undefined}
+        />
+      </View>
+    );
+  } else if (row.status?.kind === 'outgoing') {
+    // Pending outgoing request — "Added" badge mirrors what the
+    // user said ("when u search that says friend or added"), with
+    // the existing Unsend pill kept as the actionable affordance.
+    const fid = row.status.requestId;
+    trailing = (
+      <View className="flex-row items-center gap-2">
+        <RelationshipBadge label="Added" />
+        <FriendStatusAction
+          status={row.status}
+          username={u.username}
+          onAdd={friendActions.sendFriendRequest}
+          onCancel={friendActions.cancelFriendRequest}
+          isAdding={friendActions.isAddingFor(u.username)}
+          isCanceling={friendActions.isCancelingFor(fid)}
+          incomingMode="actions"
+          testID={u.id ? `friend-search-${u.id}` : undefined}
+        />
+      </View>
+    );
   } else {
-    const fid = row.status?.kind !== 'friend' ? row.status?.requestId : undefined;
+    const fid = row.status?.requestId;
     const acceptDisabled = fid ? pendingAction.has(fid) : false;
     trailing = (
       <FriendStatusAction
@@ -866,12 +1102,24 @@ function SearchResultRow({
       />
     );
   }
+  // Presence is friends-only — show the dot for friend rows so a
+  // search hit reads like the section list. Strangers / pending /
+  // self leave it hidden because their presence isn't subscribed.
+  const isFriend = row.status?.kind === 'friend';
+  // Tapping a friend hit opens the DM, mirroring the section
+  // list's row-tap behaviour. Non-friends, pending requests, and
+  // self leave the row tap-disabled — actions live in the trailing
+  // affordance for those cases.
+  const userId = u.id;
+  const onPress = isFriend && userId ? () => onOpenDM(userId) : undefined;
   return (
     <FriendRow
       displayName={u.display_name}
       username={u.username}
       avatarUrl={u.avatar_url}
-      hidePresence
+      presence={isFriend ? row.presence : undefined}
+      hidePresence={!isFriend}
+      onPress={onPress}
       trailing={trailing}
     />
   );
@@ -928,7 +1176,12 @@ function RenderedRow({
           onPress={userId && !inFlight && !menuOpen ? () => onOpenDM(userId) : undefined}
           onLongPress={u ? () => onOpenMenu(u) : undefined}
           trailing={
-            u ? <RowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} /> : undefined
+            u ? (
+              <View className="flex-row items-center gap-2">
+                <RelationshipBadge label="Friend" />
+                <FriendRowMenuButton disabled={inFlight} onPress={() => onOpenMenu(u)} />
+              </View>
+            ) : undefined
           }
         />
       );
@@ -947,6 +1200,12 @@ function RenderedRow({
           ? { kind: 'incoming', requestId: fid }
           : { kind: 'outgoing', requestId: fid }
         : undefined;
+      // "Added" badge for outgoing pending rows so the section
+      // list reads with the same vocabulary as the search hits.
+      // Incoming rows already make their state obvious through
+      // the inline accept/decline icon pair, so they don't get a
+      // badge.
+      const showAddedBadge = row.direction === 'outgoing';
       return (
         <FriendRow
           displayName={u?.display_name}
@@ -954,106 +1213,30 @@ function RenderedRow({
           avatarUrl={u?.avatar_url}
           hidePresence
           trailing={
-            <FriendStatusAction
-              status={status}
-              username={u?.username}
-              // Outgoing rows are the only state where Add fires;
-              // these rows are pending requests so the username
-              // path is dead. Wire to the shared hook for safety.
-              onAdd={friendActions.sendFriendRequest}
-              onCancel={friendActions.cancelFriendRequest}
-              isAdding={friendActions.isAddingFor(u?.username)}
-              isCanceling={friendActions.isCancelingFor(fid)}
-              onAccept={() => fid && onAccept(row.friendship)}
-              onDecline={() => fid && onDecline(row.friendship)}
-              acceptDisabled={inFlight}
-              incomingMode="actions"
-              testID={fid ? `friend-request-${fid}` : undefined}
-            />
+            <View className="flex-row items-center gap-2">
+              {showAddedBadge ? <RelationshipBadge label="Added" /> : null}
+              <FriendStatusAction
+                status={status}
+                username={u?.username}
+                // Outgoing rows are the only state where Add fires;
+                // these rows are pending requests so the username
+                // path is dead. Wire to the shared hook for safety.
+                onAdd={friendActions.sendFriendRequest}
+                onCancel={friendActions.cancelFriendRequest}
+                isAdding={friendActions.isAddingFor(u?.username)}
+                isCanceling={friendActions.isCancelingFor(fid)}
+                onAccept={() => fid && onAccept(row.friendship)}
+                onDecline={() => fid && onDecline(row.friendship)}
+                acceptDisabled={inFlight}
+                incomingMode="actions"
+                testID={fid ? `friend-request-${fid}` : undefined}
+              />
+            </View>
           }
         />
       );
     }
   }
-}
-
-function RowMenuButton({ disabled, onPress }: { disabled: boolean; onPress: () => void }) {
-  const mutedFg = useThemeColor('muted-foreground');
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel="More actions"
-      testID="friend-row-menu"
-      hitSlop={6}
-      className="h-8 w-8 items-center justify-center rounded-md active:bg-muted">
-      <MoreVertical size={18} color={mutedFg} />
-    </Pressable>
-  );
-}
-
-function FriendActionMenu({
-  target,
-  pendingAction,
-  onClose,
-  onUnfriend,
-  onBlock,
-}: {
-  target: UserRow | null;
-  pendingAction: Set<string>;
-  onClose: () => void;
-  onUnfriend: (u: UserRow) => void;
-  onBlock: (u: UserRow) => void;
-}) {
-  const fg = useThemeColor('foreground');
-  const destructive = useThemeColor('destructive');
-  const mutedFg = useThemeColor('muted-foreground');
-  const handle = target?.username ? `@${target.username}` : (target?.display_name ?? '');
-  const inFlight = target?.id ? pendingAction.has(target.id) : false;
-  return (
-    <DrawerSheet visible={!!target} onClose={onClose}>
-      <View className="px-4 pb-2 pt-3">
-        <Text variant="muted" className="text-center text-sm">
-          {handle}
-        </Text>
-      </View>
-      <View className="px-2 pb-6">
-        <Pressable
-          onPress={() => target && onUnfriend(target)}
-          disabled={inFlight}
-          accessibilityRole="button"
-          accessibilityLabel="Unfriend"
-          testID="friend-menu-unfriend"
-          className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
-          <UserMinus size={18} color={fg} />
-          <Text className="text-base">Unfriend</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => target && onBlock(target)}
-          disabled={inFlight}
-          accessibilityRole="button"
-          accessibilityLabel="Block"
-          testID="friend-menu-block"
-          className="flex-row items-center gap-3 rounded-lg px-3 py-3 active:bg-muted">
-          <ShieldOff size={18} color={destructive} />
-          <Text style={{ color: destructive }} className="text-base font-medium">
-            Block
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Cancel"
-          testID="friend-menu-cancel"
-          className="mt-2 items-center rounded-lg px-3 py-3 active:bg-muted">
-          <Text style={{ color: mutedFg }} className="text-sm">
-            Cancel
-          </Text>
-        </Pressable>
-      </View>
-    </DrawerSheet>
-  );
 }
 
 function SectionHeader({
@@ -1068,6 +1251,11 @@ function SectionHeader({
   onToggle: () => void;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
+  // Resolve the card colour to a literal hex/rgb so the sticky
+  // overlay paints with a fully opaque fill — Tailwind classes
+  // alone weren't sticking through FlashList's sticky wrapper
+  // (the overlay rendered translucent, showing rows underneath).
+  const cardBg = useThemeColor('card');
   // Caret reads "current state": ChevronRight when closed (rotated
   // 90°), ChevronDown when open. Same convention as macOS Finder
   // disclosure triangles.
@@ -1083,7 +1271,8 @@ function SectionHeader({
       accessibilityLabel={`${title}, ${count} ${count === 1 ? 'item' : 'items'}`}
       accessibilityState={{ expanded: !collapsed }}
       testID={`friend-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
-      className="flex-row items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 active:bg-muted">
+      style={{ backgroundColor: cardBg }}
+      className="flex-row items-center gap-2 border-b border-border px-4 py-2 active:bg-muted">
       <Caret size={14} color={mutedFg} />
       <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}

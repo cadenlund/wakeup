@@ -11,6 +11,9 @@ import type { InternalHandlerHttpUserResponse } from './internalHandlerHttpUserR
 
 export interface InternalHandlerHttpSearchResponse {
   conversations?: InternalHandlerHttpSearchConversationRow[];
+  conversations_total?: number;
   messages?: InternalHandlerHttpSearchMessageRow[];
+  messages_total?: number;
   users?: InternalHandlerHttpUserResponse[];
+  users_total?: number;
 }
