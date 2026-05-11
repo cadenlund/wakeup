@@ -36,6 +36,7 @@ import * as React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 import { MessageBubble } from '@/components/message-bubble';
+import { MessageContextMenu, type MessageMenuTarget } from '@/components/message-context-menu';
 import { AGGREGATE_GAP_MS, TimeDivider } from '@/components/time-divider';
 import { List } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
@@ -47,6 +48,7 @@ import type {
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { useDeleteMessage } from '@/lib/use-delete-message';
 import { useMarkReadOnFocus } from '@/lib/use-mark-read';
 import type { LocalSendStatus } from '@/lib/use-send-message';
 
@@ -85,6 +87,10 @@ export function MessageList({
 }: Props) {
   const fg = useThemeColor('foreground');
   const mutedFg = useThemeColor('muted-foreground');
+
+  // Long-press context menu: which bubble was pressed (null = closed).
+  const [menuTarget, setMenuTarget] = React.useState<MessageMenuTarget | null>(null);
+  const { deleteMessage } = useDeleteMessage(conversationId);
 
   const messagesQ = useInfiniteMessages(conversationId, undefined, {
     query: { staleTime: 15_000 },
@@ -251,7 +257,7 @@ export function MessageList({
         sameAsOlder: boolean;
         sameAsNewer: boolean;
       };
-  return (
+  const list = (
     <List<Row>
       data={rows}
       // Stable per-row keys. Dividers carry a synthetic
@@ -294,6 +300,21 @@ export function MessageList({
         // fallback resolves to initials even on mid-streak bubbles.
         // The streak-head label is gated separately via
         // showSenderLabel.
+        // Long-press opens the context menu — only on a delivered
+        // message (one with a server id that isn't a pending/failed
+        // optimistic placeholder). Copying / deleting an unsent
+        // bubble doesn't make sense.
+        const isPlaceholder = !!m.id && sendStatusByTempId.has(m.id);
+        const onLongPress =
+          m.id && !isPlaceholder
+            ? () =>
+                setMenuTarget({
+                  id: m.id as string,
+                  body: m.body ?? '',
+                  mine,
+                  isDeleted: !!m.is_deleted,
+                })
+            : undefined;
         return (
           <MessageBubble
             body={m.body}
@@ -305,6 +326,7 @@ export function MessageList({
             // someone else's message.
             sendStatus={mine && m.id ? sendStatusByTempId.get(m.id)?.status : undefined}
             onRetrySend={mine && m.id ? () => onRetrySend(m.id as string) : undefined}
+            onLongPress={onLongPress}
             // Read-receipt avatars only appear under "mine" bubbles
             // in group threads (per §6.3 spec). The bubble component
             // ignores `readBy` for non-mine rows.
@@ -322,5 +344,17 @@ export function MessageList({
         );
       }}
     />
+  );
+
+  return (
+    <>
+      {list}
+      <MessageContextMenu
+        target={menuTarget}
+        onClose={() => setMenuTarget(null)}
+        onDelete={deleteMessage}
+        testID="message-context-menu"
+      />
+    </>
   );
 }
