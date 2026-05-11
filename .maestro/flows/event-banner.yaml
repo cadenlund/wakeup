@@ -1,20 +1,25 @@
-# Phase 7.5 — in-app event banner (WAKEUPEXPO §4.13).
+# Phase 7.5 — in-app event notifications (WAKEUPEXPO §4.13).
 #
-# A real banner only appears when a WS event arrives (another user
-# sends a message, sends/accepts a friend request, adds you to a
-# group) — not reproducible from a single fresh account. Matches the
+# Heads-up events (a WS message arrives in another thread, a friend
+# request, a group add) are now surfaced as an `event` toast variant
+# rather than a standalone banner card — the §4.13 banner was folded
+# into the toast surface so there's a single notification slot.
+# `<EventToastBridge>` drains the dispatcher's queue
+# (`useBannerStore`) into `toast.event(title, body, route)`.
+#
+# A real event toast only appears when a WS event arrives — not
+# reproducible from a single fresh account. Matches the
 # conversation-thread / read-receipts pattern: mount-only smoke
-# proving the new <EventBanner> + Zustand banner store + dispatcher
-# enqueue subgraph is wired into the root layout without crashing the
-# bundle at load time.
+# proving the bridge + Zustand queue + dispatcher enqueue subgraph
+# is wired into the root layout without crashing the bundle at load.
 #
 # What this flow asserts:
 #   1. Cold launch → register-fresh → skip onboarding → land on
 #      (tabs) Chats tab with the empty state — i.e. the app boots
-#      with <EventBanner> mounted at the root.
-#   2. No banner is showing (testID "event-banner" absent) on a
+#      with <EventToastBridge> mounted at the root.
+#   2. No event toast is showing (testID "event-toast" absent) on a
 #      quiet, freshly-registered session — the queue starts empty.
-#   The populated open-banner → tap-routes path lands when the
+#   The populated open-toast → tap-routes path lands when the
 #   multi-user fixture work for §5+ flows finalises.
 appId: app.wakeup.client
 ---
@@ -31,16 +36,16 @@ appId: app.wakeup.client
 - tapOn: 'Skip'
 
 # Land on the Chats tab. Mount-without-crash proves the new
-# <EventBanner> + banner store + dispatcher enqueue subgraph doesn't
-# break the bundle.
+# event-toast bridge + banner store + dispatcher enqueue subgraph
+# doesn't break the bundle.
 - extendedWaitUntil:
     visible: 'No conversations yet'
     timeout: 10000
 - assertVisible: 'No conversations yet'
-# A quiet session has an empty banner queue — nothing should be
+# A quiet session has an empty queue — no event toast should be
 # rendered.
 - assertNotVisible:
-    id: 'event-banner'
+    id: 'event-toast'
 - takeScreenshot: event-banner-chats-empty
 # End on a hard assertion — takeScreenshot doesn't check anything on
 # its own, so without this final guard a post-screenshot regression
