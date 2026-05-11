@@ -206,17 +206,17 @@ export function MessageList({
   //   - DM: a single caption under your last delivered sent message
   //     — "Delivered" until the peer's read pointer reaches it,
   //     then "Seen".
-  //   - Group: a "Seen by …" marker only at each member's read
-  //     *frontier* — the one message their `last_read_message_id`
-  //     points at. Older messages are implicitly read, so they stay
-  //     caption-less (the frontier marker aggregates them). Members
-  //     who happen to share a frontier are listed together ("Seen by
-  //     Ada and Ben"); members on different frontiers get their own
-  //     markers further down. "Seen by" is public so the viewer
-  //     appears too; only the message's own sender is filtered out
-  //     (you don't "see" what you sent — so a message you sent that
-  //     no one else has reached shows nothing, except the newest one,
-  //     which falls back to "Delivered").
+  //   - Group: a "Seen by …" marker only at messages that are
+  //     *someone's* read frontier — the message their
+  //     `last_read_message_id` points at. Older messages are
+  //     implicitly read, so they stay caption-less (the next marker
+  //     down aggregates them). At a marker we list EVERYONE who's
+  //     read at or past it — the same set the long-press popover
+  //     shows — formatted "Seen by Ada, Ben and 2 others". "Seen by"
+  //     is public so the viewer appears; only the message's own
+  //     sender is filtered out (you don't "see" what you sent — so a
+  //     message you sent that no one else has reached shows nothing,
+  //     except the newest one, which falls back to "Delivered").
   // Members with a NULL / out-of-window read pointer haven't reached
   // any loaded message and contribute nothing.
   const receiptByMessageId = React.useMemo(() => {
@@ -224,23 +224,27 @@ export function MessageList({
     if (messages.length === 0) return out;
 
     if (isGroup) {
-      // Group members by the message id their read pointer sits on.
-      const frontier = new Map<string, InternalHandlerHttpUserResponse[]>();
+      const frontierIds = new Set<string>();
       for (const row of members) {
-        const uid = row.user?.id;
-        const readId = row.last_read_message_id;
-        if (!uid || !readId || !row.user) continue;
-        const at = frontier.get(readId);
-        if (at) at.push(row.user);
-        else frontier.set(readId, [row.user]);
+        if (row.last_read_message_id) frontierIds.add(row.last_read_message_id);
       }
       const lastIdx = messages.length - 1;
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         if (!msg.id) continue;
-        const seers = (frontier.get(msg.id) ?? []).filter((u) => u.id !== msg.sender_id);
-        if (seers.length > 0) out.set(msg.id, formatSeenBy(seers));
-        else if (i === lastIdx) out.set(msg.id, 'Delivered');
+        if (frontierIds.has(msg.id)) {
+          const seers: InternalHandlerHttpUserResponse[] = [];
+          for (const row of members) {
+            const u = row.user;
+            if (!u?.id || u.id === msg.sender_id) continue;
+            if ((readPointerIdxByUser.get(u.id) ?? -1) >= i) seers.push(u);
+          }
+          if (seers.length > 0) {
+            out.set(msg.id, formatSeenBy(seers));
+            continue;
+          }
+        }
+        if (i === lastIdx) out.set(msg.id, 'Delivered');
       }
       return out;
     }
@@ -262,7 +266,7 @@ export function MessageList({
     const otherPtrIdx = otherReadId ? (msgIdxById.get(otherReadId) ?? -1) : -1;
     out.set(lastSentId, otherPtrIdx >= lastSentIdx ? 'Seen' : 'Delivered');
     return out;
-  }, [messages, members, isGroup, myUserId, sendStatusByTempId, msgIdxById]);
+  }, [messages, members, isGroup, myUserId, sendStatusByTempId, msgIdxById, readPointerIdxByUser]);
 
   // Mark-read on focus: post the latest *delivered* message id to
   // the backend so the per-member read pointer advances. The
