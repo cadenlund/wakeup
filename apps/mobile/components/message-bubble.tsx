@@ -11,7 +11,7 @@
 // coherent (gaps would make a reply chain unreadable).
 import { MoreHorizontal } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
+import { Animated, Platform, Pressable, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
@@ -51,10 +51,13 @@ type Props = {
   // as a small dot per reader under the bubble (§6.3 — only the
   // latest read position per recipient counts).
   readBy?: InternalHandlerHttpUserResponse[];
-  // Send-pipeline status from useSendMessage. `undefined` = the
-  // message is delivered (server-issued row); `'sending'` shows
-  // a small spinner + "Sending…" caption; `'failed'` swaps in a
-  // tappable "Not sent · Retry" affordance that calls onRetrySend.
+  // Send-pipeline status from useSendMessage. `undefined` = delivered
+  // (server-issued row): the bubble is solid. `'sending'` = the
+  // optimistic placeholder still in flight: the bubble pops in on
+  // mount and sits dimmed (no spinner, no caption — it brightens
+  // when the delivered row replaces it). `'failed'` = a touch dimmed
+  // with a tappable "Not sent · Retry" affordance that calls
+  // onRetrySend.
   sendStatus?: LocalSendStatus;
   onRetrySend?: () => void;
   // Long-press anywhere in the bubble column opens the message
@@ -95,7 +98,6 @@ export function MessageBubble({
   testID,
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
-  const mutedFg = useThemeColor('muted-foreground');
   const destructive = useThemeColor('destructive');
   const fg = useThemeColor('foreground');
   // One shade off `card` so the web overflow chip reads against
@@ -105,6 +107,27 @@ export function MessageBubble({
   // rect for the action popover's anchor.
   const bubbleRef = React.useRef<View>(null);
   const BubbleColumn = onLongPress ? Pressable : View;
+
+  // iMessage-style "pop": a freshly-sent (optimistic) bubble springs
+  // up to full size on mount. Only "mine" bubbles that mount while
+  // still sending pop — history / incoming bubbles scrolling in stay
+  // put. Captured at mount: a later sending→failed flip doesn't
+  // re-pop (the bubble never remounts).
+  const popFrom = React.useRef(mine && sendStatus === 'sending' ? 0.85 : 1);
+  const popScale = React.useRef(new Animated.Value(popFrom.current)).current;
+  React.useEffect(() => {
+    if (popFrom.current === 1) return;
+    Animated.spring(popScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 7,
+      tension: 150,
+    }).start();
+  }, [popScale]);
+  // In flight → the bubble sits dimmed (the "not committed yet" cue —
+  // no spinner, no caption); failed → a touch dimmed under the red
+  // "Not sent · Retry"; delivered → solid.
+  const inFlightOpacity = sendStatus === 'sending' ? 0.55 : sendStatus === 'failed' ? 0.8 : 1;
   const handleLongPress = React.useCallback(() => {
     if (!onLongPress) return;
     haptics.tap();
@@ -188,44 +211,47 @@ export function MessageBubble({
           </Text>
         ) : null}
 
-        <View
-          ref={bubbleRef}
-          collapsable={false}
-          className={cn(
-            'rounded-2xl px-3 py-2',
-            mine ? 'rounded-br-sm bg-primary' : 'rounded-bl-sm bg-card'
-          )}>
-          {isDeleted ? (
-            <Text
-              className={cn(
-                'text-base italic',
-                mine ? 'text-primary-foreground/70' : 'text-muted-foreground'
-              )}>
-              Message deleted
-            </Text>
-          ) : (
-            <Text className={cn('text-base', mine ? 'text-primary-foreground' : 'text-foreground')}>
-              {body ?? ''}
-            </Text>
-          )}
+        <Animated.View style={{ transform: [{ scale: popScale }], opacity: inFlightOpacity }}>
+          <View
+            ref={bubbleRef}
+            collapsable={false}
+            className={cn(
+              'rounded-2xl px-3 py-2',
+              mine ? 'rounded-br-sm bg-primary' : 'rounded-bl-sm bg-card'
+            )}>
+            {isDeleted ? (
+              <Text
+                className={cn(
+                  'text-base italic',
+                  mine ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                )}>
+                Message deleted
+              </Text>
+            ) : (
+              <Text
+                className={cn('text-base', mine ? 'text-primary-foreground' : 'text-foreground')}>
+                {body ?? ''}
+              </Text>
+            )}
 
-          {showWebOverflow ? (
-            <Pressable
-              onPress={handleLongPress}
-              onHoverIn={() => setHovered(true)}
-              onHoverOut={() => setHovered(false)}
-              pointerEvents={hovered ? 'auto' : 'none'}
-              accessibilityRole="button"
-              accessibilityLabel="Message actions"
-              testID={testID ? `${testID}-overflow` : undefined}
-              // -top-3 == -12px: an h-6 (24px) chip straddling the
-              // bubble's top edge — half above, half overlapping.
-              style={{ opacity: hovered ? 1 : 0, backgroundColor: overflowBg }}
-              className="absolute -top-3 right-1 h-6 w-6 items-center justify-center rounded-full border border-border shadow active:opacity-80">
-              <MoreHorizontal size={14} color={fg} />
-            </Pressable>
-          ) : null}
-        </View>
+            {showWebOverflow ? (
+              <Pressable
+                onPress={handleLongPress}
+                onHoverIn={() => setHovered(true)}
+                onHoverOut={() => setHovered(false)}
+                pointerEvents={hovered ? 'auto' : 'none'}
+                accessibilityRole="button"
+                accessibilityLabel="Message actions"
+                testID={testID ? `${testID}-overflow` : undefined}
+                // -top-3 == -12px: an h-6 (24px) chip straddling the
+                // bubble's top edge — half above, half overlapping.
+                style={{ opacity: hovered ? 1 : 0, backgroundColor: overflowBg }}
+                className="absolute -top-3 right-1 h-6 w-6 items-center justify-center rounded-full border border-border shadow active:opacity-80">
+                <MoreHorizontal size={14} color={fg} />
+              </Pressable>
+            ) : null}
+          </View>
+        </Animated.View>
 
         {readBy && readBy.length > 0 ? (
           // §6.3: a small dot per reader (not avatars — keeps the
@@ -237,15 +263,6 @@ export function MessageBubble({
             {readBy.map((u) => (
               <View key={u.id} className="h-1.5 w-1.5 rounded-full bg-primary" />
             ))}
-          </View>
-        ) : null}
-
-        {mine && sendStatus === 'sending' ? (
-          <View className="mt-0.5 flex-row items-center gap-1 px-1">
-            <ActivityIndicator size="small" color={mutedFg} />
-            <Text variant="muted" className="text-[10px]">
-              Sending…
-            </Text>
           </View>
         ) : null}
 
