@@ -155,7 +155,12 @@ WHERE deleted_at IS NULL
 // Keyset pagination with (rel_tier ASC, match_rank ASC, created_at
 // ASC, id ASC): "the row after the cursor" is the OR-block below.
 // $6 is the cursor's rel_tier (NULL on the first page → no keyset
-// filter); $8 is the cursor's match_rank.
+// filter); $8 is the cursor's match_rank. $8 is COALESCEd to -1 so
+// a pre-rollout cursor that carries rel_tier but no match_rank (the
+// field is omitempty) resumes from the very start of that tier's
+// rank ordering — a few already-seen rows may repeat, but none are
+// dropped, which a bare `match_rank > NULL` (always NULL → false)
+// would have silently done by ending the page early.
 const listByPrefixSQL = `-- name: ListByPrefix :many
 WITH ranked AS (
   SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.avatar_url,
@@ -204,9 +209,9 @@ SELECT id, username, display_name, email, password_hash, avatar_url, bio,
 FROM ranked
 WHERE $6::int IS NULL
    OR rel_tier > $6::int
-   OR (rel_tier = $6::int AND match_rank > $8::int)
-   OR (rel_tier = $6::int AND match_rank = $8::int AND created_at > $2::timestamptz)
-   OR (rel_tier = $6::int AND match_rank = $8::int AND created_at = $2::timestamptz AND id > $3::uuid)
+   OR (rel_tier = $6::int AND match_rank > COALESCE($8::int, -1))
+   OR (rel_tier = $6::int AND match_rank = COALESCE($8::int, -1) AND created_at > $2::timestamptz)
+   OR (rel_tier = $6::int AND match_rank = COALESCE($8::int, -1) AND created_at = $2::timestamptz AND id > $3::uuid)
 ORDER BY rel_tier ASC, match_rank ASC, created_at ASC, id ASC
 LIMIT $4`
 
