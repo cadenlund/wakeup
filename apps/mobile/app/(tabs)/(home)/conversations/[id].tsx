@@ -9,19 +9,24 @@
 // per-id refetch as the fallback when this screen is opened cold
 // (deep link / search modal route).
 //
-// KeyboardAvoidingView wraps both the list and the composer so the
-// composer rides up with the soft keyboard. `behavior="padding"` on
-// BOTH platforms: with `edgeToEdgeEnabled` (app.json) Android's
-// `windowSoftInputMode="adjustResize"` is a no-op — the window
-// doesn't resize — so we can't lean on the OS there. `padding`
-// works on both because RN's KAV applies bottom padding equal to
-// the keyboard height directly. `keyboardVerticalOffset` =
-// header + status-bar height so the padding lands at the right spot.
-import { useHeaderHeight } from '@react-navigation/elements';
-import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+// The thread renders its own in-content header bar (a plain row of
+// Pressables, not the native nav-bar header) so the back / title /
+// more-actions affordances look + press the same as every other
+// header in the app, on every platform — the (home) Stack runs
+// headerless. The bar sits inside the KeyboardAvoidingView at the
+// top of the column; the composer rides up above the soft keyboard.
+// `behavior="padding"` on BOTH platforms: with `edgeToEdgeEnabled`
+// (app.json) Android's `windowSoftInputMode="adjustResize"` is a
+// no-op — the window doesn't resize — so we can't lean on the OS
+// there; `padding` works on both because RN's KAV applies bottom
+// padding equal to the keyboard height directly. `keyboardVertical
+// Offset` is 0 because the KAV's top edge IS the screen top (the
+// header bar lives inside it).
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { MoreVertical } from 'lucide-react-native';
 import * as React from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import { Composer } from '@/components/composer';
@@ -139,10 +144,7 @@ export default function ConversationThreadScreen() {
   const fg = useThemeColor('foreground');
   const card = useThemeColor('card');
   const border = useThemeColor('border');
-  // Header + status-bar height — the offset KeyboardAvoidingView
-  // needs so the keyboard padding starts below the chrome, not
-  // from the top of the screen.
-  const headerHeight = useHeaderHeight();
+  const insets = useSafeAreaInsets();
 
   // Header three-dots reuses the same ConversationActionMenu the
   // chats tab opens on row long-press. State machine: 'menu' is
@@ -160,17 +162,21 @@ export default function ConversationThreadScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title,
-          // Native back chevron looks foreign next to the rest of
-          // the app's muted-text affordances; replace it with the
-          // shared <ThemedBackButton>. headerBackVisible:false
-          // suppresses the native one underneath.
-          headerLeft: () => <ThemedBackButton label="Back" testID="conversation-thread-back" />,
-          headerBackVisible: false,
-          headerRight: () =>
-            convId ? (
+      <KeyboardAvoidingView
+        behavior="padding"
+        keyboardVerticalOffset={0}
+        className="flex-1 bg-background">
+        {/* In-content header bar — a plain Pressable row, not the
+            native nav-bar header (the (home) Stack is headerless), so
+            it looks + presses the same on every platform. paddingTop
+            clears the status bar on native; insets.top is 0 on web. */}
+        <View
+          style={{ paddingTop: insets.top, backgroundColor: card, borderBottomColor: border }}
+          className="border-b">
+          <View className="h-12 flex-row items-center px-3">
+            <ThemedBackButton label="Back" testID="conversation-thread-back" />
+            <View className="flex-1" />
+            {convId ? (
               <Pressable
                 onPress={() => {
                   haptics.tap();
@@ -183,38 +189,15 @@ export default function ConversationThreadScreen() {
                 className="h-9 w-9 items-center justify-center rounded-md active:bg-muted">
                 <MoreVertical size={20} color={fg} />
               </Pressable>
-            ) : null,
-          headerStyle: { backgroundColor: card },
-          headerTintColor: fg,
-          headerShadowVisible: false,
-          // 1px hairline so the themed border still reads on dark
-          // mode where headerShadowVisible already hides the native
-          // line.
-          headerBackground: () => (
-            <View
-              style={{
-                flex: 1,
-                backgroundColor: card,
-                borderBottomWidth: 1,
-                borderBottomColor: border,
-              }}
-            />
-          ),
-        }}
-      />
-      {/* Web renders (tabs) as a sidebar layout, which doesn't show
-          the native navigator header — so the thread has no back /
-          title / actions chrome there. Render an in-content header
-          bar on web; native keeps the Stack.Screen header above. */}
-      {Platform.OS === 'web' ? (
-        <View
-          style={{ backgroundColor: card, borderBottomColor: border }}
-          className="flex-row items-center border-b px-3 py-2">
-          <ThemedBackButton label="Back" testID="conversation-thread-back-web" />
-          {/* Title centred in the *full* bar (not between the
-              buttons) — absolute, with side padding so a long name
-              clips under the chrome rather than overlapping it. */}
-          <View pointerEvents="none" className="absolute inset-x-0 items-center">
+            ) : null}
+          </View>
+          {/* Title centred over the row (not between the buttons) —
+              absolute, with side padding so a long name clips under
+              the chrome rather than overlapping it. */}
+          <View
+            pointerEvents="none"
+            style={{ top: insets.top }}
+            className="absolute inset-x-0 h-12 items-center justify-center">
             <Text
               numberOfLines={1}
               style={{ paddingHorizontal: 96 }}
@@ -222,24 +205,7 @@ export default function ConversationThreadScreen() {
               {title}
             </Text>
           </View>
-          <View className="flex-1" />
-          {convId ? (
-            <Pressable
-              onPress={() => setSheet('menu')}
-              accessibilityRole="button"
-              accessibilityLabel="Conversation actions"
-              testID="conversation-thread-more-web"
-              hitSlop={8}
-              className="h-9 w-9 items-center justify-center rounded-md active:bg-muted">
-              <MoreVertical size={20} color={fg} />
-            </Pressable>
-          ) : null}
         </View>
-      ) : null}
-      <KeyboardAvoidingView
-        behavior="padding"
-        keyboardVerticalOffset={headerHeight}
-        className="flex-1 bg-background">
         {convId ? (
           <ThreadBody
             conversationId={convId}

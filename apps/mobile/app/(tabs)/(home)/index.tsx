@@ -19,7 +19,8 @@
 import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
 import { HeaderLogoutPill } from '@/components/header-logout-pill';
@@ -103,6 +104,9 @@ export default function ChatsScreen() {
 
   const router = useRouter();
   const goCompose = React.useCallback(() => router.push('/conversations/new'), [router]);
+  const insets = useSafeAreaInsets();
+  const card = useThemeColor('card');
+  const border = useThemeColor('border');
 
   // Long-press menu state machine: 'menu' shows pin + mute
   // entry; 'mute' is the duration sheet. The active conversation
@@ -130,16 +134,30 @@ export default function ChatsScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      {/* This screen owns the Chats header now that it lives inside
-          the (home) Stack (the tab itself is headerless). Ignored on
-          web — the sidebar layout's <Slot/> renders this headerless. */}
-      <Stack.Screen
-        options={{
-          title: 'Chats',
-          headerLeft: () => <HeaderSearchButton />,
-          headerRight: () => <HeaderLogoutPill />,
-        }}
-      />
+      {/* In-content Chats header — a plain Pressable row, not the
+          native nav-bar header (the (home) Stack is headerless), so
+          the search / logout chrome looks + presses the same as the
+          Friends/Profile tabs. Native only: on web the (tabs) sidebar
+          layout supplies the chrome and renders this <Slot/> bare. */}
+      {Platform.OS === 'web' ? null : (
+        <View
+          style={{ paddingTop: insets.top, backgroundColor: card, borderBottomColor: border }}
+          className="border-b">
+          {/* No px on this row — HeaderSearchButton / HeaderLogoutPill
+              carry their own edge margins (shared with the tab header). */}
+          <View className="h-12 flex-row items-center">
+            <HeaderSearchButton />
+            <View className="flex-1" />
+            <HeaderLogoutPill />
+          </View>
+          <View
+            pointerEvents="none"
+            style={{ top: insets.top }}
+            className="absolute inset-x-0 h-12 items-center justify-center">
+            <Text className="text-base font-semibold">Chats</Text>
+          </View>
+        </View>
+      )}
       <ChatsSearchBar
         value={query}
         onChange={setQuery}
