@@ -475,7 +475,13 @@ export default function SearchModalScreen() {
       if (rowIdx == null) return;
       const row = rows[rowIdx];
       if (!row) return;
-      if (row.kind === 'user' && row.user.id) {
+      if (row.kind === 'header') {
+        // Enter on a section header collapses / expands the
+        // chevron, same as tapping it. Lets keyboard users skip
+        // past a long stranger-filled section without arrowing
+        // through every row.
+        toggleSection(row.section);
+      } else if (row.kind === 'user' && row.user.id) {
         void onTapUser(row.user);
       } else if (row.kind === 'conversation' && row.conversation.id) {
         dismissThenGoToConversation(row.conversation.id);
@@ -485,7 +491,7 @@ export default function SearchModalScreen() {
         expandSection(row.section);
       }
     },
-    [rows, onTapUser, dismissThenGoToConversation, expandSection]
+    [rows, onTapUser, dismissThenGoToConversation, expandSection, toggleSection]
   );
 
   // Web-only keyboard nav: ↑/↓ cycles tappable rows, Enter activates.
@@ -681,6 +687,13 @@ function isTappableRow(
   friendStatusByUser: Map<string, FriendStatus>,
   myUserId: string | undefined
 ): boolean {
+  // Section headers are keyboard-targetable so ↑/↓ can land on
+  // them and Enter toggles the chevron (expand/collapse). Without
+  // this, arrowing past a non-tappable People section full of
+  // strangers landed on the Chats header below — and Enter did
+  // nothing useful there. Now the header itself is the activation
+  // surface.
+  if (r.kind === 'header') return true;
   if (r.kind === 'user') {
     // The rendered user row only allows the row tap when the
     // peer is an accepted friend AND not self. Mirror that here
