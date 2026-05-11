@@ -39,10 +39,16 @@ export function useLeaveConversation(): {
     async (conversationId: string): Promise<boolean> => {
       const userId = me?.id;
       if (!userId) {
-        // No caller id known — surface as a toast and short-circuit
-        // rather than letting the backend 404 ambiguously. Returning
-        // false lets a caller know not to route away.
-        toast.error("Couldn't leave: not signed in.");
+        // Two paths land here:
+        //   - meQ hasn't resolved yet (cold tap right after mount):
+        //     don't toast, just short-circuit. The user retries on
+        //     the next render with meQ.data populated.
+        //   - meQ resolved with no user (genuinely signed-out):
+        //     surface the toast so the user understands why
+        //     nothing happened.
+        if (!meQ.isLoading) {
+          toast.error("Couldn't leave: not signed in.");
+        }
         return false;
       }
       try {
@@ -66,7 +72,7 @@ export function useLeaveConversation(): {
         return false;
       }
     },
-    [del, me?.id, qc]
+    [del, me?.id, meQ.isLoading, qc]
   );
 
   return { leave, isPending: del.isPending };

@@ -26,6 +26,7 @@ import { FullWindowOverlay } from 'react-native-screens';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendActionMenu, FriendRowMenuButton } from '@/components/friend-action-menu';
+import { Button } from '@/components/ui/button';
 import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
 import { RelationshipBadge } from '@/components/relationship-badge';
@@ -533,18 +534,20 @@ function MemberRow({
     // Incoming pending request — surface a "Manage" button that
     // routes to the friends tab where accept / decline live. The
     // bare "Sent you a request" text didn't give the user a way
-    // to act on it from here.
+    // to act on it from here. Uses the same Button size/variant
+    // the FriendStatusAction pills use elsewhere so all trailing
+    // actions across the app have the same metrics.
     trailing = (
       <View className="flex-row items-center gap-2">
         <RelationshipBadge label="Sent you a request" />
-        <Pressable
+        <Button
+          size="sm"
+          variant="outline"
           onPress={onManageRequest}
-          accessibilityRole="button"
           accessibilityLabel="Manage friend request"
-          testID={u.id ? `member-${u.id}-manage-request` : undefined}
-          className="rounded-md border border-border bg-card px-3 py-1.5 active:bg-muted">
-          <Text className="text-xs font-medium">Manage</Text>
-        </Pressable>
+          testID={u.id ? `member-${u.id}-manage-request` : undefined}>
+          <Text>Manage</Text>
+        </Button>
       </View>
     );
   } else {

@@ -544,9 +544,13 @@ func (s *Service) AddMembers(ctx context.Context, p AddMembersParams) (AddMember
 	if !conv.IsGroup() {
 		return AddMembersResult{}, apierror.Forbidden("cannot add members to a direct conversation")
 	}
-	if !caller.IsAdmin() {
-		return AddMembersResult{}, apierror.Forbidden("only group admins can add members")
-	}
+	// Any member can add to a group — Wakeup groups are 25-cap
+	// friend circles, not admin-gated workspaces, so the "anyone
+	// pulls in their friends" model matches the product shape.
+	// Mobile clients show only the CALLER's friends in the picker,
+	// so a non-admin can't add a stranger here; the cap-25 check
+	// below + the existing user-validation step bound the damage.
+	_ = caller
 
 	// Dedup the request, drop the actor (already in), and drop anyone
 	// who's already a member. Doing this up front avoids extra DB
