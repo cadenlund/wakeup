@@ -622,15 +622,16 @@ export default function SearchModalScreen() {
 
   // After "Show all N" lands, scroll the just-expanded section's
   // header to the top of the viewport so the newly-revealed rows
-  // are visible without the user having to hunt for them.
+  // are visible without the user having to hunt for them. The
+  // ref is cleared unconditionally so a stale value can't fire
+  // after a re-render.
   React.useEffect(() => {
     const section = justExpandedRef.current;
+    justExpandedRef.current = null;
     if (!section) return;
     const idx = rows.findIndex((r) => r.kind === 'header' && r.section === section);
-    if (idx >= 0) {
-      listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0 });
-    }
-    justExpandedRef.current = null;
+    if (idx < 0) return;
+    listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0 });
   }, [rows]);
 
   // FlashList 2.0.2 stickyHeaderIndices paints the sticky overlay
