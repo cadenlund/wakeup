@@ -19,11 +19,10 @@
 import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 
+import { ChatsHeaderBar } from '@/components/chats-header-bar';
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
-import { HeaderLogoutPill } from '@/components/header-logout-pill';
-import { HeaderSearchButton } from '@/components/header-search-button';
 import { ConversationRow } from '@/components/conversation-row';
 import { MuteSheet } from '@/components/mute-sheet';
 import { Input } from '@/components/ui/input';
@@ -130,16 +129,9 @@ export default function ChatsScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      {/* This screen owns the Chats header now that it lives inside
-          the (home) Stack (the tab itself is headerless). Ignored on
-          web — the sidebar layout's <Slot/> renders this headerless. */}
-      <Stack.Screen
-        options={{
-          title: 'Chats',
-          headerLeft: () => <HeaderSearchButton />,
-          headerRight: () => <HeaderLogoutPill />,
-        }}
-      />
+      {/* In-content Chats header (native; renders null on web, where
+          the sidebar layout already carries search + logout). */}
+      <ChatsHeaderBar />
       <ChatsSearchBar
         value={query}
         onChange={setQuery}
