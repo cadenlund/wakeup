@@ -9,58 +9,55 @@ import { QueryClient } from '@tanstack/react-query';
 
 import type {
   InternalHandlerHttpConversationListResponse,
-  InternalHandlerHttpMessageListResponse,
   InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
 import { applyWSEvent } from '@/lib/ws/dispatcher';
 
-type MessageList = InternalHandlerHttpMessageListResponse;
-type InfiniteMessages = { pages: MessageList[]; pageParams: unknown[] };
 type ConversationList = InternalHandlerHttpConversationListResponse;
 type PresenceList = InternalHandlerHttpPresenceListResponse;
 
 const CONV = 'conv-1';
-// Mirrors `useInfiniteMessages`' key: ['/v1/conversations/{id}/messages', {limit,q}, 'infinite'].
 const messagesKey = [`/v1/conversations/${CONV}/messages`, { limit: 20, q: undefined }, 'infinite'];
 const conversationsKey = ['/v1/conversations'];
 const presenceKey = ['/v1/presence/friends'];
+const friendsKey = ['/v1/friends'];
+const friendRequestsKey = ['/v1/friends/requests'];
 
 function newClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function seedMessages(qc: QueryClient, pages: MessageList[]): void {
-  qc.setQueryData<InfiniteMessages>(messagesKey, { pages, pageParams: [undefined] });
+// Seed a query so `invalidateQueries` has something to mark stale.
+async function seedQuery(qc: QueryClient, key: readonly unknown[], data: unknown): Promise<void> {
+  await qc.prefetchQuery({ queryKey: key, queryFn: () => data });
 }
-function readMessages(qc: QueryClient): InfiniteMessages | undefined {
-  return qc.getQueryData<InfiniteMessages>(messagesKey);
+function isInvalidated(qc: QueryClient, key: readonly unknown[]): boolean {
+  return qc.getQueryState(key)?.isInvalidated === true;
+}
+
+// Backend `publishMessageEvent` wire shape — ids only, no body.
+function messageEvent(type: string, extra: Record<string, unknown> = {}) {
+  return {
+    type,
+    data: {
+      message_id: 'm1',
+      conversation_id: CONV,
+      sender_id: 'u9',
+      created_at: '2026-01-09T00:00:00Z',
+      ...extra,
+    },
+  };
 }
 
 describe('applyWSEvent — message.new', () => {
-  test('prepends to the first page', () => {
+  test('invalidates the thread messages query', async () => {
     const qc = newClient();
-    seedMessages(qc, [{ data: [{ id: 'm0', body: 'old', created_at: '2026-01-01T00:00:00Z' }] }]);
-    applyWSEvent(qc, {
-      type: 'message.new',
-      data: { id: 'm1', conversation_id: CONV, body: 'hi', created_at: '2026-01-02T00:00:00Z' },
-    });
-    const d = readMessages(qc);
-    expect(d?.pages[0]?.data?.map((m) => m.id)).toEqual(['m1', 'm0']);
+    await seedQuery(qc, messagesKey, { pages: [{ data: [] }], pageParams: [undefined] });
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(isInvalidated(qc, messagesKey)).toBe(true);
   });
 
-  test('is a no-op when the message id is already cached (own-send echo)', () => {
-    const qc = newClient();
-    seedMessages(qc, [{ data: [{ id: 'm1', body: 'hi', created_at: '2026-01-02T00:00:00Z' }] }]);
-    const before = readMessages(qc);
-    applyWSEvent(qc, {
-      type: 'message.new',
-      data: { id: 'm1', conversation_id: CONV, body: 'hi', created_at: '2026-01-02T00:00:00Z' },
-    });
-    // Same object reference back → React Query won't re-render.
-    expect(readMessages(qc)).toBe(before);
-  });
-
-  test('bumps the conversation row and re-sorts the list', () => {
+  test('bumps the conversation row by created_at and re-sorts', () => {
     const qc = newClient();
     qc.setQueryData<ConversationList>(conversationsKey, {
       data: [
@@ -68,10 +65,7 @@ describe('applyWSEvent — message.new', () => {
         { id: CONV, last_message_at: '2026-01-01T00:00:00Z' },
       ],
     });
-    applyWSEvent(qc, {
-      type: 'message.new',
-      data: { id: 'm1', conversation_id: CONV, body: 'hi', created_at: '2026-01-09T00:00:00Z' },
-    });
+    applyWSEvent(qc, messageEvent('message.new'));
     const list = qc.getQueryData<ConversationList>(conversationsKey);
     expect(list?.data?.map((c) => c.id)).toEqual([CONV, 'conv-0']);
     expect(list?.data?.[0]?.last_message_at).toBe('2026-01-09T00:00:00Z');
@@ -89,75 +83,31 @@ describe('applyWSEvent — message.new', () => {
         { id: CONV, last_message_at: '2026-01-01T00:00:00Z' },
       ],
     });
-    applyWSEvent(qc, {
-      type: 'message.new',
-      data: { id: 'm1', conversation_id: CONV, body: 'hi', created_at: '2026-01-09T00:00:00Z' },
-    });
-    const list = qc.getQueryData<ConversationList>(conversationsKey);
-    expect(list?.data?.map((c) => c.id)).toEqual(['pinned', CONV]);
-  });
-
-  test('ignores a payload missing conversation_id or id', () => {
-    const qc = newClient();
-    seedMessages(qc, [{ data: [{ id: 'm0' }] }]);
-    const before = readMessages(qc);
-    applyWSEvent(qc, { type: 'message.new', data: { id: 'm1' } });
-    applyWSEvent(qc, { type: 'message.new', data: { conversation_id: CONV } });
-    applyWSEvent(qc, { type: 'message.new' });
-    expect(readMessages(qc)).toBe(before);
-  });
-});
-
-describe('applyWSEvent — message.edited', () => {
-  test('patches body + edited_at in place', () => {
-    const qc = newClient();
-    seedMessages(qc, [
-      {
-        data: [
-          { id: 'm1', body: 'orig' },
-          { id: 'm2', body: 'other' },
-        ],
-      },
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(qc.getQueryData<ConversationList>(conversationsKey)?.data?.map((c) => c.id)).toEqual([
+      'pinned',
+      CONV,
     ]);
-    applyWSEvent(qc, {
-      type: 'message.edited',
-      data: { id: 'm1', conversation_id: CONV, body: 'edited', edited_at: '2026-02-01T00:00:00Z' },
-    });
-    const rows = readMessages(qc)?.pages[0]?.data;
-    expect(rows?.find((m) => m.id === 'm1')).toMatchObject({
-      body: 'edited',
-      edited_at: '2026-02-01T00:00:00Z',
-    });
-    expect(rows?.find((m) => m.id === 'm2')).toMatchObject({ body: 'other' });
   });
 
-  test('a malformed payload (no string fields) leaves the row untouched', () => {
+  test('ignores a payload missing conversation_id', () => {
     const qc = newClient();
-    seedMessages(qc, [{ data: [{ id: 'm1', body: 'orig', edited_at: '2026-01-01T00:00:00Z' }] }]);
-    const before = readMessages(qc);
-    applyWSEvent(qc, { type: 'message.edited', data: { id: 'm1', conversation_id: CONV } });
-    applyWSEvent(qc, {
-      type: 'message.edited',
-      data: { id: 'm1', conversation_id: CONV, body: 42 },
-    });
-    // No undefined merged in → same reference back.
-    expect(readMessages(qc)).toBe(before);
+    qc.setQueryData<ConversationList>(conversationsKey, { data: [{ id: CONV }] });
+    const before = qc.getQueryData<ConversationList>(conversationsKey);
+    applyWSEvent(qc, { type: 'message.new', data: { message_id: 'm1' } });
+    applyWSEvent(qc, { type: 'message.new' });
+    expect(qc.getQueryData<ConversationList>(conversationsKey)).toBe(before);
   });
 });
 
-describe('applyWSEvent — message.deleted', () => {
-  test('marks the row deleted and blanks the body', () => {
-    const qc = newClient();
-    seedMessages(qc, [{ data: [{ id: 'm1', body: 'secret', is_deleted: false }] }]);
-    applyWSEvent(qc, {
-      type: 'message.deleted',
-      data: { message_id: 'm1', conversation_id: CONV },
-    });
-    expect(readMessages(qc)?.pages[0]?.data?.[0]).toMatchObject({
-      id: 'm1',
-      is_deleted: true,
-      body: '',
-    });
+describe('applyWSEvent — message.edited / message.deleted', () => {
+  test('both invalidate the thread messages query', async () => {
+    for (const type of ['message.edited', 'message.deleted']) {
+      const qc = newClient();
+      await seedQuery(qc, messagesKey, { pages: [{ data: [] }], pageParams: [undefined] });
+      applyWSEvent(qc, messageEvent(type));
+      expect(isInvalidated(qc, messagesKey)).toBe(true);
+    }
   });
 });
 
@@ -182,11 +132,12 @@ describe('applyWSEvent — presence.update', () => {
     expect(rows?.find((p) => p.user_id === 'u2')).toMatchObject({ status: 'online' });
   });
 
-  test('a payload with only user_id leaves the row untouched', () => {
+  test('a payload with only user_id leaves the row untouched (no undefined merge)', () => {
     const qc = newClient();
     qc.setQueryData<PresenceList>(presenceKey, { data: [{ user_id: 'u1', status: 'offline' }] });
     const before = qc.getQueryData<PresenceList>(presenceKey);
     applyWSEvent(qc, { type: 'presence.update', data: { user_id: 'u1' } });
+    applyWSEvent(qc, { type: 'presence.update', data: { user_id: 'u1', status: 42 } });
     expect(qc.getQueryData<PresenceList>(presenceKey)).toBe(before);
   });
 });
@@ -194,35 +145,35 @@ describe('applyWSEvent — presence.update', () => {
 describe('applyWSEvent — friend.*', () => {
   test('friend.request_received invalidates the requests query', async () => {
     const qc = newClient();
-    await qc.prefetchQuery({ queryKey: ['/v1/friends/requests'], queryFn: () => ({ data: [] }) });
+    await seedQuery(qc, friendRequestsKey, { data: [] });
     applyWSEvent(qc, { type: 'friend.request_received' });
-    expect(qc.getQueryState(['/v1/friends/requests'])?.isInvalidated).toBe(true);
+    expect(isInvalidated(qc, friendRequestsKey)).toBe(true);
   });
 
   test('friend.request_accepted invalidates the friends + requests queries', async () => {
     const qc = newClient();
-    await qc.prefetchQuery({ queryKey: ['/v1/friends'], queryFn: () => ({ data: [] }) });
-    await qc.prefetchQuery({ queryKey: ['/v1/friends/requests'], queryFn: () => ({ data: [] }) });
+    await seedQuery(qc, friendsKey, { data: [] });
+    await seedQuery(qc, friendRequestsKey, { data: [] });
     applyWSEvent(qc, { type: 'friend.request_accepted' });
-    expect(qc.getQueryState(['/v1/friends'])?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(['/v1/friends/requests'])?.isInvalidated).toBe(true);
+    expect(isInvalidated(qc, friendsKey)).toBe(true);
+    expect(isInvalidated(qc, friendRequestsKey)).toBe(true);
   });
 });
 
 describe('applyWSEvent — conversation.*', () => {
   test('member_added invalidates the conversations list', async () => {
     const qc = newClient();
-    await qc.prefetchQuery({ queryKey: ['/v1/conversations'], queryFn: () => ({ data: [] }) });
+    await seedQuery(qc, conversationsKey, { data: [] });
     applyWSEvent(qc, { type: 'conversation.member_added', data: { conversation_id: CONV } });
-    expect(qc.getQueryState(['/v1/conversations'])?.isInvalidated).toBe(true);
+    expect(isInvalidated(qc, conversationsKey)).toBe(true);
   });
 });
 
 describe('applyWSEvent — deliberate no-ops', () => {
-  test('room.* / typing.* / message.read / notification.new leave the cache untouched', () => {
+  test('room.* / typing.* / message.read / notification.new touch nothing', async () => {
     const qc = newClient();
-    seedMessages(qc, [{ data: [{ id: 'm0', body: 'x' }] }]);
-    const before = readMessages(qc);
+    await seedQuery(qc, messagesKey, { pages: [{ data: [] }], pageParams: [undefined] });
+    await seedQuery(qc, conversationsKey, { data: [] });
     for (const type of [
       'room.started',
       'room.participant_joined',
@@ -236,6 +187,7 @@ describe('applyWSEvent — deliberate no-ops', () => {
     ]) {
       applyWSEvent(qc, { type, data: { conversation_id: CONV } });
     }
-    expect(readMessages(qc)).toBe(before);
+    expect(isInvalidated(qc, messagesKey)).toBe(false);
+    expect(isInvalidated(qc, conversationsKey)).toBe(false);
   });
 });
