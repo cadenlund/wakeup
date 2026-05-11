@@ -1,18 +1,23 @@
-// Stub thread screen. Phase 5.2 fills in the message list, 5.3
-// adds the composer, 5.5 adds the typing indicator, etc. For 5.1
-// we just need a route to push to from the conversations list so
-// taps don't dead-end — this placeholder reads the conversation
-// row from the list cache (so we have a title without an extra
-// fetch) and shows an "in progress" message.
+// Phase 6.1 — conversation thread screen.
+//
+// Renders the §6.4 paginated /v1/conversations/{id}/messages feed
+// via the shared <MessageList>. The conversation row is hydrated
+// from the chats-tab list cache first (so the title appears
+// instantly on the push transition) with a per-id refetch as the
+// fallback when this screen is opened cold (deep link / search
+// modal route).
+//
+// Composer + typing indicator land in Phase 6.2 / 6.4; this PR is
+// the read-side foundation everything else hangs off of.
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { MessageCircle, MoreVertical } from 'lucide-react-native';
+import { MoreVertical } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, View } from 'react-native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
+import { MessageList } from '@/components/message-list';
 import { MuteSheet } from '@/components/mute-sheet';
-import { Text } from '@/components/ui/text';
 import { ThemedBackButton } from '@/components/ui/themed-back-button';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import {
@@ -72,7 +77,6 @@ export default function ConversationThreadScreen() {
   const conversation = cachedRow ?? detail;
 
   const title = computeTitle(conversation, me?.id);
-  const mutedFg = useThemeColor('muted-foreground');
   const fg = useThemeColor('foreground');
   const card = useThemeColor('card');
   const border = useThemeColor('border');
@@ -136,14 +140,15 @@ export default function ConversationThreadScreen() {
           ),
         }}
       />
-      <View className="flex-1 items-center justify-center gap-3 bg-background px-6">
-        <MessageCircle size={48} color={mutedFg} />
-        <Text variant="h3" className="text-center">
-          {title}
-        </Text>
-        <Text variant="muted" className="text-center">
-          The message thread lands in Phase 6.
-        </Text>
+      <View className="flex-1 bg-background">
+        {convId ? (
+          <MessageList
+            conversationId={convId}
+            myUserId={me?.id}
+            isGroup={isGroup}
+            members={conversation?.members ?? []}
+          />
+        ) : null}
       </View>
 
       <ConversationActionMenu

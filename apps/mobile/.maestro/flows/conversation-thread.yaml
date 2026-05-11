@@ -1,0 +1,38 @@
+# Phase 6.1 — conversation thread (message list).
+#
+# A single-account fresh run has no conversations to open, so the
+# populated thread → message-bubble path needs a multi-user fixture.
+# Matches the conv-pin-mute / conversation-create / dm-auto-create
+# pattern: mount-only smoke proving the chats tab + thread route
+# don't crash at render with the new <MessageList> wired in.
+#
+# What this flow asserts:
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs) Chats tab with the empty state.
+#   2. The chats screen renders cleanly with the new MessageList
+#      dependency tree imported into the thread route. The thread
+#      route itself isn't reachable on a fresh account; the
+#      populated open-thread path lands when the multi-user
+#      fixture work for §5+ flows finalises.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. Mount-without-crash proves the thread
+# route's new <MessageList> import + the useInfiniteMessages hook
+# don't blow up the bundle at load time.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+- takeScreenshot: conversation-thread-chats-empty
