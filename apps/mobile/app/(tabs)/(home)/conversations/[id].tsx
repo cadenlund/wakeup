@@ -167,7 +167,7 @@ export default function ConversationThreadScreen() {
           // the app's muted-text affordances; replace it with the
           // shared <ThemedBackButton>. headerBackVisible:false
           // suppresses the native one underneath.
-          headerLeft: () => <ThemedBackButton label="Chats" testID="conversation-thread-back" />,
+          headerLeft: () => <ThemedBackButton label="Back" testID="conversation-thread-back" />,
           headerBackVisible: false,
           headerRight: () =>
             convId ? (
@@ -210,7 +210,7 @@ export default function ConversationThreadScreen() {
         <View
           style={{ backgroundColor: card, borderBottomColor: border }}
           className="flex-row items-center border-b px-3 py-2">
-          <ThemedBackButton label="Chats" testID="conversation-thread-back-web" />
+          <ThemedBackButton label="Back" testID="conversation-thread-back-web" />
           {/* Title centred in the *full* bar (not between the
               buttons) — absolute, with side padding so a long name
               clips under the chrome rather than overlapping it. */}

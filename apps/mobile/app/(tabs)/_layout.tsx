@@ -1,42 +1,22 @@
 // Three-tab navigator (Phase 4.1). Tab order — Chats, Friends,
 // Profile — matches §5.1 / §16. Each tab's content lives in a
-// sibling file; this layout only owns the chrome (icons, labels,
-// header tint) and the Phase-3 temporary logout button on the
-// global header.
-import { Tabs, usePathname, useRouter } from 'expo-router';
-import { LogOut, MessageCircle, Search, User, Users } from 'lucide-react-native';
+// sibling file/group; this layout only owns the chrome (icons,
+// labels, header tint, the temporary logout pill).
+//
+// The Chats tab is the `(home)` group — a nested <Stack> holding the
+// conversations list + the thread — so opening a chat pushes (slides
+// in like login↔register) instead of swapping tabs. That Stack owns
+// its own headers, so the Chats tab here is `headerShown: false`;
+// Friends / Profile keep the shared header (search left, logout
+// right). On web the (tabs) layout is replaced by `_layout.web.tsx`
+// (a sidebar), so none of this header chrome runs there.
+import { Tabs } from 'expo-router';
+import { MessageCircle, User, Users } from 'lucide-react-native';
 import * as React from 'react';
-import { Pressable } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
 
-import { Text } from '@/components/ui/text';
-import { APIError } from '@/lib/api/client';
-import { usePostV1AuthLogout } from '@/lib/api/hooks/auth/auth';
-import { signedOut } from '@/lib/auth/post-auth-nav';
+import { HeaderLogoutPill } from '@/components/header-logout-pill';
+import { HeaderSearchButton } from '@/components/header-search-button';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
-
-// The conversation thread (/conversations/[id]) lives inside the
-// (tabs) layout — so the web sidebar stays visible while a chat is
-// open — but it isn't its own tab, so by default no tab reads as
-// active there. Treat any /conversations/... route as belonging to
-// "Chats" and force that tab's active styling.
-function useOnConversation(): boolean {
-  return usePathname().startsWith('/conversations/');
-}
-
-function ChatsTabIcon({ color, size, focused }: { color: string; size: number; focused: boolean }) {
-  const primary = useThemeColor('primary');
-  const onConversation = useOnConversation();
-  const active = focused || onConversation;
-  return <MessageCircle color={active ? primary : color} size={size} />;
-}
-
-function ChatsTabLabel({ color, focused }: { color: string; focused: boolean }) {
-  const primary = useThemeColor('primary');
-  const onConversation = useOnConversation();
-  const active = focused || onConversation;
-  return <Text style={{ color: active ? primary : color, fontSize: 12 }}>Chats</Text>;
-}
 
 export default function TabLayout() {
   const primary = useThemeColor('primary');
@@ -45,32 +25,6 @@ export default function TabLayout() {
   const bg = useThemeColor('background');
   const card = useThemeColor('card');
   const border = useThemeColor('border');
-
-  // Temporary in-app logout for end-to-end testing of the auth +
-  // onboarding flow. Real settings/logout UX lands in Phase 11.6.
-  //
-  // Only signedOut on definitive success or "already signed out"
-  // (401). A 5xx mid-logout would have hit `onSettled` and cleared
-  // the local cache — but the server session was still alive, so
-  // the user would have ended up with a stale "logged out" view
-  // that diverged from reality on the next page load. Now:
-  //   - 2xx → signedOut (clean path).
-  //   - 401 → signedOut (session was already gone server-side, so
-  //     local clear matches reality).
-  //   - everything else → mutationCache toast surfaces the failure
-  //     and the user stays signed in.
-  const qc = useQueryClient();
-  const router = useRouter();
-  const logout = usePostV1AuthLogout({
-    mutation: {
-      onSuccess: () => signedOut(qc, router),
-      onError: (err) => {
-        if (err instanceof APIError && err.status === 401) {
-          void signedOut(qc, router);
-        }
-      },
-    },
-  });
 
   return (
     <Tabs
@@ -95,39 +49,17 @@ export default function TabLayout() {
           backgroundColor: card,
           borderTopColor: border,
         },
-        // Right-side logout pill on the global tabs header. Removed
-        // when settings/account lands in Phase 11.6 — at that point
-        // logout moves into the account screen.
-        headerRight: () => (
-          <LogoutPill onPress={() => logout.mutate()} pending={logout.isPending} fg={fg} />
-        ),
-        // Header-left search icon present on every tab (Chats,
-        // Friends, Profile) so the global /search modal is one tap
-        // away regardless of where the user is. Visually distinct
-        // from the friends-tab inline search input (which is
-        // friend-discovery — a different flow that filters and
-        // adds people in place).
-        headerLeft: () => (
-          <Pressable
-            onPress={() => router.push('/search')}
-            accessibilityRole="button"
-            accessibilityLabel="Search people, chats, messages"
-            testID="header-search"
-            hitSlop={8}
-            className="ml-3 h-9 w-9 items-center justify-center rounded-full active:bg-muted">
-            <Search size={18} color={fg} />
-          </Pressable>
-        ),
+        headerRight: () => <HeaderLogoutPill />,
+        headerLeft: () => <HeaderSearchButton />,
       }}>
       <Tabs.Screen
-        name="index"
+        name="(home)"
         options={{
           title: 'Chats',
-          // Custom icon + label so the Chats tab still reads as
-          // active while you're inside a /conversations/[id] thread
-          // (which renders within (tabs) but isn't its own tab).
-          tabBarIcon: (props) => <ChatsTabIcon {...props} />,
-          tabBarLabel: (props) => <ChatsTabLabel {...props} />,
+          // The (home) Stack draws the header for both the list and
+          // the thread, so the tab itself is headerless.
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
         }}
       />
       <Tabs.Screen
@@ -144,42 +76,6 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />
-      {/* The conversation thread lives inside (tabs) on web so the
-          sidebar stays visible when a chat is open. On native it
-          shouldn't appear in the tab bar — `href: null` excludes
-          it. The screen is reached via router.push from the chats
-          list either way. */}
-      <Tabs.Screen name="conversations/[id]" options={{ href: null }} />
     </Tabs>
-  );
-}
-
-function LogoutPill({
-  onPress,
-  pending,
-  fg,
-}: {
-  onPress: () => void;
-  pending: boolean;
-  fg: string;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Log out"
-      testID="header-logout"
-      onPress={onPress}
-      disabled={pending}
-      hitSlop={8}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        marginRight: 14,
-        opacity: pending ? 0.5 : 1,
-      }}>
-      <LogOut size={16} color={fg} />
-      <Text className="text-sm font-medium">{pending ? 'Logging out…' : 'Log out'}</Text>
-    </Pressable>
   );
 }

@@ -52,7 +52,7 @@ export type AuthUser = {
 type RouterReplace = Pick<Router, 'replace'>;
 
 // Decide which route group a freshly-authenticated user belongs in.
-// `'/'` resolves to (tabs)/index via Stack.Protected's group guards;
+// `'/'` resolves to (tabs)/(home)/index via Stack.Protected's group guards;
 // `'/(onboarding)'` is explicit because '/' would otherwise pick
 // (tabs) for an onboarded-but-just-logged-in user when the
 // onboarding-pending cache flip hasn't fully landed.
