@@ -58,7 +58,7 @@ export default function ChatsScreen() {
   // page so the count in the header doesn't flicker as later pages
   // land.
   const conversationsQ = useInfiniteConversations({ query: { staleTime: 30_000 } });
-  const { data: conversations, total: conversationsTotal } = React.useMemo(
+  const { data: conversations } = React.useMemo(
     () => flatten<Conversation, { data?: Conversation[] }>(conversationsQ.data?.pages),
     [conversationsQ.data]
   );
@@ -181,13 +181,8 @@ export default function ChatsScreen() {
               void conversationsQ.fetchNextPage();
             }
           }}
-          // Section header at the top of the list. While a filter is
-          // active the global total would mislead (it'd read "CHATS
-          // 42" over 2 visible rows), so show the filtered count
-          // instead.
-          ListHeaderComponent={
-            <ChatsSectionHeader count={filterActive ? visible.length : conversationsTotal} />
-          }
+          // Section header at the top of the list.
+          ListHeaderComponent={<ChatsSectionHeader />}
           ListFooterComponent={<ConversationsFooter loading={conversationsQ.isFetchingNextPage} />}
           renderItem={({ item }) => (
             <RenderedConversationRow
@@ -467,11 +462,11 @@ function ConversationsFooter({ loading }: { loading: boolean }) {
 
 // Section header row for the conversations list — mirrors the
 // friends tab's <SectionHeader> visual (uppercase muted label,
-// trailing count, card background, bottom hairline) but without
-// the collapse caret: the chats list is a single uncollapsible
-// section, so there's no toggle. Rendered as the FlashList's
-// ListHeaderComponent so it scrolls with the rows.
-function ChatsSectionHeader({ count }: { count: number }) {
+// card background, bottom hairline) but without the collapse caret
+// (the chats list is a single uncollapsible section) and without a
+// trailing count. Rendered as the FlashList's ListHeaderComponent
+// so it scrolls with the rows.
+function ChatsSectionHeader() {
   const cardBg = useThemeColor('card');
   return (
     <View
@@ -480,11 +475,6 @@ function ChatsSectionHeader({ count }: { count: number }) {
       <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         Chats
       </Text>
-      {count > 0 ? (
-        <Text variant="muted" className="text-xs">
-          {count}
-        </Text>
-      ) : null}
     </View>
   );
 }
