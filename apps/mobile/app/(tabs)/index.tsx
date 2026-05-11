@@ -19,7 +19,7 @@
 import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from 'react-native';
-import { useNavigation, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
 import { ConversationRow } from '@/components/conversation-row';
@@ -62,18 +62,6 @@ export default function ChatsScreen() {
     () => flatten<Conversation, { data?: Conversation[] }>(conversationsQ.data?.pages),
     [conversationsQ.data]
   );
-
-  // Surface the total as a sleek count next to the screen-title
-  // "Chats" word in the native header. setOptions runs through
-  // useLayoutEffect (not useEffect) so the header paints in the
-  // same frame as the data lands — no one-frame flash of an empty
-  // count.
-  const navigation = useNavigation();
-  React.useLayoutEffect(() => {
-    navigation.setOptions({
-      headerTitle: () => <ChatsHeaderTitle total={conversationsTotal} />,
-    });
-  }, [navigation, conversationsTotal]);
 
   // Presence is keyed by user_id. Cache it once per render so each
   // row's display can look up O(1) without re-deriving the map per
@@ -193,6 +181,13 @@ export default function ChatsScreen() {
               void conversationsQ.fetchNextPage();
             }
           }}
+          // Section header at the top of the list. While a filter is
+          // active the global total would mislead (it'd read "CHATS
+          // 42" over 2 visible rows), so show the filtered count
+          // instead.
+          ListHeaderComponent={
+            <ChatsSectionHeader count={filterActive ? visible.length : conversationsTotal} />
+          }
           ListFooterComponent={<ConversationsFooter loading={conversationsQ.isFetchingNextPage} />}
           renderItem={({ item }) => (
             <RenderedConversationRow
@@ -470,21 +465,25 @@ function ConversationsFooter({ loading }: { loading: boolean }) {
   );
 }
 
-// Custom header title for the Chats tab — "Chats" in the standard
-// header weight + a small muted total badge next to it. Renders
-// the bare title when total is 0 (a brand-new account would
-// otherwise read "Chats 0", which scans louder than "Chats"
-// alone).
-function ChatsHeaderTitle({ total }: { total: number }) {
+// Section header row for the conversations list — mirrors the
+// friends tab's <SectionHeader> visual (uppercase muted label,
+// trailing count, card background, bottom hairline) but without
+// the collapse caret: the chats list is a single uncollapsible
+// section, so there's no toggle. Rendered as the FlashList's
+// ListHeaderComponent so it scrolls with the rows.
+function ChatsSectionHeader({ count }: { count: number }) {
+  const cardBg = useThemeColor('card');
   return (
-    <View className="flex-row items-center gap-2">
-      <Text className="text-base font-semibold">Chats</Text>
-      {total > 0 ? (
-        <View className="rounded-full bg-muted px-2 py-0.5">
-          <Text variant="muted" className="text-xs font-medium">
-            {total}
-          </Text>
-        </View>
+    <View
+      style={{ backgroundColor: cardBg }}
+      className="flex-row items-center border-b border-border px-4 py-2">
+      <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
+        Chats
+      </Text>
+      {count > 0 ? (
+        <Text variant="muted" className="text-xs">
+          {count}
+        </Text>
       ) : null}
     </View>
   );
