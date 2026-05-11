@@ -14,8 +14,8 @@
 //     a spring scale-in so it feels native.
 //
 // Actions (icon-only): Copy / React (v2 stub) / Report (no
-// moderation backend yet — neutral acknowledgement; hidden on your
-// own messages) / Delete (own non-deleted messages only).
+// moderation backend yet — "coming soon" toast, like React; hidden
+// on your own messages) / Delete (own non-deleted messages only).
 import * as Clipboard from 'expo-clipboard';
 import { Copy, Flag, SmilePlus, Trash2 } from 'lucide-react-native';
 import * as React from 'react';
@@ -163,7 +163,7 @@ function PopoverContent({
       label: 'Report',
       icon: <Flag size={20} color={fg} />,
       onPress: () => {
-        toast.info('Thanks — we’ll take a look.');
+        toast.info('Reporting coming soon');
         onClose();
       },
     });
