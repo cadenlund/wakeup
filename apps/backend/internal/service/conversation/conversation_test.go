@@ -13,6 +13,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
@@ -26,6 +27,7 @@ type stack struct {
 	users   *userrepo.Queries
 	friends *friendrepo.Queries
 	pool    *pgxpool.Pool
+	broker  pubsub.Broker
 }
 
 func newStack(t *testing.T) *stack {
@@ -34,13 +36,15 @@ func newStack(t *testing.T) *stack {
 	convs := convrepo.New(pool)
 	users := userrepo.New(pool)
 	friends := friendrepo.New(pool)
+	broker := pubsub.NewInProc(pubsub.NewRegistry())
+	t.Cleanup(func() { _ = broker.Close() })
 	svc, err := conversation.New(conversation.Config{
-		Pool: pool, Convs: convs, Users: users, Friends: friends,
+		Pool: pool, Convs: convs, Users: users, Friends: friends, Broker: broker,
 	})
 	if err != nil {
 		t.Fatalf("conversation.New: %v", err)
 	}
-	return &stack{svc: svc, convs: convs, users: users, friends: friends, pool: pool}
+	return &stack{svc: svc, convs: convs, users: users, friends: friends, pool: pool, broker: broker}
 }
 
 // makeFriendship is a setup helper that establishes an accepted
@@ -1212,6 +1216,58 @@ func TestMarkRead_MemberSucceeds(t *testing.T) {
 	}
 	if err := st.svc.MarkRead(ctx, b.ID, created.Conversation.ID, msgID); err != nil {
 		t.Fatalf("MarkRead: %v", err)
+	}
+}
+
+// MarkRead fans out a `message.read` event on the conversation's
+// messages channel so other members' open threads advance the
+// reader's pointer live. The payload carries the reader's id and the
+// pointer message id under the same field name the member DTO uses.
+func TestMarkRead_PublishesReadEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationDirect, Creator: a.ID, MemberIDs: []uuid.UUID{b.ID},
+	})
+	msgID := uuid.Must(uuid.NewV7())
+	if _, err := st.pool.Exec(ctx, `
+		INSERT INTO messages (id, conversation_id, sender_id, body)
+		VALUES ($1, $2, $3, 'hello')
+	`, msgID, created.Conversation.ID, a.ID); err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+
+	channel := "conv:" + created.Conversation.ID.String() + ":messages"
+	ch, err := st.broker.Subscribe(ctx, channel)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	if err := st.svc.MarkRead(ctx, b.ID, created.Conversation.ID, msgID); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+
+	select {
+	case msg := <-ch:
+		payload := string(msg.Payload)
+		wants := []string{
+			"message.read",
+			created.Conversation.ID.String(),
+			b.ID.String(),
+			msgID.String(),
+			"conversation_id",
+			"message_id",
+		}
+		for _, want := range wants {
+			if !strings.Contains(payload, want) {
+				t.Errorf("payload missing %q: %s", want, payload)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for message.read event")
 	}
 }
 
