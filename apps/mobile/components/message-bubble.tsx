@@ -48,8 +48,8 @@ type Props = {
   // Members whose last_read_message_id sits at this exact bubble.
   // Only meaningful on "mine" bubbles in groups — the list builder
   // (<MessageList>) leaves it undefined for everything else. Renders
-  // as a row of tiny avatars under the bubble (iMessage convention:
-  // only the latest read position per recipient is shown).
+  // as a small dot per reader under the bubble (§6.3 — only the
+  // latest read position per recipient counts).
   readBy?: InternalHandlerHttpUserResponse[];
   // Send-pipeline status from useSendMessage. `undefined` = the
   // message is delivered (server-issued row); `'sending'` shows
@@ -228,11 +228,15 @@ export function MessageBubble({
         </View>
 
         {readBy && readBy.length > 0 ? (
-          <View className="mt-0.5 flex-row gap-1 px-1">
-            {readBy.map((u) => {
-              const name = u.display_name?.trim() || u.username?.trim() || 'Member';
-              return <Avatar key={u.id} source={u.avatar_url} fallbackName={name} size={14} />;
-            })}
+          // §6.3: a small dot per reader (not avatars — keeps the
+          // receipt unobtrusive and unambiguous about whose face
+          // it isn't).
+          <View
+            className="mt-1 flex-row gap-1 px-1"
+            accessibilityLabel={`Read by ${readBy.length}`}>
+            {readBy.map((u) => (
+              <View key={u.id} className="h-1.5 w-1.5 rounded-full bg-primary" />
+            ))}
           </View>
         ) : null}
 

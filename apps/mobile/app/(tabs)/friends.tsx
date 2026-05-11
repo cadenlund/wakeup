@@ -47,6 +47,7 @@ import { WebRefreshButton } from '@/components/ui/web-refresh-button';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
+import { getGetV1ConversationsQueryKey } from '@/lib/api/hooks/conversations/conversations';
 import {
   getGetV1FriendsQueryKey,
   getGetV1FriendsRequestsQueryKey,
@@ -56,6 +57,7 @@ import {
   usePostV1FriendsRequestsIdDecline,
   usePostV1FriendsUserIdBlock,
 } from '@/lib/api/hooks/friends/friends';
+import { getGetV1SearchQueryKey } from '@/lib/api/hooks/search/search';
 import { flatten, useInfiniteFriends, useInfiniteUsers } from '@/lib/api/use-infinite';
 import {
   getGetV1PresenceFriendsQueryKey,
@@ -237,6 +239,12 @@ export default function FriendsScreen() {
       qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() }),
       qc.invalidateQueries({ queryKey: getGetV1FriendsQueryKey() }),
       qc.invalidateQueries({ queryKey: getGetV1PresenceFriendsQueryKey() }),
+      // A friendship change can add or remove a DM (the backend
+      // deletes the direct thread on unfriend / block), so the
+      // chats list + search caches go stale too — refresh them so
+      // a dead DM doesn't linger and get re-opened to a 404.
+      qc.invalidateQueries({ queryKey: getGetV1ConversationsQueryKey() }),
+      qc.invalidateQueries({ queryKey: getGetV1SearchQueryKey() }),
     ]);
   }, [qc]);
 
