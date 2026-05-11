@@ -394,6 +394,11 @@ export default function SearchModalScreen() {
     setExpandedSections(new Set());
     setCollapsedSections(new Set());
   }, [debouncedQuery]);
+  // After "Show all N" expands a section, the post-render effect
+  // below scrolls that section's header to the top of the viewport
+  // so the newly-revealed rows are visible without the user having
+  // to hunt for them.
+  const justExpandedRef = React.useRef<SectionId | null>(null);
   const expandSection = React.useCallback((section: SectionId) => {
     setExpandedSections((prev) => {
       if (prev.has(section)) return prev;
@@ -401,6 +406,7 @@ export default function SearchModalScreen() {
       next.add(section);
       return next;
     });
+    justExpandedRef.current = section;
   }, []);
   const toggleSection = React.useCallback((section: SectionId) => {
     setCollapsedSections((prev) => {
@@ -614,6 +620,19 @@ export default function SearchModalScreen() {
 
   const mutedFg = useThemeColor('muted-foreground');
 
+  // After "Show all N" lands, scroll the just-expanded section's
+  // header to the top of the viewport so the newly-revealed rows
+  // are visible without the user having to hunt for them.
+  React.useEffect(() => {
+    const section = justExpandedRef.current;
+    if (!section) return;
+    const idx = rows.findIndex((r) => r.kind === 'header' && r.section === section);
+    if (idx >= 0) {
+      listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0 });
+    }
+    justExpandedRef.current = null;
+  }, [rows]);
+
   // FlashList 2.0.2 stickyHeaderIndices paints the sticky overlay
   // on top of the inline header at scrollY=0, doubling the first
   // section header. Gate sticky behind a small scroll so the
@@ -661,11 +680,6 @@ export default function SearchModalScreen() {
             // users, conversations, messages, and show-all rows in
             // separate pools so each renders with the right shape.
             getItemType={(item) => item.kind}
-            // Anchor visible content when rows are inserted above
-            // the viewport, so tapping "Show all N people"
-            // doesn't shift the rest of the modal down out of
-            // sight.
-            maintainVisibleContentPosition={{ disabled: false, startRenderingFromBottom: false }}
             // Sticky chevron headers — gated behind a small scroll
             // so the inline header has left the viewport before
             // the overlay takes over (FlashList 2.0.2 duplicate

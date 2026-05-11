@@ -357,6 +357,12 @@ export default function FriendsScreen() {
   const [expandedRequestSections, setExpandedRequestSections] = React.useState<
     Set<'incoming' | 'outgoing'>
   >(new Set());
+  // After "Show N more" expands a section, the post-render scroll
+  // effect in SectionsPane snaps that section's header to the top
+  // of the viewport. Reading this ref is what tells the effect
+  // which section was just expanded; without it, the user stayed
+  // wherever they were and had to hunt for the new rows.
+  const justExpandedRef = React.useRef<'incoming' | 'outgoing' | null>(null);
   const expandRequestSection = React.useCallback((section: 'incoming' | 'outgoing') => {
     setExpandedRequestSections((prev) => {
       if (prev.has(section)) return prev;
@@ -364,6 +370,7 @@ export default function FriendsScreen() {
       next.add(section);
       return next;
     });
+    justExpandedRef.current = section;
   }, []);
   // Track the section that was just toggled (in either direction)
   // so the post-render effect can scroll its header to the top.
@@ -613,6 +620,7 @@ export default function FriendsScreen() {
           refreshing={refreshing}
           onRefresh={onRefresh}
           justToggledRef={justToggledRef}
+          justExpandedRef={justExpandedRef}
           onEndReached={() => {
             if (friendsQ.hasNextPage && !friendsQ.isFetchingNextPage) {
               void friendsQ.fetchNextPage();
@@ -695,6 +703,7 @@ function SectionsPane({
   refreshing,
   onRefresh,
   justToggledRef,
+  justExpandedRef,
   onEndReached,
   isFetchingNextPage,
 }: {
@@ -714,10 +723,28 @@ function SectionsPane({
   refreshing: boolean;
   onRefresh: () => void;
   justToggledRef: React.MutableRefObject<SectionId | null>;
+  // Set when the user just tapped "Show N more" — the scroll
+  // effect below snaps that section's header to the top of the
+  // viewport so the newly-revealed rows are visible without the
+  // user having to hunt for them.
+  justExpandedRef: React.MutableRefObject<'incoming' | 'outgoing' | null>;
   onEndReached: () => void;
   isFetchingNextPage: boolean;
 }) {
   const listRef = React.useRef<ListRef<Row>>(null);
+
+  // After "Show N more" lands, scroll the just-expanded section's
+  // header to the top of the viewport so the newly-revealed rows
+  // are visible without the user having to hunt for them.
+  React.useEffect(() => {
+    const section = justExpandedRef.current;
+    if (!section) return;
+    const idx = rows.findIndex((r) => r.kind === 'header' && r.sectionId === section);
+    if (idx >= 0) {
+      listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0 });
+    }
+    justExpandedRef.current = null;
+  }, [rows, justExpandedRef]);
 
   // FlashList 2.0.2 stickyHeaderIndices paints the sticky overlay
   // ON TOP of the inline header row at scrollY=0, doubling the
@@ -763,12 +790,6 @@ function SectionsPane({
       // and the rows under them disappearing when the user toggled
       // the Friends section.
       getItemType={(item) => item.kind}
-      // Anchor visible content when rows are inserted above the
-      // viewport — tapping "Show N more" on the Incoming or
-      // Outgoing section used to push the Friends section down,
-      // making the user's current view appear to shift while
-      // they were trying to see what they expanded.
-      maintainVisibleContentPosition={{ disabled: false, startRenderingFromBottom: false }}
       // Sticky chevron headers — see stickyEnabled state above;
       // undefined turns sticky off entirely (used at scrollY < 50
       // to avoid the FlashList 2.0.2 duplicate-header bug).
