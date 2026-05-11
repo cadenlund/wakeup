@@ -19,12 +19,10 @@
 import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
+import { ChatsHeaderBar } from '@/components/chats-header-bar';
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
-import { HeaderLogoutPill } from '@/components/header-logout-pill';
-import { HeaderSearchButton } from '@/components/header-search-button';
 import { ConversationRow } from '@/components/conversation-row';
 import { MuteSheet } from '@/components/mute-sheet';
 import { Input } from '@/components/ui/input';
@@ -104,9 +102,6 @@ export default function ChatsScreen() {
 
   const router = useRouter();
   const goCompose = React.useCallback(() => router.push('/conversations/new'), [router]);
-  const insets = useSafeAreaInsets();
-  const card = useThemeColor('card');
-  const border = useThemeColor('border');
 
   // Long-press menu state machine: 'menu' shows pin + mute
   // entry; 'mute' is the duration sheet. The active conversation
@@ -134,30 +129,9 @@ export default function ChatsScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      {/* In-content Chats header — a plain Pressable row, not the
-          native nav-bar header (the (home) Stack is headerless), so
-          the search / logout chrome looks + presses the same as the
-          Friends/Profile tabs. Native only: on web the (tabs) sidebar
-          layout supplies the chrome and renders this <Slot/> bare. */}
-      {Platform.OS === 'web' ? null : (
-        <View
-          style={{ paddingTop: insets.top, backgroundColor: card, borderBottomColor: border }}
-          className="border-b">
-          {/* No px on this row — HeaderSearchButton / HeaderLogoutPill
-              carry their own edge margins (shared with the tab header). */}
-          <View className="h-12 flex-row items-center">
-            <HeaderSearchButton />
-            <View className="flex-1" />
-            <HeaderLogoutPill />
-          </View>
-          <View
-            pointerEvents="none"
-            style={{ top: insets.top }}
-            className="absolute inset-x-0 h-12 items-center justify-center">
-            <Text className="text-base font-semibold">Chats</Text>
-          </View>
-        </View>
-      )}
+      {/* In-content Chats header (native; renders null on web, where
+          the sidebar layout already carries search + logout). */}
+      <ChatsHeaderBar />
       <ChatsSearchBar
         value={query}
         onChange={setQuery}
