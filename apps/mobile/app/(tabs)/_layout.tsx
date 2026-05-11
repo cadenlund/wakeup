@@ -3,7 +3,7 @@
 // sibling file; this layout only owns the chrome (icons, labels,
 // header tint) and the Phase-3 temporary logout button on the
 // global header.
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, usePathname, useRouter } from 'expo-router';
 import { LogOut, MessageCircle, Search, User, Users } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable } from 'react-native';
@@ -14,6 +14,29 @@ import { APIError } from '@/lib/api/client';
 import { usePostV1AuthLogout } from '@/lib/api/hooks/auth/auth';
 import { signedOut } from '@/lib/auth/post-auth-nav';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+
+// The conversation thread (/conversations/[id]) lives inside the
+// (tabs) layout — so the web sidebar stays visible while a chat is
+// open — but it isn't its own tab, so by default no tab reads as
+// active there. Treat any /conversations/... route as belonging to
+// "Chats" and force that tab's active styling.
+function useOnConversation(): boolean {
+  return usePathname().startsWith('/conversations/');
+}
+
+function ChatsTabIcon({ color, size, focused }: { color: string; size: number; focused: boolean }) {
+  const primary = useThemeColor('primary');
+  const onConversation = useOnConversation();
+  const active = focused || onConversation;
+  return <MessageCircle color={active ? primary : color} size={size} />;
+}
+
+function ChatsTabLabel({ color, focused }: { color: string; focused: boolean }) {
+  const primary = useThemeColor('primary');
+  const onConversation = useOnConversation();
+  const active = focused || onConversation;
+  return <Text style={{ color: active ? primary : color, fontSize: 12 }}>Chats</Text>;
+}
 
 export default function TabLayout() {
   const primary = useThemeColor('primary');
@@ -100,7 +123,11 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Chats',
-          tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
+          // Custom icon + label so the Chats tab still reads as
+          // active while you're inside a /conversations/[id] thread
+          // (which renders within (tabs) but isn't its own tab).
+          tabBarIcon: (props) => <ChatsTabIcon {...props} />,
+          tabBarLabel: (props) => <ChatsTabLabel {...props} />,
         }}
       />
       <Tabs.Screen

@@ -9,8 +9,9 @@
 // Deleted rows render the body as italicised "Message deleted" —
 // we still draw a placeholder so the conversation history stays
 // coherent (gaps would make a reply chain unreadable).
+import { MoreHorizontal } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
@@ -19,6 +20,8 @@ import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import type { LocalSendStatus } from '@/lib/use-send-message';
 import { cn } from '@/lib/utils';
+
+const isWeb = Platform.OS === 'web';
 
 type Props = {
   body: string | null | undefined;
@@ -55,12 +58,24 @@ type Props = {
   sendStatus?: LocalSendStatus;
   onRetrySend?: () => void;
   // Long-press anywhere in the bubble column opens the message
-  // context menu (Copy / React / Report / Delete). The list owns
-  // the menu state; the bubble just reports the gesture. Fires
-  // haptics.tap() internally before the callback.
-  onLongPress?: () => void;
+  // action popover. The bubble measures its own rect in window
+  // coords and hands it up so the popover can anchor to the
+  // message itself (iMessage-style) rather than a bottom drawer.
+  // `rect` is undefined if measuring fails (rare) — the popover
+  // falls back to centering. Fires haptics.tap() before the cb.
+  onLongPress?: (rect: BubbleRect | undefined) => void;
+  // True while THIS bubble is the one the action popover is open
+  // on. The popover renders a "lifted" copy of the bubble pinned
+  // at its measured rect over a scrim — so the in-thread copy
+  // hides (opacity 0, layout preserved) to avoid a visible
+  // duplicate; the lifted copy fills the gap. Restores when the
+  // popover closes.
+  lifted?: boolean;
   testID?: string;
 };
+
+// Window-coordinate rect of the bubble — `measureInWindow` output.
+export type BubbleRect = { x: number; y: number; width: number; height: number };
 
 export function MessageBubble({
   body,
@@ -76,21 +91,61 @@ export function MessageBubble({
   sendStatus,
   onRetrySend,
   onLongPress,
+  lifted,
   testID,
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
   const mutedFg = useThemeColor('muted-foreground');
   const destructive = useThemeColor('destructive');
+  const fg = useThemeColor('foreground');
+  // One shade off `card` so the web overflow chip reads against
+  // both a `card`-coloured "theirs" bubble and a `primary` "mine".
+  const overflowBg = useThemeColor('background');
+  // Ref on the bubble View so long-press can measure its window
+  // rect for the action popover's anchor.
+  const bubbleRef = React.useRef<View>(null);
   const BubbleColumn = onLongPress ? Pressable : View;
+  const handleLongPress = React.useCallback(() => {
+    if (!onLongPress) return;
+    haptics.tap();
+    const node = bubbleRef.current;
+    if (!node) {
+      onLongPress(undefined);
+      return;
+    }
+    // Measure on the next frame: a layout pass can be in flight
+    // right after the press is recognised and an immediate
+    // measureInWindow can read stale (often too-small / shifted)
+    // bounds on Android.
+    requestAnimationFrame(() => {
+      const n = bubbleRef.current;
+      if (!n) {
+        onLongPress(undefined);
+        return;
+      }
+      n.measureInWindow((x, y, width, height) => {
+        onLongPress(
+          Number.isFinite(x) && Number.isFinite(y) && width > 0 && height > 0
+            ? { x, y, width, height }
+            : undefined
+        );
+      });
+    });
+  }, [onLongPress]);
+  // Web: long-press isn't a discoverable affordance, so a small ⋯
+  // button appears in the bubble's top-right corner on hover (the
+  // Slack/Discord convention). It opens the same action popover.
+  const [hovered, setHovered] = React.useState(false);
+  const showWebOverflow = isWeb && !!onLongPress;
   const bubbleColumnProps = onLongPress
     ? {
-        onLongPress: () => {
-          haptics.tap();
-          onLongPress();
-        },
+        onLongPress: handleLongPress,
         delayLongPress: 300,
         accessibilityRole: 'button' as const,
         accessibilityLabel: 'Message actions',
+        ...(showWebOverflow
+          ? { onHoverIn: () => setHovered(true), onHoverOut: () => setHovered(false) }
+          : {}),
       }
     : {};
   // Per-bubble timestamps moved to centered <TimeDivider> rows in
@@ -122,6 +177,10 @@ export function MessageBubble({
 
       <BubbleColumn
         {...bubbleColumnProps}
+        // Hide the in-thread copy while the action popover holds it
+        // — opacity 0 keeps the layout so the list doesn't reflow;
+        // the popover's pinned snapshot fills the visual gap.
+        style={lifted ? { opacity: 0 } : undefined}
         className={cn('max-w-[80%]', mine ? 'items-end' : 'items-start')}>
         {showSenderLabel && !mine && displayName ? (
           <Text variant="muted" className="mb-0.5 px-1 text-xs">
@@ -130,6 +189,8 @@ export function MessageBubble({
         ) : null}
 
         <View
+          ref={bubbleRef}
+          collapsable={false}
           className={cn(
             'rounded-2xl px-3 py-2',
             mine ? 'rounded-br-sm bg-primary' : 'rounded-bl-sm bg-card'
@@ -147,6 +208,23 @@ export function MessageBubble({
               {body ?? ''}
             </Text>
           )}
+
+          {showWebOverflow ? (
+            <Pressable
+              onPress={handleLongPress}
+              onHoverIn={() => setHovered(true)}
+              onHoverOut={() => setHovered(false)}
+              pointerEvents={hovered ? 'auto' : 'none'}
+              accessibilityRole="button"
+              accessibilityLabel="Message actions"
+              testID={testID ? `${testID}-overflow` : undefined}
+              // -top-3 == -12px: an h-6 (24px) chip straddling the
+              // bubble's top edge — half above, half overlapping.
+              style={{ opacity: hovered ? 1 : 0, backgroundColor: overflowBg }}
+              className="absolute -top-3 right-1 h-6 w-6 items-center justify-center rounded-full border border-border shadow active:opacity-80">
+              <MoreHorizontal size={14} color={fg} />
+            </Pressable>
+          ) : null}
         </View>
 
         {readBy && readBy.length > 0 ? (

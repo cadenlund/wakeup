@@ -21,13 +21,14 @@ import { useHeaderHeight } from '@react-navigation/elements';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { MoreVertical } from 'lucide-react-native';
 import * as React from 'react';
-import { KeyboardAvoidingView, Pressable, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, View } from 'react-native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import { Composer } from '@/components/composer';
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
 import { MessageList } from '@/components/message-list';
 import { MuteSheet } from '@/components/mute-sheet';
+import { Text } from '@/components/ui/text';
 import { ThemedBackButton } from '@/components/ui/themed-back-button';
 import { useSendMessage } from '@/lib/use-send-message';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
@@ -167,6 +168,40 @@ export default function ConversationThreadScreen() {
           ),
         }}
       />
+      {/* Web renders (tabs) as a sidebar layout, which doesn't show
+          the native navigator header — so the thread has no back /
+          title / actions chrome there. Render an in-content header
+          bar on web; native keeps the Stack.Screen header above. */}
+      {Platform.OS === 'web' ? (
+        <View
+          style={{ backgroundColor: card, borderBottomColor: border }}
+          className="flex-row items-center border-b px-3 py-2">
+          <ThemedBackButton label="Chats" testID="conversation-thread-back-web" />
+          {/* Title centred in the *full* bar (not between the
+              buttons) — absolute, with side padding so a long name
+              clips under the chrome rather than overlapping it. */}
+          <View pointerEvents="none" className="absolute inset-x-0 items-center">
+            <Text
+              numberOfLines={1}
+              style={{ paddingHorizontal: 96 }}
+              className="text-base font-semibold">
+              {title}
+            </Text>
+          </View>
+          <View className="flex-1" />
+          {convId ? (
+            <Pressable
+              onPress={() => setSheet('menu')}
+              accessibilityRole="button"
+              accessibilityLabel="Conversation actions"
+              testID="conversation-thread-more-web"
+              hitSlop={8}
+              className="h-9 w-9 items-center justify-center rounded-md active:bg-muted">
+              <MoreVertical size={20} color={fg} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       <KeyboardAvoidingView
         behavior="padding"
         keyboardVerticalOffset={headerHeight}
