@@ -10,12 +10,18 @@
 // (deep link / search modal route).
 //
 // KeyboardAvoidingView wraps both the list and the composer so the
-// composer rides on top of the soft keyboard. Read receipts +
-// typing indicator land in Phase 6.3 / 6.4.
+// composer rides up with the soft keyboard. `behavior="padding"` on
+// BOTH platforms: with `edgeToEdgeEnabled` (app.json) Android's
+// `windowSoftInputMode="adjustResize"` is a no-op — the window
+// doesn't resize — so we can't lean on the OS there. `padding`
+// works on both because RN's KAV applies bottom padding equal to
+// the keyboard height directly. `keyboardVerticalOffset` =
+// header + status-bar height so the padding lands at the right spot.
+import { useHeaderHeight } from '@react-navigation/elements';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { MoreVertical } from 'lucide-react-native';
 import * as React from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, View } from 'react-native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
 import { Composer } from '@/components/composer';
@@ -97,6 +103,10 @@ export default function ConversationThreadScreen() {
   const fg = useThemeColor('foreground');
   const card = useThemeColor('card');
   const border = useThemeColor('border');
+  // Header + status-bar height — the offset KeyboardAvoidingView
+  // needs so the keyboard padding starts below the chrome, not
+  // from the top of the screen.
+  const headerHeight = useHeaderHeight();
 
   // Header three-dots reuses the same ConversationActionMenu the
   // chats tab opens on row long-press. State machine: 'menu' is
@@ -158,11 +168,8 @@ export default function ConversationThreadScreen() {
         }}
       />
       <KeyboardAvoidingView
-        // iOS: 'padding' pushes the composer above the keyboard.
-        // Android handles soft-input via windowSoftInputMode in the
-        // manifest and doesn't need this; we still mount the view
-        // so the layout stays consistent.
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
+        keyboardVerticalOffset={headerHeight}
         className="flex-1 bg-background">
         {convId ? (
           <ThreadBody

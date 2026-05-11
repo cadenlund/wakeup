@@ -270,6 +270,9 @@ export function MessageList({
       // try to reuse a divider's tiny height for a full bubble
       // and vice-versa, causing flicker on prepend.
       getItemType={(row) => row.kind}
+      // Breathing room so the newest bubble doesn't sit flush
+      // against the composer's top edge.
+      contentContainerStyle={{ paddingBottom: 8 }}
       // Anchor at the bottom on first paint so the user lands on
       // the newest message; lets older content prepend cleanly as
       // the cursor walks back through history.
