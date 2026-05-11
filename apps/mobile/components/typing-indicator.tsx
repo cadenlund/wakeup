@@ -13,6 +13,7 @@
 import * as React from 'react';
 import { AccessibilityInfo, Animated, View } from 'react-native';
 
+import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import type { InternalHandlerHttpConversationMemberRow } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
@@ -24,8 +25,11 @@ const DOT_MIN_OPACITY = 0.3;
 const DOT_DURATION_MS = 360;
 const DOT_STAGGER_MS = 180;
 
+function userFor(members: Member[] | undefined, userId: string) {
+  return members?.find((m) => m.user?.id === userId)?.user;
+}
 function nameFor(members: Member[] | undefined, userId: string): string {
-  const u = members?.find((m) => m.user?.id === userId)?.user;
+  const u = userFor(members, userId);
   return u?.display_name?.trim() || u?.username?.trim() || 'Someone';
 }
 
@@ -116,6 +120,10 @@ export function TypingIndicator({
   if (ids.length === 0) return null;
 
   const label = isGroup ? groupLabel(members, ids) : undefined;
+  // In a group, show the typing user's avatar in the gutter (the
+  // first one, when several are typing) — same slot/size as a
+  // "theirs" message bubble's avatar.
+  const headUser = isGroup ? userFor(members, ids[0]) : undefined;
 
   return (
     // Mirrors <MessageBubble>'s "theirs" row: avatar gutter in groups
@@ -125,7 +133,11 @@ export function TypingIndicator({
       accessibilityLiveRegion="polite"
       accessibilityLabel={label ? `${label} is typing` : 'Typing'}
       testID="typing-indicator">
-      {isGroup ? <View className="w-8" /> : null}
+      {isGroup ? (
+        <View className="w-8">
+          <Avatar source={headUser?.avatar_url} fallbackName={nameFor(members, ids[0])} size={32} />
+        </View>
+      ) : null}
       <View className="max-w-[80%] items-start">
         {label ? (
           <Text variant="muted" className="mb-0.5 px-1 text-xs">
