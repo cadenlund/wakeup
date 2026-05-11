@@ -156,6 +156,13 @@ export function connectWS(): void {
   }
   reconnectAttempt = 0;
   clearReconnectTimer();
+  // We want a connection and we're actively opening one — surface
+  // that as 'reconnecting' (the enum has no separate "connecting"
+  // state) so the state hook doesn't read 'disconnected' through
+  // the initial handshake window. onopen flips it to 'connected';
+  // a failed handshake's onclose schedules a reconnect (which
+  // re-asserts 'reconnecting'). (CR on PR #146.)
+  setState('reconnecting');
   openSocket();
 }
 
