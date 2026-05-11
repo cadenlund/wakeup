@@ -15,19 +15,20 @@
 //      (`message.new` / `message.edited` / `message.deleted`) only
 //      carry ids on the wire (`{ message_id, conversation_id,
 //      sender_id, created_at }` — see backend `publishMessageEvent`),
-//      not the body, so the open thread refetches; `friend.*` and
-//      `conversation.*` mark their lists stale the same way.
-//   2. setQueryData patch — `message.new` also bumps the conversation
-//      row's `last_message_at` and re-sorts the chats list;
-//      `presence.update` patches the friend's presence row.
+//      not the body, so the open thread refetches; `message.new` also
+//      invalidates the chats list (it's an infinite query whose pages
+//      can't be re-sorted in place); `friend.*` / `conversation.*`
+//      mark their lists stale the same way.
+//   2. setQueryData patch — `presence.update` patches the friend's
+//      presence row directly (the event carries its full state).
 //   3. side-effect — `room.*` (call store), `typing.*` (typing store)
 //      land in later phases; explicit no-op cases.
 //
 // Banner enqueues (per §4.13): `message.new` (unless you're on that
 // thread or it's muted), `friend.request_received`,
 // `friend.request_accepted`, `conversation.member_added` (only when
-// you're the added member). Skipped: muted conversation, on the
-// conversation screen, `room.started` (CallOverlay owns that).
+// you're the added member). Globally suppressed when presence intent
+// is `dnd`; `room.started` never banners (the CallOverlay owns it).
 //
 // Query keys are inlined as URL-prefix literals rather than imported
 // from the orval-generated hook modules — those modules transitively
@@ -44,7 +45,8 @@ import type {
   InternalHandlerHttpPresenceResponse,
 } from '@/lib/api/model';
 import { getActiveConversation } from '@/lib/banner/active-conversation';
-import { enqueueBanner } from '@/lib/banner/store';
+import { getPresenceIntent } from '@/lib/banner/presence-intent';
+import { enqueueBanner, type BannerEvent } from '@/lib/banner/store';
 import type { WSEnvelope } from '@/lib/ws/client';
 
 type ConversationList = InternalHandlerHttpConversationListResponse;
@@ -65,37 +67,22 @@ const FRIEND_REQUESTS_KEY = '/v1/friends/requests';
 const PRESENCE_FRIENDS_KEY = '/v1/presence/friends';
 const messagesKeyFor = (conversationId: string) => `/v1/conversations/${conversationId}/messages`;
 
+// --- banner enqueue ------------------------------------------------
+
+// Enqueue an event banner unless suppressed by the global gate that
+// applies to every banner: the user's presence intent is `dnd`
+// (§4.13 — same gate as pushes). Event-specific skips (on-screen,
+// muted, not-the-added-member) are checked at the call site.
+function maybeBanner(event: BannerEvent): void {
+  if (getPresenceIntent() === 'dnd') return;
+  enqueueBanner(event);
+}
+
 // --- conversations list --------------------------------------------
 
 type Cached<P> = P | InfiniteData<P>;
 function isInfinite<P>(d: Cached<P> | undefined): d is InfiniteData<P> {
   return !!d && Array.isArray((d as InfiniteData<P>).pages);
-}
-
-// Bump a conversation row's last_message_at and re-sort so the thread
-// jumps to the top of the chats list when a new message lands there.
-function bumpConversation(
-  data: ConversationList | undefined,
-  conversationId: string,
-  lastMessageAt: string | undefined
-): ConversationList | undefined {
-  if (!data?.data || !lastMessageAt) return data;
-  let touched = false;
-  const rows: Conversation[] = data.data.map((c) => {
-    if (c.id !== conversationId) return c;
-    touched = true;
-    return { ...c, last_message_at: lastMessageAt };
-  });
-  if (!touched) return data;
-  // Pinned rows stay above unpinned; within each band, newest
-  // last_message_at first — mirrors the server's list ordering.
-  rows.sort((a, b) => {
-    const ap = a.pinned_at ? 1 : 0;
-    const bp = b.pinned_at ? 1 : 0;
-    if (ap !== bp) return bp - ap;
-    return (b.last_message_at ?? '').localeCompare(a.last_message_at ?? '');
-  });
-  return { ...data, data: rows };
 }
 
 // Find a conversation row across every cached `/v1/conversations`
@@ -176,23 +163,21 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
   switch (env.type) {
     case 'message.new': {
       // `{ message_id, conversation_id, sender_id, created_at }` — no
-      // body on the wire, so the thread refetches; the chats list gets
-      // an in-place bump so it re-sorts without a round-trip.
+      // body on the wire, so both the open thread AND the chats list
+      // refetch (the chats query is an infinite query whose pages
+      // can't be re-sorted in place — a row may have to cross pages).
       const d = asRecord(env.data);
       const convId = d && str(d.conversation_id);
       if (!d || !convId) return;
       void qc.invalidateQueries({ queryKey: [messagesKeyFor(convId)] });
-      const createdAt = str(d.created_at);
-      qc.setQueriesData<ConversationList>({ queryKey: [CONVERSATIONS_KEY] }, (cur) =>
-        bumpConversation(cur, convId, createdAt)
-      );
+      void qc.invalidateQueries({ queryKey: [CONVERSATIONS_KEY] });
       // Banner — unless you're already on that thread or it's muted.
       const conv = findConversation(qc, convId);
       if (getActiveConversation() === convId || isMuted(conv)) return;
       const messageId = str(d.message_id);
       const name = senderName(conv, str(d.sender_id) ?? '');
-      enqueueBanner({
-        id: messageId ?? `msg:${convId}:${createdAt ?? ''}`,
+      maybeBanner({
+        id: messageId ?? `msg:${convId}:${str(d.created_at) ?? ''}`,
         title: name ? `New message from ${name}` : 'New message',
         route: `/conversations/${convId}`,
       });
@@ -223,7 +208,7 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
     case 'friend.request_received': {
       void qc.invalidateQueries({ queryKey: [FRIEND_REQUESTS_KEY] });
       const id = str(asRecord(env.data)?.id);
-      enqueueBanner({
+      maybeBanner({
         id: id ? `friend-req:${id}` : `friend-req:${Date.now()}`,
         title: 'New friend request',
         route: '/friends',
@@ -234,7 +219,7 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       void qc.invalidateQueries({ queryKey: [FRIENDS_KEY] });
       void qc.invalidateQueries({ queryKey: [FRIEND_REQUESTS_KEY] });
       const id = str(asRecord(env.data)?.id);
-      enqueueBanner({
+      maybeBanner({
         id: id ? `friend-acc:${id}` : `friend-acc:${Date.now()}`,
         title: 'Friend request accepted',
         route: '/friends',
@@ -252,7 +237,7 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       const addedId = addedUser && str(addedUser.id);
       if (!convId || !ctx.myUserId || addedId !== ctx.myUserId) return;
       const name = findConversation(qc, convId)?.name?.trim();
-      enqueueBanner({
+      maybeBanner({
         id: `member-added:${convId}`,
         title: name ? `Added you to ${name}` : 'Added you to a group',
         route: `/conversations/${convId}`,

@@ -12,6 +12,7 @@ import type {
   InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
 import { setActiveConversation } from '@/lib/banner/active-conversation';
+import { setPresenceIntent } from '@/lib/banner/presence-intent';
 import { useBannerStore } from '@/lib/banner/store';
 import { applyWSEvent } from '@/lib/ws/dispatcher';
 
@@ -25,11 +26,12 @@ const presenceKey = ['/v1/presence/friends'];
 const friendsKey = ['/v1/friends'];
 const friendRequestsKey = ['/v1/friends/requests'];
 
-// The banner store + active-conversation tracker are module-level
-// singletons; reset them before each test.
+// The banner store + active-conversation / presence-intent trackers
+// are module-level singletons; reset them before each test.
 beforeEach(() => {
   useBannerStore.setState({ queue: [] });
   setActiveConversation(null);
+  setPresenceIntent('online');
 });
 function bannerQueue() {
   return useBannerStore.getState().queue;
@@ -69,37 +71,11 @@ describe('applyWSEvent — message.new', () => {
     expect(isInvalidated(qc, messagesKey)).toBe(true);
   });
 
-  test('bumps the conversation row by created_at and re-sorts', () => {
+  test('invalidates the chats list so it re-sorts on refetch', async () => {
     const qc = newClient();
-    qc.setQueryData<ConversationList>(conversationsKey, {
-      data: [
-        { id: 'conv-0', last_message_at: '2026-01-05T00:00:00Z' },
-        { id: CONV, last_message_at: '2026-01-01T00:00:00Z' },
-      ],
-    });
+    await seedQuery(qc, conversationsKey, { data: [] });
     applyWSEvent(qc, messageEvent('message.new'));
-    const list = qc.getQueryData<ConversationList>(conversationsKey);
-    expect(list?.data?.map((c) => c.id)).toEqual([CONV, 'conv-0']);
-    expect(list?.data?.[0]?.last_message_at).toBe('2026-01-09T00:00:00Z');
-  });
-
-  test('keeps pinned rows above unpinned after a bump', () => {
-    const qc = newClient();
-    qc.setQueryData<ConversationList>(conversationsKey, {
-      data: [
-        {
-          id: 'pinned',
-          pinned_at: '2026-01-01T00:00:00Z',
-          last_message_at: '2026-01-02T00:00:00Z',
-        },
-        { id: CONV, last_message_at: '2026-01-01T00:00:00Z' },
-      ],
-    });
-    applyWSEvent(qc, messageEvent('message.new'));
-    expect(qc.getQueryData<ConversationList>(conversationsKey)?.data?.map((c) => c.id)).toEqual([
-      'pinned',
-      CONV,
-    ]);
+    expect(isInvalidated(qc, conversationsKey)).toBe(true);
   });
 
   test('ignores a payload missing conversation_id', () => {
@@ -277,5 +253,22 @@ describe('applyWSEvent — event banners (§4.13)', () => {
     applyWSEvent(qc, { type: 'friend.request_received', data: { id: 'fr1' } });
     applyWSEvent(qc, { type: 'friend.request_accepted', data: { id: 'fr2' } });
     expect(bannerQueue().map((b) => b.route)).toEqual(['/friends', '/friends']);
+  });
+
+  test('no banner is enqueued for any event while presence intent is dnd', () => {
+    const qc = newClient();
+    setPresenceIntent('dnd');
+    applyWSEvent(qc, messageEvent('message.new'));
+    applyWSEvent(qc, { type: 'friend.request_received', data: { id: 'fr1' } });
+    applyWSEvent(qc, { type: 'friend.request_accepted', data: { id: 'fr2' } });
+    applyWSEvent(
+      qc,
+      {
+        type: 'conversation.member_added',
+        data: { conversation_id: CONV, member: { user: { id: 'me' } } },
+      },
+      { myUserId: 'me' }
+    );
+    expect(bannerQueue()).toEqual([]);
   });
 });
