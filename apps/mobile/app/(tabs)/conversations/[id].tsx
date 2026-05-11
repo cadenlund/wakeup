@@ -18,7 +18,7 @@
 // the keyboard height directly. `keyboardVerticalOffset` =
 // header + status-bar height so the padding lands at the right spot.
 import { useHeaderHeight } from '@react-navigation/elements';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { MoreVertical } from 'lucide-react-native';
 import * as React from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, View } from 'react-native';
@@ -31,6 +31,7 @@ import { MuteSheet } from '@/components/mute-sheet';
 import { Text } from '@/components/ui/text';
 import { ThemedBackButton } from '@/components/ui/themed-back-button';
 import { WSReconnectBanner } from '@/components/ws-reconnect-banner';
+import { setActiveConversation } from '@/lib/banner/active-conversation';
 import { useRefetchMessagesOnReconnect } from '@/lib/ws/use-refetch-on-reconnect';
 import { useSendMessage } from '@/lib/use-send-message';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
@@ -50,6 +51,15 @@ import { useLeaveConversation } from '@/lib/use-conversation-leave';
 
 export default function ConversationThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  // Tell the WS dispatcher which thread is on screen so it suppresses
+  // the message banner for messages that land here (WAKEUPEXPO §4.13).
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!id) return;
+      setActiveConversation(id);
+      return () => setActiveConversation(null);
+    }, [id])
+  );
   const meQ = useGetV1AuthMe({ query: { staleTime: 60_000 } });
   const me = meQ.data as { id?: string } | undefined;
 

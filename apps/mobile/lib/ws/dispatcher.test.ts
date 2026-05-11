@@ -4,13 +4,16 @@
 // `applyWSEvent`, and asserts the resulting cache state. No React, no
 // network — the dispatcher is pure (QueryClient in, cache mutation
 // out), so it tests in isolation.
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { QueryClient } from '@tanstack/react-query';
 
 import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
+import { setActiveConversation } from '@/lib/banner/active-conversation';
+import { setPresenceIntent } from '@/lib/banner/presence-intent';
+import { useBannerStore } from '@/lib/banner/store';
 import { applyWSEvent } from '@/lib/ws/dispatcher';
 
 type ConversationList = InternalHandlerHttpConversationListResponse;
@@ -22,6 +25,17 @@ const conversationsKey = ['/v1/conversations'];
 const presenceKey = ['/v1/presence/friends'];
 const friendsKey = ['/v1/friends'];
 const friendRequestsKey = ['/v1/friends/requests'];
+
+// The banner store + active-conversation / presence-intent trackers
+// are module-level singletons; reset them before each test.
+beforeEach(() => {
+  useBannerStore.setState({ queue: [] });
+  setActiveConversation(null);
+  setPresenceIntent('online');
+});
+function bannerQueue() {
+  return useBannerStore.getState().queue;
+}
 
 function newClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -57,37 +71,11 @@ describe('applyWSEvent — message.new', () => {
     expect(isInvalidated(qc, messagesKey)).toBe(true);
   });
 
-  test('bumps the conversation row by created_at and re-sorts', () => {
+  test('invalidates the chats list so it re-sorts on refetch', async () => {
     const qc = newClient();
-    qc.setQueryData<ConversationList>(conversationsKey, {
-      data: [
-        { id: 'conv-0', last_message_at: '2026-01-05T00:00:00Z' },
-        { id: CONV, last_message_at: '2026-01-01T00:00:00Z' },
-      ],
-    });
+    await seedQuery(qc, conversationsKey, { data: [] });
     applyWSEvent(qc, messageEvent('message.new'));
-    const list = qc.getQueryData<ConversationList>(conversationsKey);
-    expect(list?.data?.map((c) => c.id)).toEqual([CONV, 'conv-0']);
-    expect(list?.data?.[0]?.last_message_at).toBe('2026-01-09T00:00:00Z');
-  });
-
-  test('keeps pinned rows above unpinned after a bump', () => {
-    const qc = newClient();
-    qc.setQueryData<ConversationList>(conversationsKey, {
-      data: [
-        {
-          id: 'pinned',
-          pinned_at: '2026-01-01T00:00:00Z',
-          last_message_at: '2026-01-02T00:00:00Z',
-        },
-        { id: CONV, last_message_at: '2026-01-01T00:00:00Z' },
-      ],
-    });
-    applyWSEvent(qc, messageEvent('message.new'));
-    expect(qc.getQueryData<ConversationList>(conversationsKey)?.data?.map((c) => c.id)).toEqual([
-      'pinned',
-      CONV,
-    ]);
+    expect(isInvalidated(qc, conversationsKey)).toBe(true);
   });
 
   test('ignores a payload missing conversation_id', () => {
@@ -189,5 +177,98 @@ describe('applyWSEvent — deliberate no-ops', () => {
     }
     expect(isInvalidated(qc, messagesKey)).toBe(false);
     expect(isInvalidated(qc, conversationsKey)).toBe(false);
+  });
+});
+
+describe('applyWSEvent — event banners (§4.13)', () => {
+  test('message.new enqueues a banner routing to the thread', () => {
+    const qc = newClient();
+    qc.setQueryData<ConversationList>(conversationsKey, {
+      data: [{ id: CONV, members: [{ user: { id: 'u9', display_name: 'Ada' } }] }],
+    });
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(bannerQueue()).toEqual([
+      { id: 'm1', title: 'New message from Ada', route: `/conversations/${CONV}` },
+    ]);
+  });
+
+  test('message.new falls back to a generic title when the sender is not cached', () => {
+    const qc = newClient();
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(bannerQueue()[0]).toMatchObject({
+      title: 'New message',
+      route: `/conversations/${CONV}`,
+    });
+  });
+
+  test('message.new is NOT bannered when that thread is on screen', () => {
+    const qc = newClient();
+    setActiveConversation(CONV);
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(bannerQueue()).toEqual([]);
+  });
+
+  test('message.new is NOT bannered when the conversation is muted', () => {
+    const qc = newClient();
+    qc.setQueryData<ConversationList>(conversationsKey, {
+      data: [{ id: CONV, muted_until: '2999-01-01T00:00:00Z' }],
+    });
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(bannerQueue()).toEqual([]);
+  });
+
+  test('a duplicate message.new (same message_id) is enqueued only once', () => {
+    const qc = newClient();
+    applyWSEvent(qc, messageEvent('message.new'));
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(bannerQueue()).toHaveLength(1);
+  });
+
+  test('conversation.member_added banners only when you are the added member', () => {
+    const qc = newClient();
+    // Someone else added — no banner.
+    applyWSEvent(
+      qc,
+      {
+        type: 'conversation.member_added',
+        data: { conversation_id: CONV, member: { user: { id: 'other' } } },
+      },
+      { myUserId: 'me' }
+    );
+    expect(bannerQueue()).toEqual([]);
+    // You were added — banner.
+    applyWSEvent(
+      qc,
+      {
+        type: 'conversation.member_added',
+        data: { conversation_id: CONV, member: { user: { id: 'me' } } },
+      },
+      { myUserId: 'me' }
+    );
+    expect(bannerQueue()[0]).toMatchObject({ route: `/conversations/${CONV}` });
+  });
+
+  test('friend.request_received / accepted enqueue banners routing to /friends', () => {
+    const qc = newClient();
+    applyWSEvent(qc, { type: 'friend.request_received', data: { id: 'fr1' } });
+    applyWSEvent(qc, { type: 'friend.request_accepted', data: { id: 'fr2' } });
+    expect(bannerQueue().map((b) => b.route)).toEqual(['/friends', '/friends']);
+  });
+
+  test('no banner is enqueued for any event while presence intent is dnd', () => {
+    const qc = newClient();
+    setPresenceIntent('dnd');
+    applyWSEvent(qc, messageEvent('message.new'));
+    applyWSEvent(qc, { type: 'friend.request_received', data: { id: 'fr1' } });
+    applyWSEvent(qc, { type: 'friend.request_accepted', data: { id: 'fr2' } });
+    applyWSEvent(
+      qc,
+      {
+        type: 'conversation.member_added',
+        data: { conversation_id: CONV, member: { user: { id: 'me' } } },
+      },
+      { myUserId: 'me' }
+    );
+    expect(bannerQueue()).toEqual([]);
   });
 });
