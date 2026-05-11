@@ -286,15 +286,15 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       return;
     }
     case 'message.read': {
-      // Payload `{ conversation_id, user_id, last_read_message_id }`
-      // — someone (maybe us, from another device) advanced their read
-      // pointer. Patch that member's row in the cached conversation
-      // detail so the open thread's §6.3 receipt captions recompute.
-      // No banner; no message refetch (the body didn't change).
+      // Payload `{ conversation_id, message_id, user_id, read_at }`
+      // (§7.2) — `message_id` is the reader's new last-read pointer.
+      // Maybe us (another device). Patch that member's row in the
+      // cached conversation detail so the open thread's §6.3 receipt
+      // captions recompute. No banner; no message refetch.
       const d = asRecord(env.data);
       const convId = d && str(d.conversation_id);
       const userId = d && str(d.user_id);
-      const readId = d && str(d.last_read_message_id);
+      const readId = d && str(d.message_id);
       if (!convId || !userId || !readId) return;
       qc.setQueryData<Conversation>([conversationDetailKeyFor(convId)], (cur) =>
         patchMemberReadPointer(cur, userId, readId)

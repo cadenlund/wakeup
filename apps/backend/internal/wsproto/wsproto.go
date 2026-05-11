@@ -186,11 +186,16 @@ type MessageDeletedPayload struct {
 	ConversationID uuid.UUID `json:"conversation_id"`
 }
 
-// MessageReadPayload — `message.read`.
+// MessageReadPayload — `message.read`. Fans out on the conversation's
+// `conv:<id>:messages` channel (every member, not just the message
+// sender) so each open thread can advance the reader's pointer for the
+// §6.3 "Seen by …" captions. MessageID is the newest message the
+// reader has now read — i.e. their last-read pointer.
 type MessageReadPayload struct {
-	MessageID uuid.UUID `json:"message_id"`
-	UserID    uuid.UUID `json:"user_id"`
-	ReadAt    time.Time `json:"read_at"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	MessageID      uuid.UUID `json:"message_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	ReadAt         time.Time `json:"read_at"`
 }
 
 // ConversationMemberAddedPayload — `conversation.member_added`. Member is

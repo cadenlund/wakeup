@@ -1444,7 +1444,7 @@ return ListMessagesResponse{Data: toMessageResponses(data), NextCursor: next, Ha
 | `message.new` | full Message |
 | `message.edited` | Message |
 | `message.deleted` | `{ message_id, conversation_id }` |
-| `message.read` | `{ message_id, user_id, read_at }` |
+| `message.read` | `{ conversation_id, message_id, user_id, read_at }` |
 | `conversation.created` | Conversation |
 | `conversation.updated` | Conversation |
 | `conversation.member_added` | `{ conversation_id, member }` |
@@ -2177,7 +2177,7 @@ func (c *TestConn) Send(t *testing.T, eventType string, data any)
 
 - `message.new` — also: deleted-conversation member doesn't receive; sender DOES receive (echo-back for multi-device).
 - `message.edited`, `message.deleted` — also: only members of the conversation receive.
-- `message.read` — fires for the message *sender only* (so they see read state). Other recipients don't get it.
+- `message.read` — fans out on `conv:<id>:messages` to **every** member (not just the sender): the §6.3 "Seen by …" captions are public, so each open thread advances the reader's `last_read_message_id` from `message_id`.
 - `conversation.created` — fires for every initial member.
 - `conversation.member_added` — fires for the existing members AND the newly added one.
 - `conversation.member_removed` — fires for the remaining members AND the one being removed (so their UI dismisses).

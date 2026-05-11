@@ -201,7 +201,7 @@ describe('applyWSEvent — message.read (§6.3)', () => {
     });
     applyWSEvent(qc, {
       type: 'message.read',
-      data: { conversation_id: CONV, user_id: 'u2', last_read_message_id: 'm9' },
+      data: { conversation_id: CONV, user_id: 'u2', message_id: 'm9' },
     });
     const detail = qc.getQueryData<{
       members: { user: { id: string }; last_read_message_id: string | null }[];
@@ -216,7 +216,7 @@ describe('applyWSEvent — message.read (§6.3)', () => {
     await seedQuery(qc, messagesKey, { pages: [{ data: [] }], pageParams: [undefined] });
     applyWSEvent(qc, {
       type: 'message.read',
-      data: { conversation_id: CONV, user_id: 'u2', last_read_message_id: 'm9' },
+      data: { conversation_id: CONV, user_id: 'u2', message_id: 'm9' },
     });
     expect(isInvalidated(qc, messagesKey)).toBe(false);
   });

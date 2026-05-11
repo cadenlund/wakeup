@@ -705,20 +705,19 @@ func (s *Service) MarkRead(ctx context.Context, actor, convID, messageID uuid.UU
 	return nil
 }
 
-// publishReadEvent fires-and-forgets a `message.read` envelope on the
-// `conv:<id>:messages` channel. No-op when the broker isn't wired.
-// Wire shape mirrors §7.1 so the WS bridge fans the bytes straight
-// through; `last_read_message_id` matches the field name the
-// conversation-member DTO already uses, so the client patch is a
-// direct field copy.
+// publishReadEvent fires-and-forgets a `message.read` envelope (§7.2)
+// on the `conv:<id>:messages` channel. No-op when the broker isn't
+// wired. `MessageID` is the reader's new last-read pointer; the client
+// copies it onto that member's `last_read_message_id`.
 func (s *Service) publishReadEvent(ctx context.Context, convID, userID, messageID uuid.UUID) {
 	if s.broker == nil {
 		return
 	}
-	payload, err := wsproto.Encode(wsproto.EventMessageRead, map[string]any{
-		"conversation_id":      convID,
-		"user_id":              userID,
-		"last_read_message_id": messageID,
+	payload, err := wsproto.Encode(wsproto.EventMessageRead, wsproto.MessageReadPayload{
+		ConversationID: convID,
+		MessageID:      messageID,
+		UserID:         userID,
+		ReadAt:         time.Now().UTC(),
 	})
 	if err != nil {
 		s.logger.Warn("conversation: encode read event", slog.String("error", err.Error()))

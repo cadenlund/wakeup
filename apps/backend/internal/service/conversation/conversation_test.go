@@ -1253,7 +1253,15 @@ func TestMarkRead_PublishesReadEvent(t *testing.T) {
 	select {
 	case msg := <-ch:
 		payload := string(msg.Payload)
-		for _, want := range []string{"message.read", b.ID.String(), msgID.String(), "last_read_message_id"} {
+		wants := []string{
+			"message.read",
+			created.Conversation.ID.String(),
+			b.ID.String(),
+			msgID.String(),
+			"conversation_id",
+			"message_id",
+		}
+		for _, want := range wants {
 			if !strings.Contains(payload, want) {
 				t.Errorf("payload missing %q: %s", want, payload)
 			}
