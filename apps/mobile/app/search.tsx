@@ -594,15 +594,6 @@ export default function SearchModalScreen() {
 
   const mutedFg = useThemeColor('muted-foreground');
 
-  // Header rows stick to the top of the viewport while their
-  // section is in view so a long expanded People section can be
-  // collapsed mid-scroll without paging back up to find the
-  // chevron.
-  const stickyHeaderIndices = React.useMemo(
-    () => rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0),
-    [rows]
-  );
-
   return (
     <ModalScreenShell onClose={goCancel} testID="search-modal-shell">
       <View className="flex-1 bg-background">
@@ -639,7 +630,10 @@ export default function SearchModalScreen() {
             // users, conversations, messages, and show-all rows in
             // separate pools so each renders with the right shape.
             getItemType={(item) => item.kind}
-            stickyHeaderIndices={stickyHeaderIndices}
+            // stickyHeaderIndices intentionally omitted — FlashList
+            // 2.0.2 renders both the sticky overlay AND the inline
+            // header at scroll position 0, doubling the first
+            // section header visually.
             onEndReachedThreshold={0.5}
             onEndReached={() => {
               if (!usersExpanded) return;

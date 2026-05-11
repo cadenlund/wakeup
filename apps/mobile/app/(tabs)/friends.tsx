@@ -725,15 +725,6 @@ function SectionsPane({
 
   const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
 
-  // Section-header rows stick to the top of the viewport while
-  // their section is in view, so scrolling deep into Friends still
-  // leaves the chevron tappable for collapse without scrolling
-  // back up.
-  const stickyHeaderIndices = React.useMemo(
-    () => rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0),
-    [rows]
-  );
-
   // Empty / single-empty-header collapse to the welcoming empty
   // state; we still wrap that in a ScrollView so pull-to-refresh
   // works even when there's no data yet.
@@ -765,7 +756,11 @@ function SectionsPane({
       // and the rows under them disappearing when the user toggled
       // the Friends section.
       getItemType={(item) => item.kind}
-      stickyHeaderIndices={stickyHeaderIndices}
+      // stickyHeaderIndices intentionally omitted: FlashList 2.0.2
+      // renders both the sticky overlay AND the inline header when
+      // the list is already at the top, producing a visible
+      // duplicate of the first section header. Sticky behavior is
+      // nice-to-have here but a duplicate header is a blocker.
       onEndReachedThreshold={0.5}
       onEndReached={onEndReached}
       ListFooterComponent={isFetchingNextPage ? <SectionsListLoader /> : null}
