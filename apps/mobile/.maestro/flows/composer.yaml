@@ -1,0 +1,45 @@
+# Phase 6.2 — composer + optimistic send.
+#
+# A single-account fresh run has no conversations to open, so the
+# populated type-and-send happy path (optimistic placeholder → server
+# success → reconciliation, plus the failure rollback) needs a
+# multi-user fixture. Matches the conv-pin-mute / conversation-create
+# / conversation-thread pattern: mount-only smoke proving the new
+# composer + useSendMessage dependency tree doesn't blow up the
+# bundle at load time.
+#
+# What this flow asserts:
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs) Chats tab with the empty state.
+#   2. The chats screen renders cleanly with the new <Composer> +
+#      useSendMessage imports pulled into the thread route. The
+#      thread route itself isn't reachable on a fresh account; the
+#      populated send-flow (type → tap → assert placeholder → wait
+#      for server reconciliation → assert real id) lands when the
+#      multi-user fixture work for §5+ flows finalises.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. Mount-without-crash proves the new
+# composer + send-hook subgraph doesn't crash the bundle.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+- takeScreenshot: composer-chats-empty
+# Re-assert after the screenshot so the flow ends on a hard
+# assertion — `takeScreenshot` doesn't itself check anything, so
+# without this final assertion a CI failure post-screenshot would
+# slip through silently.
+- assertVisible: 'No conversations yet'
