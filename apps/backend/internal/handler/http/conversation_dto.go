@@ -30,10 +30,19 @@ type ConversationResponse struct {
 }
 
 // ConversationMemberRow is one member of a ConversationResponse.
+//
+// LastReadMessageID is the per-member read pointer maintained by
+// `POST /v1/conversations/{id}/read` (§6.3). Mobile renders tiny
+// read-receipt avatars under "mine" bubbles in groups by comparing
+// this id against each rendered message id. JSON-null (not omitted)
+// when the member has never opened the thread — stable nullability
+// is part of the contract so clients can distinguish "never read"
+// from a missing field on an older response (CR on PR #143).
 type ConversationMemberRow struct {
-	User     UserResponse `json:"user"`
-	Role     string       `json:"role"               example:"admin"`
-	JoinedAt time.Time    `json:"joined_at"          example:"2026-05-02T09:31:21.810Z"`
+	User              UserResponse `json:"user"`
+	Role              string       `json:"role"                 example:"admin"`
+	JoinedAt          time.Time    `json:"joined_at"            example:"2026-05-02T09:31:21.810Z"`
+	LastReadMessageID *uuid.UUID   `json:"last_read_message_id" example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
 }
 
 // ConversationListResponse is the §6.4 paginated envelope for
@@ -128,9 +137,10 @@ func toConversationMemberResponse(m domain.ConversationMember) ConversationMembe
 // with the embedded counterparty profile.
 func toConversationMemberRow(m domain.ConversationMember, u domain.User, p Presigner) ConversationMemberRow {
 	return ConversationMemberRow{
-		User:     toUserResponse(u, p),
-		Role:     string(m.Role),
-		JoinedAt: m.JoinedAt,
+		User:              toUserResponse(u, p),
+		Role:              string(m.Role),
+		JoinedAt:          m.JoinedAt,
+		LastReadMessageID: m.LastReadMessageID,
 	}
 }
 

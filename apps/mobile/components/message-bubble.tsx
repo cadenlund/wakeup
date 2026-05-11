@@ -14,6 +14,7 @@ import { View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
+import type { InternalHandlerHttpUserResponse } from '@/lib/api/model';
 import { formatRelative } from '@/lib/relative-time';
 import { cn } from '@/lib/utils';
 
@@ -35,6 +36,12 @@ type Props = {
   // for messages in a streak (only the last bubble of a streak shows
   // the avatar); always false for "mine".
   showAvatar?: boolean;
+  // Members whose last_read_message_id sits at this exact bubble.
+  // Only meaningful on "mine" bubbles in groups — the list builder
+  // (<MessageList>) leaves it undefined for everything else. Renders
+  // as a row of tiny avatars under the bubble (iMessage convention:
+  // only the latest read position per recipient is shown).
+  readBy?: InternalHandlerHttpUserResponse[];
   testID?: string;
 };
 
@@ -48,6 +55,7 @@ export function MessageBubble({
   senderAvatarUrl,
   showSenderLabel,
   showAvatar,
+  readBy,
   testID,
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
@@ -103,6 +111,15 @@ export function MessageBubble({
           <Text variant="muted" className="mt-0.5 px-1 text-[10px]">
             {time}
           </Text>
+        ) : null}
+
+        {readBy && readBy.length > 0 ? (
+          <View className="mt-0.5 flex-row gap-1 px-1">
+            {readBy.map((u) => {
+              const name = u.display_name?.trim() || u.username?.trim() || 'Member';
+              return <Avatar key={u.id} source={u.avatar_url} fallbackName={name} size={14} />;
+            })}
+          </View>
         ) : null}
       </View>
     </View>

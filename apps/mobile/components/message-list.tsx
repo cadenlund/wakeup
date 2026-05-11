@@ -43,8 +43,10 @@ import type {
   InternalHandlerHttpConversationMemberRow,
   InternalHandlerHttpMessageListResponse,
   InternalHandlerHttpMessageResponse,
+  InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { useMarkReadOnFocus } from '@/lib/use-mark-read';
 
 type Message = InternalHandlerHttpMessageResponse;
 
@@ -92,6 +94,38 @@ export function MessageList({ conversationId, myUserId, isGroup, members }: Prop
     }
     return m;
   }, [members]);
+
+  // Read-receipt index: messageId → users who have read up to (and
+  // exactly at) that message. We render the resulting avatar row
+  // under "mine" bubbles only — that's the side the caller cares
+  // about ("did they see it yet?"). Members with NULL last_read
+  // never opened the thread and contribute nothing.
+  //
+  // Note this surfaces each member at exactly one bubble — their
+  // "current pointer." Older bubbles get implicit reads (the
+  // pointer has moved past them), matching the iMessage / Discord
+  // convention where only the latest read receipt is shown.
+  const readByMessageId = React.useMemo(() => {
+    const m = new Map<string, InternalHandlerHttpUserResponse[]>();
+    if (!isGroup) return m;
+    for (const row of members) {
+      const uid = row.user?.id;
+      const readId = row.last_read_message_id;
+      if (!uid || !readId) continue;
+      if (uid === myUserId) continue; // skip self — own receipts are noise
+      const arr = m.get(readId);
+      if (arr) arr.push(row.user!);
+      else m.set(readId, [row.user!]);
+    }
+    return m;
+  }, [members, isGroup, myUserId]);
+
+  // Mark-read on focus: post the latest visible message id to the
+  // backend so the per-member read pointer advances. The hook
+  // gates re-posts internally — re-focusing on the same screen
+  // with no new messages is a no-op.
+  const latestMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : undefined;
+  useMarkReadOnFocus(conversationId, latestMessageId);
 
   // Older history loads when the user scrolls to the TOP of the
   // list — onStartReached is the v2 equivalent of inverted+onEndReached.
@@ -184,6 +218,10 @@ export function MessageList({ conversationId, myUserId, isGroup, members }: Prop
             createdAt={item.created_at}
             isDeleted={item.is_deleted}
             mine={mine}
+            // Read-receipt avatars only appear under "mine" bubbles
+            // in group threads (per §6.3 spec). The bubble component
+            // ignores `readBy` for non-mine rows.
+            readBy={mine && item.id ? readByMessageId.get(item.id) : undefined}
             senderName={isGroup ? (sender?.display_name ?? undefined) : undefined}
             senderUsername={isGroup ? (sender?.username ?? undefined) : undefined}
             senderAvatarUrl={isGroup ? (sender?.avatar_url ?? undefined) : undefined}
