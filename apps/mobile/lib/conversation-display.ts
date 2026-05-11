@@ -144,3 +144,12 @@ export function filterConversations(
 // from the friends list) but want to match the same shape used by
 // presence + display.
 export type DisplayUser = InternalHandlerHttpUserResponse;
+
+// Display string for a single user, using the same fallback chain
+// as the rest of the thread UI (display_name → username → generic
+// label). Soft-deleted accounts arrive with a server-set
+// display_name (e.g. "Deleted User"), which flows through here
+// unchanged — callers never need their own deleted-user branch.
+export function userDisplayName(u: DisplayUser | null | undefined, fallback = 'Someone'): string {
+  return u?.display_name?.trim() || u?.username?.trim() || fallback;
+}
