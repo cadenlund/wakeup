@@ -331,7 +331,7 @@ function ThreadBody({
           onRetrySend={retry}
         />
       </View>
-      <TypingIndicator conversationId={conversationId} members={members} />
+      <TypingIndicator conversationId={conversationId} members={members} isGroup={isGroup} />
       <Composer
         onSend={send}
         pending={isPending}
