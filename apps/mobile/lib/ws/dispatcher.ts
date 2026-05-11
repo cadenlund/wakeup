@@ -1,13 +1,16 @@
 // Phase 7.3 — WebSocket event → React Query cache dispatcher.
-// Phase 7.5 — also enqueues `<EventBanner>` events (WAKEUPEXPO §4.13).
+// Phase 7.5 — also enqueues heads-up events for the toast surface
+// (WAKEUPEXPO §4.13).
 //
 // The client (`lib/ws/client.ts`) hands every inbound envelope to
 // `applyWSEvent`. This module is the ONLY place that turns a server
 // fact into a cache mutation — it never owns state itself; every
 // fact still lives in TanStack Query (WAKEUPEXPO §4.4 / §6.2) — and
 // the ONLY place that decides whether an event also surfaces a
-// heads-up banner. The `<EventBanner>` component never filters; it
-// just renders whatever this module queues.
+// heads-up notification. It enqueues into `useBannerStore`;
+// `<EventToastBridge>` drains that into `toast.event(...)` (the
+// dispatcher stays off `react-native` so its `bun test` suite runs,
+// hence the store seam rather than calling `toast` directly).
 //
 // Cache actions:
 //

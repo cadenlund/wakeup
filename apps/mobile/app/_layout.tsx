@@ -16,7 +16,7 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 
 import { useAuthState } from '@/components/auth-gate';
 import { ForceUpgradeGate } from '@/components/force-upgrade-gate';
-import { EventBanner } from '@/components/event-banner';
+import { EventToastBridge } from '@/components/event-toast-bridge';
 import { NetworkBanner } from '@/components/network-banner';
 import { ToastRoot } from '@/components/toast-root';
 import { RootErrorBoundary } from '@/components/ui/root-error-boundary';
@@ -162,7 +162,7 @@ function RootLayout() {
             </ForceUpgradeGate>
           </RootErrorBoundary>
           <ToastRoot />
-          <EventBanner />
+          <EventToastBridge />
         </ThemeProvider>
       </SafeAreaProvider>
     </PersistQueryClientProvider>
