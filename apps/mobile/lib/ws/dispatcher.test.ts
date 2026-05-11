@@ -130,6 +130,19 @@ describe('applyWSEvent — message.edited', () => {
     });
     expect(rows?.find((m) => m.id === 'm2')).toMatchObject({ body: 'other' });
   });
+
+  test('a malformed payload (no string fields) leaves the row untouched', () => {
+    const qc = newClient();
+    seedMessages(qc, [{ data: [{ id: 'm1', body: 'orig', edited_at: '2026-01-01T00:00:00Z' }] }]);
+    const before = readMessages(qc);
+    applyWSEvent(qc, { type: 'message.edited', data: { id: 'm1', conversation_id: CONV } });
+    applyWSEvent(qc, {
+      type: 'message.edited',
+      data: { id: 'm1', conversation_id: CONV, body: 42 },
+    });
+    // No undefined merged in → same reference back.
+    expect(readMessages(qc)).toBe(before);
+  });
 });
 
 describe('applyWSEvent — message.deleted', () => {
@@ -167,6 +180,14 @@ describe('applyWSEvent — presence.update', () => {
       last_active_at: '2026-03-01T00:00:00Z',
     });
     expect(rows?.find((p) => p.user_id === 'u2')).toMatchObject({ status: 'online' });
+  });
+
+  test('a payload with only user_id leaves the row untouched', () => {
+    const qc = newClient();
+    qc.setQueryData<PresenceList>(presenceKey, { data: [{ user_id: 'u1', status: 'offline' }] });
+    const before = qc.getQueryData<PresenceList>(presenceKey);
+    applyWSEvent(qc, { type: 'presence.update', data: { user_id: 'u1' } });
+    expect(qc.getQueryData<PresenceList>(presenceKey)).toBe(before);
   });
 });
 

@@ -188,6 +188,22 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
+// Build a patch object from `src`, keeping only keys whose value is a
+// string. A missing/non-string field is OMITTED, never set to
+// `undefined` — `{ ...row, ...patch }` would otherwise erase a
+// previously-valid value on a malformed payload (CR on PR #151).
+function stringPatch<K extends string>(
+  src: Record<string, unknown>,
+  keys: readonly K[]
+): Record<K, string> {
+  const out = {} as Record<K, string>;
+  for (const k of keys) {
+    const v = str(src[k]);
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
 // --- the dispatcher ------------------------------------------------
 
 export function applyWSEvent(qc: QueryClient, env: WSEnvelope): void {
@@ -212,8 +228,10 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope): void {
       const convId = d && str(d.conversation_id);
       const id = d && str(d.id);
       if (!d || !convId || !id) return;
+      const patch = stringPatch(d, ['body', 'edited_at'] as const);
+      if (Object.keys(patch).length === 0) return;
       qc.setQueriesData<Cached<MessageList>>({ queryKey: [messagesKeyFor(convId)] }, (cur) =>
-        patchMessage(cur, id, { body: str(d.body), edited_at: str(d.edited_at) })
+        patchMessage(cur, id, patch)
       );
       return;
     }
@@ -233,8 +251,10 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope): void {
       const d = asRecord(env.data);
       const userId = d && str(d.user_id);
       if (!d || !userId) return;
+      const patch = stringPatch(d, ['status', 'last_active_at'] as const);
+      if (Object.keys(patch).length === 0) return;
       qc.setQueriesData<PresenceList>({ queryKey: [PRESENCE_FRIENDS_KEY] }, (cur) =>
-        patchPresence(cur, userId, { status: str(d.status), last_active_at: str(d.last_active_at) })
+        patchPresence(cur, userId, patch)
       );
       return;
     }
