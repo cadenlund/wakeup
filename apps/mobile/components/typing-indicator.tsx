@@ -1,15 +1,15 @@
 // Phase 6.4 — typing indicator for the conversation thread.
 //
 // Renders the WS-fed typing state (`useTypingUserIds`) as an
-// incoming-style message bubble: the "theirs"-side chrome —
-// `rounded-2xl rounded-bl-sm`, the group avatar gutter — but on
-// `bg-muted` (one shade off the thread background) so the bubble
-// actually reads against the near-white surface. Sits below the
-// message list, above the composer; the list is `flex-1` so it
-// shrinks to make room when the bubble appears. Inside: a staggered
-// three-dot pulse. In a DM the dots stand alone (you know the peer);
-// in a group they get a "{name}" / "{a} and {b}" / "Several people"
-// label above, like a sender label. Renders nothing when quiet.
+// incoming message bubble: the exact "theirs" chrome — `bg-card`,
+// `rounded-2xl rounded-bl-sm`, `px-3 py-2`, the group avatar gutter
+// — sized to a single-line bubble (the dots sit in a 24px row). Sits
+// below the message list, above the composer; the list is `flex-1`
+// so it shrinks to make room when the bubble appears. Inside: a
+// staggered three-dot pulse. In a DM the dots stand alone (you know
+// the peer); in a group they get a "{name}" / "{a} and {b}" /
+// "Several people" label above, like a sender label. Renders nothing
+// when quiet.
 import * as React from 'react';
 import { AccessibilityInfo, Animated, View } from 'react-native';
 
@@ -132,8 +132,14 @@ export function TypingIndicator({
             {label}
           </Text>
         ) : null}
-        <View className="rounded-2xl rounded-bl-sm bg-muted px-3 py-2.5">
-          <TypingDots />
+        {/* Same chrome AND footprint as a one-line "theirs" bubble:
+            `bg-card`, `px-3 py-2`, and the dots sit in a 24px row —
+            text-base's line height — so the bubble is exactly the
+            size of a single-line incoming message. */}
+        <View className="rounded-2xl rounded-bl-sm bg-card px-3 py-2">
+          <View className="h-6 justify-center">
+            <TypingDots />
+          </View>
         </View>
       </View>
     </View>
