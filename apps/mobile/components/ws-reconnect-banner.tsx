@@ -6,6 +6,12 @@
 // toast fires. A blip shorter than 2s shows nothing and fires no
 // toast — short reconnects are noise, not news.
 //
+// When the device is offline the root <NetworkBanner> already says
+// so ("You're offline — …"); a redundant "Reconnecting…" strip under
+// it is noise, so this one stays hidden until the device is back
+// online (the WS state machine keeps running underneath, so the
+// "Reconnected" toast still fires on recovery).
+//
 // Mounted inside the conversation thread (not at root) — it's the
 // only screen the spec calls for this surface, and a global strip
 // would shove every other screen down on every Wi-Fi hiccup.
@@ -13,6 +19,7 @@ import * as React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 import { Text } from '@/components/ui/text';
+import { useNetworkState } from '@/lib/network/state';
 import { toast } from '@/lib/toast';
 import { useWSConnectionState } from '@/lib/ws/use-ws-connection-state';
 
@@ -21,6 +28,7 @@ const BANNER_DELAY_MS = 2_000;
 
 export function WSReconnectBanner(): React.ReactElement | null {
   const state = useWSConnectionState();
+  const { online } = useNetworkState();
   const [visible, setVisible] = React.useState(false);
   // Read the live `visible` from the state-change effect without
   // re-arming it on every toggle.
@@ -43,7 +51,8 @@ export function WSReconnectBanner(): React.ReactElement | null {
     return () => clearTimeout(timer);
   }, [state]);
 
-  if (!visible) return null;
+  // Offline → the root <NetworkBanner> owns the message; stay quiet.
+  if (!visible || !online) return null;
 
   return (
     <View className="flex-row items-center justify-center gap-2 bg-muted px-4 py-1.5">
