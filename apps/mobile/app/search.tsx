@@ -452,10 +452,18 @@ export default function SearchModalScreen() {
   }, [rows, friendStatusByUser, me?.id]);
 
   const [focusedRowIdx, setFocusedRowIdx] = React.useState<number | null>(null);
-  // Whenever results change, snap focus to the first tappable row
-  // so Enter immediately activates the most relevant hit.
+  // When results change, keep focus on the same row if it's still
+  // tappable; otherwise snap to the first tappable row. The earlier
+  // "always reset to first tappable" combined with the
+  // scrollToIndex effect below caused a nasty auto-scroll on
+  // expand: 1000 stranger users (non-tappable) followed by a group
+  // chat (tappable) meant tappableRowIndices[0] was the group, and
+  // FlashList scrolled the whole modal down to it.
   React.useEffect(() => {
-    setFocusedRowIdx(tappableRowIndices[0] ?? null);
+    setFocusedRowIdx((prev) => {
+      if (prev != null && tappableRowIndices.includes(prev)) return prev;
+      return tappableRowIndices[0] ?? null;
+    });
   }, [tappableRowIndices]);
 
   // Activate the row at a given index (Enter, or programmatic).
@@ -483,17 +491,32 @@ export default function SearchModalScreen() {
   // Web-only keyboard nav: ↑/↓ cycles tappable rows, Enter activates.
   // Listener is on capture phase so a focused TextInput in the
   // header can't swallow the events. Native gets nothing — touch
-  // UX uses tap-to-select directly.
+  // UX uses tap-to-select directly. The scrollToIndex call lives
+  // INSIDE this handler (not in a useEffect on focusedRowIdx) so
+  // only user-driven arrow presses cause the viewport to follow —
+  // a data-change-driven focus reset never scrolls the list.
   const listRef = React.useRef<ListRef<Row>>(null);
   React.useEffect(() => {
     if (Platform.OS !== 'web' || tappableRowIndices.length === 0) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setFocusedRowIdx((prev) => stepFocus(prev, tappableRowIndices, 1));
+        setFocusedRowIdx((prev) => {
+          const next = stepFocus(prev, tappableRowIndices, 1);
+          if (next != null) {
+            listRef.current?.scrollToIndex({ index: next, viewPosition: 0.5 });
+          }
+          return next;
+        });
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setFocusedRowIdx((prev) => stepFocus(prev, tappableRowIndices, -1));
+        setFocusedRowIdx((prev) => {
+          const next = stepFocus(prev, tappableRowIndices, -1);
+          if (next != null) {
+            listRef.current?.scrollToIndex({ index: next, viewPosition: 0.5 });
+          }
+          return next;
+        });
       } else if (e.key === 'Enter') {
         e.preventDefault();
         activateRow(focusedRowIdx);
@@ -502,14 +525,6 @@ export default function SearchModalScreen() {
     window.addEventListener('keydown', handler, { capture: true });
     return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [tappableRowIndices, focusedRowIdx, activateRow]);
-
-  // Keep the focused row in view as the user arrows around — without
-  // this, ArrowDown past the last visible row leaves the highlight
-  // off-screen.
-  React.useEffect(() => {
-    if (focusedRowIdx == null) return;
-    listRef.current?.scrollToIndex({ index: focusedRowIdx, viewPosition: 0.5 });
-  }, [focusedRowIdx]);
 
   const mutedFg = useThemeColor('muted-foreground');
 
