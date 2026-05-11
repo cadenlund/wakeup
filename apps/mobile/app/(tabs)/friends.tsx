@@ -704,24 +704,14 @@ function SectionsPane({
 }) {
   const listRef = React.useRef<ListRef<Row>>(null);
 
-  // After any section toggle (expand OR collapse), scroll its
-  // header to the top of the viewport. FlashList preserves the
-  // prior scroll offset across data updates, so without this:
-  //   - expand → inserted rows push the header behind the screen
-  //     chrome
-  //   - collapse → removed rows above the offset leave the list
-  //     scrolled into empty space below the now-shorter content
-  // Pinning the tapped header to the top is the predictable shape
-  // either way.
-  React.useEffect(() => {
-    const id = justToggledRef.current;
-    if (!id) return;
-    const idx = rows.findIndex((r) => r.kind === 'header' && r.sectionId === id);
-    if (idx >= 0) {
-      listRef.current?.scrollToIndex({ index: idx, animated: true });
-    }
-    justToggledRef.current = null;
-  }, [rows, justToggledRef]);
+  // The previous "snap tapped header to the top" effect (a
+  // scrollToIndex on every section toggle) was the same auto-scroll
+  // bug the search modal had: tapping a chevron to expand 1000 rows
+  // animated the viewport down to chase the section header, which
+  // felt like the list was scrolling itself. Drop the effect; the
+  // section toggles in place. (justToggledRef is still threaded
+  // through because the parent reads it elsewhere; we just no
+  // longer act on it here.)
 
   const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
 
@@ -756,11 +746,11 @@ function SectionsPane({
       // and the rows under them disappearing when the user toggled
       // the Friends section.
       getItemType={(item) => item.kind}
-      // stickyHeaderIndices intentionally omitted: FlashList 2.0.2
-      // renders both the sticky overlay AND the inline header when
-      // the list is already at the top, producing a visible
-      // duplicate of the first section header. Sticky behavior is
-      // nice-to-have here but a duplicate header is a blocker.
+      // Sticky chevron headers so a long scroll keeps the
+      // collapse affordance reachable. The earlier "duplicate
+      // FRIENDS header" symptom traced to a scrollToIndex on
+      // toggle that's now gone, not to FlashList sticky itself.
+      stickyHeaderIndices={rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0)}
       onEndReachedThreshold={0.5}
       onEndReached={onEndReached}
       ListFooterComponent={isFetchingNextPage ? <SectionsListLoader /> : null}
