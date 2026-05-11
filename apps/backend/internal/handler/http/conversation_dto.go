@@ -34,13 +34,15 @@ type ConversationResponse struct {
 // LastReadMessageID is the per-member read pointer maintained by
 // `POST /v1/conversations/{id}/read` (§6.3). Mobile renders tiny
 // read-receipt avatars under "mine" bubbles in groups by comparing
-// this id against each rendered message id. NULL means the member
-// has never opened the thread (no messages read).
+// this id against each rendered message id. JSON-null (not omitted)
+// when the member has never opened the thread — stable nullability
+// is part of the contract so clients can distinguish "never read"
+// from a missing field on an older response (CR on PR #143).
 type ConversationMemberRow struct {
 	User              UserResponse `json:"user"`
-	Role              string       `json:"role"                         example:"admin"`
-	JoinedAt          time.Time    `json:"joined_at"                    example:"2026-05-02T09:31:21.810Z"`
-	LastReadMessageID *uuid.UUID   `json:"last_read_message_id,omitempty" example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
+	Role              string       `json:"role"                 example:"admin"`
+	JoinedAt          time.Time    `json:"joined_at"            example:"2026-05-02T09:31:21.810Z"`
+	LastReadMessageID *uuid.UUID   `json:"last_read_message_id" example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
 }
 
 // ConversationListResponse is the §6.4 paginated envelope for
