@@ -58,7 +58,7 @@ export default function ChatsScreen() {
   // page so the count in the header doesn't flicker as later pages
   // land.
   const conversationsQ = useInfiniteConversations({ query: { staleTime: 30_000 } });
-  const { data: conversations, total: conversationsTotal } = React.useMemo(
+  const { data: conversations } = React.useMemo(
     () => flatten<Conversation, { data?: Conversation[] }>(conversationsQ.data?.pages),
     [conversationsQ.data]
   );
@@ -181,14 +181,9 @@ export default function ChatsScreen() {
               void conversationsQ.fetchNextPage();
             }
           }}
-          ListFooterComponent={
-            <ConversationsFooter
-              loading={conversationsQ.isFetchingNextPage}
-              loaded={visible.length}
-              total={filterActive ? visible.length : conversationsTotal}
-              filterActive={filterActive}
-            />
-          }
+          // Section header at the top of the list.
+          ListHeaderComponent={<ChatsSectionHeader />}
+          ListFooterComponent={<ConversationsFooter loading={conversationsQ.isFetchingNextPage} />}
           renderItem={({ item }) => (
             <RenderedConversationRow
               conversation={item}
@@ -455,38 +450,30 @@ function PullableEmpty({ refreshing, onRefresh }: { refreshing: boolean; onRefre
   );
 }
 
-function ConversationsFooter({
-  loading,
-  loaded,
-  total,
-  filterActive,
-}: {
-  loading: boolean;
-  loaded: number;
-  total: number;
-  filterActive: boolean;
-}) {
+function ConversationsFooter({ loading }: { loading: boolean }) {
   const mutedFg = useThemeColor('muted-foreground');
-  if (loading) {
-    return (
-      <View className="items-center py-4">
-        <ActivityIndicator color={mutedFg} />
-      </View>
-    );
-  }
-  // No total hint while filtering — the "N of M" hint would read
-  // wrong (it'd compare filtered visible to global total). Filter
-  // is local only; pagination drives the un-filtered shape.
-  if (filterActive) return null;
-  // Render the footer even after the last page lands so the user
-  // sees "Showing 1000 of 1000" — the previous `total <= loaded`
-  // guard hid it exactly when the count first became authoritative
-  // (CodeRabbit on PR #138).
-  if (total <= 0) return null;
+  if (!loading) return null;
   return (
-    <View className="items-center py-3">
-      <Text variant="muted" className="text-xs">
-        Showing {loaded} of {total}
+    <View className="items-center py-4">
+      <ActivityIndicator color={mutedFg} />
+    </View>
+  );
+}
+
+// Section header row for the conversations list — mirrors the
+// friends tab's <SectionHeader> visual (uppercase muted label,
+// card background, bottom hairline) but without the collapse caret
+// (the chats list is a single uncollapsible section) and without a
+// trailing count. Rendered as the FlashList's ListHeaderComponent
+// so it scrolls with the rows.
+function ChatsSectionHeader() {
+  const cardBg = useThemeColor('card');
+  return (
+    <View
+      style={{ backgroundColor: cardBg }}
+      className="flex-row items-center border-b border-border px-4 py-2">
+      <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
+        Chats
       </Text>
     </View>
   );

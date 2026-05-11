@@ -10,19 +10,24 @@
 // we still draw a placeholder so the conversation history stays
 // coherent (gaps would make a reply chain unreadable).
 import * as React from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import type { InternalHandlerHttpUserResponse } from '@/lib/api/model';
-import { formatRelative } from '@/lib/relative-time';
+import { useThemeColor } from '@/lib/theme/use-theme-color';
+import type { LocalSendStatus } from '@/lib/use-send-message';
 import { cn } from '@/lib/utils';
 
 type Props = {
   body: string | null | undefined;
-  createdAt: string | null | undefined;
   isDeleted: boolean | undefined;
   mine: boolean;
+  // True when the surrounding thread is a group. DM threads hide
+  // the avatar gutter AND the sender label entirely so "theirs"
+  // bubbles hug the left edge (Apple Messages convention). Groups
+  // keep the gutter for sender identity.
+  isGroup: boolean;
   // Identity for the avatar fallback (always supplied in groups so
   // mid-streak bubbles still resolve to initials when the user has
   // no avatar_url). DMs / "mine" rows leave it undefined.
@@ -42,37 +47,53 @@ type Props = {
   // as a row of tiny avatars under the bubble (iMessage convention:
   // only the latest read position per recipient is shown).
   readBy?: InternalHandlerHttpUserResponse[];
+  // Send-pipeline status from useSendMessage. `undefined` = the
+  // message is delivered (server-issued row); `'sending'` shows
+  // a small spinner + "Sending…" caption; `'failed'` swaps in a
+  // tappable "Not sent · Retry" affordance that calls onRetrySend.
+  sendStatus?: LocalSendStatus;
+  onRetrySend?: () => void;
   testID?: string;
 };
 
 export function MessageBubble({
   body,
-  createdAt,
   isDeleted,
   mine,
+  isGroup,
   senderName,
   senderUsername,
   senderAvatarUrl,
   showSenderLabel,
   showAvatar,
   readBy,
+  sendStatus,
+  onRetrySend,
   testID,
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
-  const time = formatRelative(createdAt);
+  const mutedFg = useThemeColor('muted-foreground');
+  const destructive = useThemeColor('destructive');
+  // Per-bubble timestamps moved to centered <TimeDivider> rows in
+  // the list (Apple Messages convention — gaps between message
+  // bursts get a divider; individual bubbles stay quiet).
   // edited_at is in the backend response but v1 has no message-edit
   // UI (deferred to v2 — §6.5 context menu lands a stub only), so
   // we don't surface an "edited" indicator yet. The prop stays
   // omitted to avoid drifting away from the locked v1 scope.
 
+  // Avatar gutter only renders in groups. In DMs the "theirs"
+  // bubble hugs the left edge so the conversation reads tighter
+  // — matches Apple Messages.
+  const showGutter = isGroup && !mine;
   return (
     <View
       testID={testID}
-      // Row: avatar gutter + bubble column. "Mine" rows put the
-      // bubble flush right with no avatar; "theirs" rows align
-      // bubble against an avatar gutter on the left.
+      // Row: optional avatar gutter (groups only) + bubble column.
+      // "Mine" rows flush right; "theirs" rows align left against
+      // either the gutter (groups) or the edge (DMs).
       className={cn('flex-row items-end gap-2 px-3 py-1', mine ? 'justify-end' : 'justify-start')}>
-      {!mine ? (
+      {showGutter ? (
         <View className="w-8">
           {showAvatar ? (
             <Avatar source={senderAvatarUrl} fallbackName={displayName} size={32} />
@@ -107,12 +128,6 @@ export function MessageBubble({
           )}
         </View>
 
-        {time ? (
-          <Text variant="muted" className="mt-0.5 px-1 text-[10px]">
-            {time}
-          </Text>
-        ) : null}
-
         {readBy && readBy.length > 0 ? (
           <View className="mt-0.5 flex-row gap-1 px-1">
             {readBy.map((u) => {
@@ -120,6 +135,39 @@ export function MessageBubble({
               return <Avatar key={u.id} source={u.avatar_url} fallbackName={name} size={14} />;
             })}
           </View>
+        ) : null}
+
+        {mine && sendStatus === 'sending' ? (
+          <View className="mt-0.5 flex-row items-center gap-1 px-1">
+            <ActivityIndicator size="small" color={mutedFg} />
+            <Text variant="muted" className="text-[10px]">
+              Sending…
+            </Text>
+          </View>
+        ) : null}
+
+        {mine && sendStatus === 'failed' ? (
+          onRetrySend ? (
+            <Pressable
+              onPress={onRetrySend}
+              accessibilityRole="button"
+              accessibilityLabel="Retry send"
+              testID={testID ? `${testID}-retry` : undefined}
+              hitSlop={6}
+              className="mt-0.5 flex-row items-center gap-1 px-1 active:opacity-70">
+              <Text style={{ color: destructive }} className="text-[10px] font-medium">
+                Not sent · Retry
+              </Text>
+            </Pressable>
+          ) : (
+            // No retry handler wired (shouldn't happen in practice —
+            // every "mine" bubble gets one from <MessageList> — but
+            // keep the failure visible rather than rendering a dead
+            // tap target).
+            <Text style={{ color: destructive }} className="mt-0.5 px-1 text-[10px] font-medium">
+              Not sent
+            </Text>
+          )
         ) : null}
       </View>
     </View>
