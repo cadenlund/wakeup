@@ -1,13 +1,17 @@
-// Phase 6.4 — typing indicator row for the conversation thread.
+// Phase 6.4 — typing indicator for the conversation thread.
 //
-// Reads `useTypingUserIds` (the WS-fed typing store) and shows a
-// pulsing three-dot animation. In a DM the dots stand alone (you
-// already know who the peer is); in a group they're prefixed with
-// who's typing ("{name}", "{a} and {b}", or "Several people").
-// Renders nothing when nobody's typing — zero pixel cost in the
-// common case. Sits between the message list and the composer.
+// Renders the WS-fed typing state (`useTypingUserIds`) as an
+// incoming-style message bubble: same chrome as `<MessageBubble>`'s
+// "theirs" side — `bg-muted`, `rounded-2xl rounded-bl-sm`, the same
+// row/gutter layout — so it reads as a real bubble at the bottom of
+// the thread (it's the message list's `ListFooterComponent`, so it
+// scrolls with the messages and the list naturally makes room).
+// Inside: a staggered three-dot pulse. In a DM the dots stand alone
+// (you know the peer); in a group they get a "{name}" / "{a} and
+// {b}" / "Several people" label above, like a sender label. Renders
+// nothing when nobody's typing.
 import * as React from 'react';
-import { Animated, View } from 'react-native';
+import { AccessibilityInfo, Animated, View } from 'react-native';
 
 import { Text } from '@/components/ui/text';
 import type { InternalHandlerHttpConversationMemberRow } from '@/lib/api/model';
@@ -25,16 +29,19 @@ function nameFor(members: Member[] | undefined, userId: string): string {
   return u?.display_name?.trim() || u?.username?.trim() || 'Someone';
 }
 
-function groupPrefix(members: Member[] | undefined, ids: string[]): string {
+function groupLabel(members: Member[] | undefined, ids: string[]): string {
   if (ids.length === 1) return nameFor(members, ids[0]);
   if (ids.length === 2) return `${nameFor(members, ids[0])} and ${nameFor(members, ids[1])}`;
   return 'Several people';
 }
 
 // Three small circles whose opacity pulses in a staggered loop.
+// Honours the OS "reduce motion" setting — when it's on the dots
+// stay fully visible and the loop never starts (matches the
+// reduced-motion handling elsewhere in the app).
 function TypingDots(): React.ReactElement {
   const color = useThemeColor('muted-foreground');
-  // Lazily create the three Animated.Values once.
+  const [reduceMotion, setReduceMotion] = React.useState(false);
   const dotsRef = React.useRef<Animated.Value[] | null>(null);
   if (!dotsRef.current) {
     dotsRef.current = [
@@ -46,6 +53,19 @@ function TypingDots(): React.ReactElement {
   const dots = dotsRef.current;
 
   React.useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (mounted) setReduceMotion(enabled);
+    });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (reduceMotion) return;
     const loop = Animated.loop(
       Animated.stagger(
         DOT_STAGGER_MS,
@@ -63,14 +83,20 @@ function TypingDots(): React.ReactElement {
     );
     loop.start();
     return () => loop.stop();
-  }, [dots]);
+  }, [dots, reduceMotion]);
 
   return (
     <View className="flex-row items-center gap-1" accessibilityElementsHidden>
       {dots.map((d, i) => (
         <Animated.View
           key={i}
-          style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color, opacity: d }}
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: color,
+            opacity: reduceMotion ? 1 : d,
+          }}
         />
       ))}
     </View>
@@ -89,17 +115,27 @@ export function TypingIndicator({
   const ids = useTypingUserIds(conversationId);
   if (ids.length === 0) return null;
 
-  const prefix = isGroup ? groupPrefix(members, ids) : undefined;
-  const a11yLabel = isGroup ? `${prefix} is typing` : 'Typing';
+  const label = isGroup ? groupLabel(members, ids) : undefined;
 
   return (
+    // Mirrors <MessageBubble>'s "theirs" row: avatar gutter in groups
+    // so the bubble lines up with incoming messages; left-aligned.
     <View
-      className="flex-row items-center gap-2 bg-background px-4 py-1.5"
+      className="flex-row items-end gap-2 px-3 py-1"
       accessibilityLiveRegion="polite"
-      accessibilityLabel={a11yLabel}
+      accessibilityLabel={label ? `${label} is typing` : 'Typing'}
       testID="typing-indicator">
-      {prefix ? <Text className="text-xs text-muted-foreground">{prefix}</Text> : null}
-      <TypingDots />
+      {isGroup ? <View className="w-8" /> : null}
+      <View className="max-w-[80%] items-start">
+        {label ? (
+          <Text variant="muted" className="mb-0.5 px-1 text-xs">
+            {label}
+          </Text>
+        ) : null}
+        <View className="rounded-2xl rounded-bl-sm bg-muted px-3 py-2.5">
+          <TypingDots />
+        </View>
+      </View>
     </View>
   );
 }

@@ -1,6 +1,6 @@
 // One rendered message bubble. Sender direction picks the side
 // (mine = right, theirs = left) and the colour token (mine =
-// primary, theirs = card). Group conversations may render a small
+// primary, theirs = muted). Group conversations may render a small
 // sender label above the bubble — only when the sender changes
 // from the previous bubble in the visual stack, so a streak of
 // messages from one user reads as one block (Discord / iMessage
@@ -98,8 +98,8 @@ export function MessageBubble({
   const mutedFg = useThemeColor('muted-foreground');
   const destructive = useThemeColor('destructive');
   const fg = useThemeColor('foreground');
-  // One shade off `card` so the web overflow chip reads against
-  // both a `card`-coloured "theirs" bubble and a `primary` "mine".
+  // `background` reads as a distinct chip against both a `muted`
+  // "theirs" bubble and a `primary` "mine".
   const overflowBg = useThemeColor('background');
   // Ref on the bubble View so long-press can measure its window
   // rect for the action popover's anchor.
@@ -192,8 +192,12 @@ export function MessageBubble({
           ref={bubbleRef}
           collapsable={false}
           className={cn(
+            // "theirs" uses `muted` (not `card`) so the incoming
+            // bubble stays distinct from the thread `background` —
+            // `card` is the same near-white as `background` in most
+            // schemes, which read as white-on-white.
             'rounded-2xl px-3 py-2',
-            mine ? 'rounded-br-sm bg-primary' : 'rounded-bl-sm bg-card'
+            mine ? 'rounded-br-sm bg-primary' : 'rounded-bl-sm bg-muted'
           )}>
           {isDeleted ? (
             <Text

@@ -36,6 +36,7 @@ import * as React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 import { MessageBubble } from '@/components/message-bubble';
+import { TypingIndicator } from '@/components/typing-indicator';
 import {
   MessageActionPopover,
   type MessageActionTarget,
@@ -300,6 +301,13 @@ export function MessageList({
             <ActivityIndicator color={mutedFg} />
           </View>
         ) : null
+      }
+      // Footer sits at the BOTTOM of the scroll — the typing
+      // indicator lives here so it scrolls with the messages and
+      // the list makes room for it (it renders null when nobody's
+      // typing).
+      ListFooterComponent={
+        <TypingIndicator conversationId={conversationId} members={members} isGroup={isGroup} />
       }
       renderItem={({ item }) => {
         if (item.kind === 'divider') {
