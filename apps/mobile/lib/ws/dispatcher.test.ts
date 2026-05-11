@@ -51,7 +51,8 @@ function isInvalidated(qc: QueryClient, key: readonly unknown[]): boolean {
   return qc.getQueryState(key)?.isInvalidated === true;
 }
 
-// Backend `publishMessageEvent` wire shape — ids only, no body.
+// Backend `publishMessageEvent` wire shape for message.new — ids +
+// the body (used for the banner preview).
 function messageEvent(type: string, extra: Record<string, unknown> = {}) {
   return {
     type,
@@ -60,6 +61,7 @@ function messageEvent(type: string, extra: Record<string, unknown> = {}) {
       conversation_id: CONV,
       sender_id: 'u9',
       created_at: '2026-01-09T00:00:00Z',
+      body: 'hello there',
       ...extra,
     },
   };
@@ -257,22 +259,41 @@ describe('applyWSEvent — deliberate no-ops', () => {
 });
 
 describe('applyWSEvent — event banners (§4.13)', () => {
-  test('message.new enqueues a banner routing to the thread', () => {
+  test('message.new (DM) banners "<sender>" / "<body>"', () => {
     const qc = newClient();
     qc.setQueryData<ConversationList>(conversationsKey, {
-      data: [{ id: CONV, members: [{ user: { id: 'u9', display_name: 'Ada' } }] }],
+      data: [{ id: CONV, type: 'direct', members: [{ user: { id: 'u9', display_name: 'Ada' } }] }],
     });
     applyWSEvent(qc, messageEvent('message.new'));
     expect(bannerQueue()).toEqual([
-      { id: 'm1', title: 'New message from Ada', route: `/conversations/${CONV}` },
+      { id: 'm1', title: 'Ada', body: 'hello there', route: `/conversations/${CONV}` },
     ]);
   });
 
-  test('message.new falls back to a generic title when the sender is not cached', () => {
+  test('message.new (group) banners "<group>" / "<sender>: <body>"', () => {
+    const qc = newClient();
+    qc.setQueryData<ConversationList>(conversationsKey, {
+      data: [
+        {
+          id: CONV,
+          type: 'group',
+          name: 'Roommates',
+          members: [{ user: { id: 'u9', display_name: 'Ada' } }],
+        },
+      ],
+    });
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(bannerQueue()).toEqual([
+      { id: 'm1', title: 'Roommates', body: 'Ada: hello there', route: `/conversations/${CONV}` },
+    ]);
+  });
+
+  test('message.new falls back to a generic title when the conversation is not cached', () => {
     const qc = newClient();
     applyWSEvent(qc, messageEvent('message.new'));
     expect(bannerQueue()[0]).toMatchObject({
       title: 'New message',
+      body: 'hello there',
       route: `/conversations/${CONV}`,
     });
   });

@@ -15,13 +15,12 @@
 // Cache actions:
 //
 //   1. invalidateQueries — the message-thread events
-//      (`message.new` / `message.edited` / `message.deleted`) only
-//      carry ids on the wire (`{ message_id, conversation_id,
-//      sender_id, created_at }` — see backend `publishMessageEvent`),
-//      not the body, so the open thread refetches; `message.new` also
-//      invalidates the chats list (it's an infinite query whose pages
-//      can't be re-sorted in place); `friend.*` / `conversation.*`
-//      mark their lists stale the same way.
+//      (`message.new` / `message.edited` / `message.deleted`) carry
+//      ids (+ `body` on new/edited, used only for the banner preview)
+//      — not the full DTO — so the open thread still refetches;
+//      `message.new` also invalidates the chats list (it's an
+//      infinite query whose pages can't be re-sorted in place);
+//      `friend.*` / `conversation.*` mark their lists stale the same way.
 //   2. setQueryData patch — `presence.update` patches the friend's
 //      presence row directly (the event carries its full state).
 //   3. side-effect — `typing.start` / `typing.stop` poke
@@ -187,10 +186,12 @@ function stringPatch<K extends string>(
 export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchContext = {}): void {
   switch (env.type) {
     case 'message.new': {
-      // `{ message_id, conversation_id, sender_id, created_at }` — no
-      // body on the wire, so both the open thread AND the chats list
-      // refetch (the chats query is an infinite query whose pages
-      // can't be re-sorted in place — a row may have to cross pages).
+      // `{ message_id, conversation_id, sender_id, created_at, body }`
+      // — the body rides along (for the banner preview), but we still
+      // refetch the open thread + chats list rather than patch: the
+      // thread query needs the full DTO (attachments, reply_to, …) and
+      // the chats query is an infinite query whose pages can't be
+      // re-sorted in place (a row may have to cross pages).
       const d = asRecord(env.data);
       const convId = d && str(d.conversation_id);
       if (!d || !convId) return;
@@ -200,10 +201,18 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       const conv = findConversation(qc, convId);
       if (getActiveConversation() === convId || isMuted(conv)) return;
       const messageId = str(d.message_id);
-      const name = senderName(conv, str(d.sender_id) ?? '');
+      const body = str(d.body);
+      const sender = senderName(conv, str(d.sender_id) ?? '');
+      const isGroupConv = conv?.type === 'group';
+      const groupName = conv?.name?.trim() || undefined;
       maybeBanner({
         id: messageId ?? `msg:${convId}:${str(d.created_at) ?? ''}`,
-        title: name ? `New message from ${name}` : 'New message',
+        // DM: "Ada" / the body. Group: "<group name>" / "Ada: <body>"
+        // — so the sender + the message + (for groups) which group all
+        // show. Falls back to "New message" when the conversation
+        // isn't in cache yet.
+        title: (isGroupConv ? groupName : sender) ?? 'New message',
+        body: isGroupConv && sender && body ? `${sender}: ${body}` : body,
         route: `/conversations/${convId}`,
       });
       return;
