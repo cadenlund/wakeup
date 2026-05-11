@@ -1,24 +1,29 @@
 // Phase 6.1 — conversation thread screen.
+// Phase 6.2 — composer + optimistic send.
 //
 // Renders the §6.4 paginated /v1/conversations/{id}/messages feed
-// via the shared <MessageList>. The conversation row is hydrated
-// from the chats-tab list cache first (so the title appears
-// instantly on the push transition) with a per-id refetch as the
-// fallback when this screen is opened cold (deep link / search
-// modal route).
+// via the shared <MessageList>, with a <Composer> pinned at the
+// bottom that prepends an optimistic placeholder on submit. The
+// conversation row is hydrated from the chats-tab list cache first
+// (so the title appears instantly on the push transition) with a
+// per-id refetch as the fallback when this screen is opened cold
+// (deep link / search modal route).
 //
-// Composer + typing indicator land in Phase 6.2 / 6.4; this PR is
-// the read-side foundation everything else hangs off of.
+// KeyboardAvoidingView wraps both the list and the composer so the
+// composer rides on top of the soft keyboard. Read receipts +
+// typing indicator land in Phase 6.3 / 6.4.
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { MoreVertical } from 'lucide-react-native';
 import * as React from 'react';
-import { Pressable, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, View } from 'react-native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
+import { Composer } from '@/components/composer';
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
 import { MessageList } from '@/components/message-list';
 import { MuteSheet } from '@/components/mute-sheet';
 import { ThemedBackButton } from '@/components/ui/themed-back-button';
+import { useSendMessage } from '@/lib/use-send-message';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import {
   getGetV1ConversationsQueryKey,
@@ -140,16 +145,27 @@ export default function ConversationThreadScreen() {
           ),
         }}
       />
-      <View className="flex-1 bg-background">
+      <KeyboardAvoidingView
+        // iOS: 'padding' pushes the composer above the keyboard.
+        // Android handles soft-input via windowSoftInputMode in the
+        // manifest and doesn't need this; we still mount the view
+        // so the layout stays consistent.
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        className="flex-1 bg-background">
         {convId ? (
-          <MessageList
-            conversationId={convId}
-            myUserId={me?.id}
-            isGroup={isGroup}
-            members={conversation?.members ?? []}
-          />
+          <>
+            <View className="flex-1">
+              <MessageList
+                conversationId={convId}
+                myUserId={me?.id}
+                isGroup={isGroup}
+                members={conversation?.members ?? []}
+              />
+            </View>
+            <ThreadComposer conversationId={convId} myUserId={me?.id} />
+          </>
         ) : null}
-      </View>
+      </KeyboardAvoidingView>
 
       <ConversationActionMenu
         visible={sheet === 'menu'}
@@ -220,4 +236,19 @@ function computeTitle(
     return other?.display_name?.trim() || other?.username?.trim() || 'Direct message';
   }
   return c.name?.trim() || 'Group';
+}
+
+// Tiny wrapper so the send-mutation only mounts once per
+// conversation route. Hoisting useSendMessage into the parent
+// component would re-run on every screen render; this trims the
+// re-render cost to the composer subtree.
+function ThreadComposer({
+  conversationId,
+  myUserId,
+}: {
+  conversationId: string;
+  myUserId: string | undefined;
+}) {
+  const { send, isPending } = useSendMessage(conversationId, myUserId);
+  return <Composer onSend={send} pending={isPending} testID="thread-composer" />;
 }
