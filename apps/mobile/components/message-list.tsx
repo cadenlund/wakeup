@@ -43,6 +43,7 @@ import {
 import { AGGREGATE_GAP_MS, TimeDivider } from '@/components/time-divider';
 import { List, type ListRef } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
+import { userDisplayName } from '@/lib/conversation-display';
 import { flatten, useInfiniteMessages } from '@/lib/api/use-infinite';
 import type {
   InternalHandlerHttpConversationMemberRow,
@@ -70,13 +71,9 @@ type Row =
       sameAsNewer: boolean;
     };
 
-function memberName(u: InternalHandlerHttpUserResponse): string {
-  return u.display_name?.trim() || u.username?.trim() || 'Someone';
-}
-
 // "Seen by Ada" / "Seen by Ada and Ben" / "Seen by Ada, Ben and 2 others".
 function formatSeenBy(users: InternalHandlerHttpUserResponse[]): string {
-  const names = users.map(memberName);
+  const names = users.map((u) => userDisplayName(u));
   if (names.length === 1) return `Seen by ${names[0]}`;
   if (names.length === 2) return `Seen by ${names[0]} and ${names[1]}`;
   const rest = names.length - 2;
@@ -443,13 +440,7 @@ export function MessageList({
                         if (!isGroup && u.id === myUserId) return [];
                         const ptr = readPointerIdxByUser.get(u.id) ?? -1;
                         if (ptr < msgIdx) return [];
-                        return [
-                          {
-                            id: u.id,
-                            name: u.display_name?.trim() || u.username?.trim() || 'Someone',
-                            avatarUrl: u.avatar_url,
-                          },
-                        ];
+                        return [{ id: u.id, name: userDisplayName(u), avatarUrl: u.avatar_url }];
                       });
                 setActionTarget({
                   id: m.id as string,
