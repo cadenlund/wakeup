@@ -35,8 +35,10 @@ import { WSReconnectBanner } from '@/components/ws-reconnect-banner';
 import { setActiveConversation } from '@/lib/banner/active-conversation';
 import { useRefetchMessagesOnReconnect } from '@/lib/ws/use-refetch-on-reconnect';
 import { useSendMessage } from '@/lib/use-send-message';
+import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import {
+  getGetV1ConversationsIdQueryKey,
   getGetV1ConversationsQueryKey,
   useGetV1ConversationsId,
 } from '@/lib/api/hooks/conversations/conversations';
@@ -107,11 +109,31 @@ export default function ConversationThreadScreen() {
     query: {
       enabled: !!id,
       staleTime: 30_000,
+      // 4xx won't fix itself on a retry — fail fast so the
+      // gone-conversation recovery below kicks in promptly.
+      retry: (count, err) =>
+        !(err instanceof APIError && err.status >= 400 && err.status < 500) && count < 2,
       ...(cachedRow ? { initialData: cachedRow as never } : {}),
     },
   });
   const detail = detailQ.data as InternalHandlerHttpConversationResponse | undefined;
   const conversation = detail ?? cachedRow;
+
+  // Recovery: a DM whose friendship ended is deleted server-side, so
+  // GET /v1/conversations/{id} 404s. Evict every cached trace of it
+  // (so nothing — e.g. the chats list, useEnsureDirectConversation —
+  // re-opens a dead route) and bail back to the chats list.
+  const router = useRouter();
+  React.useEffect(() => {
+    const err = detailQ.error;
+    if (!id || !(err instanceof APIError) || err.status !== 404) return;
+    setActiveConversation(null);
+    qc.removeQueries({ queryKey: getGetV1ConversationsIdQueryKey(id) });
+    qc.removeQueries({ queryKey: [`/v1/conversations/${id}/messages`] });
+    void qc.invalidateQueries({ queryKey: getGetV1ConversationsQueryKey() });
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [detailQ.error, id, qc, router]);
 
   const title = computeTitle(conversation, me?.id);
   const fg = useThemeColor('foreground');
@@ -126,7 +148,6 @@ export default function ConversationThreadScreen() {
   // chats tab opens on row long-press. State machine: 'menu' is
   // the row of Pin/Mute/Manage/Leave entries; 'mute' is the
   // duration sheet that opens when the user picks "Mute…".
-  const router = useRouter();
   const [sheet, setSheet] = React.useState<'menu' | 'mute' | null>(null);
   const closeSheet = React.useCallback(() => setSheet(null), []);
   const openMute = React.useCallback(() => setSheet('mute'), []);
