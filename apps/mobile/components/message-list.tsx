@@ -136,12 +136,22 @@ export function MessageList({
     return m;
   }, [members, isGroup, myUserId]);
 
-  // Mark-read on focus: post the latest visible message id to the
-  // backend so the per-member read pointer advances. The hook
-  // gates re-posts internally — re-focusing on the same screen
-  // with no new messages is a no-op.
-  const latestMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : undefined;
-  useMarkReadOnFocus(conversationId, latestMessageId);
+  // Mark-read on focus: post the latest *delivered* message id to
+  // the backend so the per-member read pointer advances. The
+  // newest rendered row can be an optimistic placeholder (its id
+  // is a client temp id, present in sendStatusByTempId) — posting
+  // that would set the read pointer to a non-existent message. Walk
+  // back from the end and skip anything that's still in flight /
+  // failed. The hook gates re-posts internally — re-focusing on
+  // the same screen with no new delivered message is a no-op.
+  const latestDeliveredMessageId = React.useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const id = messages[i]?.id;
+      if (id && !sendStatusByTempId.has(id)) return id;
+    }
+    return undefined;
+  }, [messages, sendStatusByTempId]);
+  useMarkReadOnFocus(conversationId, latestDeliveredMessageId);
 
   // Build the interleaved row list:
   // - A divider precedes every message that starts a new burst

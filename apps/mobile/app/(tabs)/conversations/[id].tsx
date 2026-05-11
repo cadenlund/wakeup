@@ -75,11 +75,23 @@ export default function ConversationThreadScreen() {
     return undefined;
   }, [qc, id]);
 
+  // Keep the detail query ENABLED even when we have a cached row —
+  // the cached row only seeds the initial render (so the title +
+  // members paint instantly on the push transition). After
+  // useMarkReadOnFocus invalidates this query, a disabled query
+  // wouldn't refetch and the read-receipt avatars would freeze on
+  // the seed snapshot (CR on PR #144). Feeding cachedRow as
+  // `initialData` keeps the hook reactive while still avoiding a
+  // blank flash on first paint.
   const detailQ = useGetV1ConversationsId(id ?? '', {
-    query: { enabled: !!id && !cachedRow, staleTime: 30_000 },
+    query: {
+      enabled: !!id,
+      staleTime: 30_000,
+      ...(cachedRow ? { initialData: cachedRow as never } : {}),
+    },
   });
   const detail = detailQ.data as InternalHandlerHttpConversationResponse | undefined;
-  const conversation = cachedRow ?? detail;
+  const conversation = detail ?? cachedRow;
 
   const title = computeTitle(conversation, me?.id);
   const fg = useThemeColor('foreground');

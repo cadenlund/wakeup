@@ -147,17 +147,27 @@ export function MessageBubble({
         ) : null}
 
         {mine && sendStatus === 'failed' ? (
-          <Pressable
-            onPress={onRetrySend}
-            accessibilityRole="button"
-            accessibilityLabel="Retry send"
-            testID={testID ? `${testID}-retry` : undefined}
-            hitSlop={6}
-            className="mt-0.5 flex-row items-center gap-1 px-1 active:opacity-70">
-            <Text style={{ color: destructive }} className="text-[10px] font-medium">
-              Not sent · Retry
+          onRetrySend ? (
+            <Pressable
+              onPress={onRetrySend}
+              accessibilityRole="button"
+              accessibilityLabel="Retry send"
+              testID={testID ? `${testID}-retry` : undefined}
+              hitSlop={6}
+              className="mt-0.5 flex-row items-center gap-1 px-1 active:opacity-70">
+              <Text style={{ color: destructive }} className="text-[10px] font-medium">
+                Not sent · Retry
+              </Text>
+            </Pressable>
+          ) : (
+            // No retry handler wired (shouldn't happen in practice —
+            // every "mine" bubble gets one from <MessageList> — but
+            // keep the failure visible rather than rendering a dead
+            // tap target).
+            <Text style={{ color: destructive }} className="mt-0.5 px-1 text-[10px] font-medium">
+              Not sent
             </Text>
-          </Pressable>
+          )
         ) : null}
       </View>
     </View>
