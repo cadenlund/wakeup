@@ -52,6 +52,7 @@ import {
   useGetV1FriendsRequests,
   usePostV1FriendsUserIdBlock,
 } from '@/lib/api/hooks/friends/friends';
+import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
 import { useFriendActions } from '@/lib/api/use-friend-actions';
 import { flatten, useInfiniteFriends } from '@/lib/api/use-infinite';
@@ -60,6 +61,7 @@ import type {
   InternalHandlerHttpConversationResponse,
   InternalHandlerHttpFriendRequestsResponse,
   InternalHandlerHttpFriendshipResponse,
+  InternalHandlerHttpPresenceListResponse,
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
@@ -100,7 +102,20 @@ export default function ManageMembersScreen() {
   // the friends tab so subsequent opens are cheap.
   const friendsQ = useInfiniteFriends({ query: { staleTime: 30_000 } });
   const requestsQ = useGetV1FriendsRequests({ query: { staleTime: 30_000 } });
+  // Presence drives the status dot on add-pane rows so the view
+  // matches the friends-tab row layout exactly. Same staleTime the
+  // friends tab uses so an open immediately after switching tabs
+  // hits the shared cache.
+  const presenceQ = useGetV1PresenceFriends({ query: { staleTime: 15_000 } });
   const requestsData = requestsQ.data as InternalHandlerHttpFriendRequestsResponse | undefined;
+  const presenceData = presenceQ.data as InternalHandlerHttpPresenceListResponse | undefined;
+  const presenceByUser = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of presenceData?.data ?? []) {
+      if (p.user_id && p.status) m.set(p.user_id, p.status);
+    }
+    return m;
+  }, [presenceData]);
   const friendStatusByUser = React.useMemo(() => {
     const m = new Map<string, FriendStatus>();
     const { data: friends } = flatten<
@@ -136,16 +151,10 @@ export default function ManageMembersScreen() {
     return s;
   }, [members]);
 
-  // Eagerly chain friend pages so the add list is comprehensive
-  // without the user having to scroll. The friends graph is small
-  // by design; one or two extra page fetches on first open is cheap.
-  React.useEffect(() => {
-    if (!showAdd) return;
-    if (friendsQ.hasNextPage && !friendsQ.isFetchingNextPage) {
-      void friendsQ.fetchNextPage();
-    }
-  }, [showAdd, friendsQ, friendsQ.data]);
-
+  // Flatten the paged friends response — AddPane consumes the raw
+  // list, runs the substring filter, and drives infinite scroll off
+  // the next-cursor. No eager pre-fetch: the user pulls more pages by
+  // scrolling, matching the friends-tab UX.
   const addCandidates = React.useMemo<UserRow[]>(() => {
     const { data: friends } = flatten<
       InternalHandlerHttpFriendshipResponse,
@@ -344,11 +353,18 @@ export default function ManageMembersScreen() {
             query={query}
             onQueryChange={setQuery}
             results={addCandidates}
+            presenceByUser={presenceByUser}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
             loading={friendsQ.isLoading && !friendsQ.data}
             error={friendsQ.isError && !friendsQ.data}
             onRetry={() => friendsQ.refetch()}
+            onEndReached={() => {
+              if (friendsQ.hasNextPage && !friendsQ.isFetchingNextPage) {
+                void friendsQ.fetchNextPage();
+              }
+            }}
+            isFetchingNextPage={friendsQ.isFetchingNextPage}
           />
         ) : (
           <MembersPane
@@ -583,11 +599,14 @@ function AddPane({
   query,
   onQueryChange,
   results,
+  presenceByUser,
   selectedIds,
   onToggleSelect,
   loading,
   error,
   onRetry,
+  onEndReached,
+  isFetchingNextPage,
 }: {
   query: string;
   onQueryChange: (v: string) => void;
@@ -595,6 +614,10 @@ function AddPane({
   // existing members + self, and already substring-matches against
   // `query`. The pane just renders.
   results: UserRow[];
+  // Friends-only presence map keyed by user_id. The status dot on
+  // each row reads from this so the add pane mirrors the friends
+  // tab one-for-one.
+  presenceByUser: Map<string, string>;
   selectedIds: Set<string>;
   onToggleSelect: (uid: string) => void;
   loading: boolean;
@@ -603,6 +626,11 @@ function AddPane({
   // masquerade as "no friends matched."
   error: boolean;
   onRetry: () => void;
+  // Pulls the next page when the user nears the end of the list.
+  // Drives the same infinite-scroll behaviour the friends tab has,
+  // instead of the previous eager-prefetch-all-on-open pattern.
+  onEndReached: () => void;
+  isFetchingNextPage: boolean;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
   // Mirror /conversations/new's selected-pills strip so a user
@@ -679,9 +707,19 @@ function AddPane({
         <List
           data={results}
           keyExtractor={(u, i) => u.id ?? `idx-${i}`}
+          onEndReachedThreshold={0.5}
+          onEndReached={onEndReached}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View className="items-center py-4">
+                <ActivityIndicator color={mutedFg} />
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => (
-            <FriendCheckRow
+            <FriendPickerRow
               user={item}
+              presence={item.id ? presenceByUser.get(item.id) : undefined}
               selected={!!item.id && selectedIds.has(item.id)}
               onToggle={() => item.id && onToggleSelect(item.id)}
             />
@@ -725,46 +763,41 @@ function SelectedStrip({
   );
 }
 
-// Same check-row layout /conversations/new's FriendCheckRow uses —
-// avatar + identity column + a circle that fills in primary on
-// select. Keeps the multi-select vocabulary consistent across
-// every "pick friends" surface.
-function FriendCheckRow({
+// Friend picker row used inside the add pane. Reuses FriendRow so
+// the layout (avatar + presence dot + identity column) matches the
+// friends tab one-for-one; trailing is the same circle/check
+// affordance the create-group flow uses, so multi-select reads the
+// same across every "pick friends" surface.
+function FriendPickerRow({
   user,
+  presence,
   selected,
   onToggle,
 }: {
   user: UserRow;
+  presence: string | undefined;
   selected: boolean;
   onToggle: () => void;
 }) {
-  const handle = user.display_name?.trim() || user.username?.trim() || 'Friend';
   const checkColor = useThemeColor('primary-foreground');
   return (
-    <Pressable
+    <FriendRow
+      displayName={user.display_name}
+      username={user.username}
+      avatarUrl={user.avatar_url}
+      presence={presence}
       onPress={onToggle}
-      accessibilityRole="checkbox"
-      accessibilityLabel={handle}
-      accessibilityState={{ checked: selected }}
       testID={user.id ? `manage-members-pick-${user.id}` : undefined}
-      className="flex-row items-center gap-3 px-4 py-3 active:bg-muted">
-      <Avatar source={user.avatar_url} fallbackName={handle} size={40} />
-      <View className="min-w-0 flex-1">
-        <Text numberOfLines={1} className="text-base font-medium">
-          {handle}
-        </Text>
-        {user.username ? (
-          <Text numberOfLines={1} variant="muted" className="text-sm">
-            @{user.username}
-          </Text>
-        ) : null}
-      </View>
-      <View
-        className={`h-6 w-6 items-center justify-center rounded-full border ${
-          selected ? 'border-primary bg-primary' : 'border-border'
-        }`}>
-        {selected ? <Check size={14} color={checkColor} /> : null}
-      </View>
-    </Pressable>
+      trailing={
+        <View
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: selected }}
+          className={`h-6 w-6 items-center justify-center rounded-full border ${
+            selected ? 'border-primary bg-primary' : 'border-border'
+          }`}>
+          {selected ? <Check size={14} color={checkColor} /> : null}
+        </View>
+      }
+    />
   );
 }
