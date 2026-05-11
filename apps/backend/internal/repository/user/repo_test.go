@@ -280,6 +280,55 @@ func TestListByPrefix_PrefixMatch(t *testing.T) {
 	}
 }
 
+// TestListByPrefix_ExactMatchRanksFirst regresses the match-rank
+// ordering: an exact username match leads, then username-prefix
+// matches, regardless of which was created more recently. (Before,
+// the only tiebreaker within a tier was created_at DESC, so a newer
+// "user499" outranked the exact "user4".)
+func TestListByPrefix_ExactMatchRanksFirst(t *testing.T) {
+	t.Parallel()
+	repo, _ := newRepo(t)
+	ctx := context.Background()
+
+	// Create the EXACT match FIRST (so it's the oldest) and the
+	// prefix matches after — under the old recency-only ordering
+	// (created_at DESC within a tier) the exact match would have
+	// landed last; match-rank ordering must float it to the top.
+	suffix := makeBaseParams().Username[1:9] // 8 hex chars — unique enough
+	mk := func(name string) {
+		p := makeBaseParams()
+		p.Username = name
+		p.DisplayName = name
+		p.Email = name + "-" + suffix + "@x.test"
+		if _, err := repo.Create(ctx, p); err != nil {
+			t.Fatalf("Create %s: %v", name, err)
+		}
+	}
+	base := "qz" + suffix // unlikely to collide with other test rows
+	mk(base)              // exact match, created first (oldest)
+	mk(base + "99")       // username-prefix match
+	mk(base + "7")        // username-prefix match, created last (newest)
+
+	got, err := repo.ListByPrefix(ctx, base, nil, nil, 10)
+	if err != nil {
+		t.Fatalf("ListByPrefix: %v", err)
+	}
+	if len(got) < 3 {
+		t.Fatalf("expected ≥3 hits, got %d (%+v)", len(got), got)
+	}
+	if got[0].User.Username != base {
+		t.Fatalf("exact match should rank first; got %q (rows: %+v)", got[0].User.Username, got)
+	}
+	if got[0].MatchRank != 0 {
+		t.Errorf("exact match should have MatchRank 0, got %d", got[0].MatchRank)
+	}
+	for _, h := range got[1:3] {
+		if h.MatchRank != 1 {
+			t.Errorf("prefix match %q should have MatchRank 1, got %d", h.User.Username, h.MatchRank)
+		}
+	}
+}
+
 // LIKE-metacharacter input must NOT behave as a wildcard. A user typing
 // "%" into the search box should see only literal-percent matches, not
 // every row.

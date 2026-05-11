@@ -117,13 +117,18 @@ func (s *Service) ListUsers(ctx context.Context, p ListUsersParams) (ListUsersRe
 	if err != nil {
 		return ListUsersResult{}, apierror.Internal("admin: list users").WithCause(err)
 	}
-	// The repo always orders by (rel_tier ASC, created_at DESC, id DESC).
-	// With callerID=nil (admin path), every row gets tier=2, so the
-	// effective sort collapses to the legacy (created_at, id) shape —
-	// but the cursor still needs Tier set for keyset chaining.
+	// The repo orders by (rel_tier ASC, match_rank ASC, created_at DESC,
+	// id DESC). With callerID=nil (admin path) every row gets tier=2;
+	// match_rank still varies by how the row matches the query. The
+	// cursor carries both for keyset chaining.
 	data, next, hasMore := pagination.Page(overFetched, p.Limit, func(h userrepo.SearchHit) pagination.Cursor {
-		tier := h.Tier
-		return pagination.Cursor{Timestamp: h.User.CreatedAt, ID: h.User.ID, Tier: &tier}
+		tier, matchRank := h.Tier, h.MatchRank
+		return pagination.Cursor{
+			Timestamp: h.User.CreatedAt,
+			ID:        h.User.ID,
+			Tier:      &tier,
+			MatchRank: &matchRank,
+		}
 	})
 	users := make([]domain.User, 0, len(data))
 	for _, h := range data {
