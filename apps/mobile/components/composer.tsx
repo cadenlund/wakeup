@@ -18,11 +18,14 @@ import * as React from 'react';
 import { Pressable, TextInput, View } from 'react-native';
 
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { sendWS } from '@/lib/ws/client';
 
 const MAX_LENGTH = 10000;
 // Hard upper bound on the visual height. Past this the input
 // scrolls internally rather than pushing the thread out of view.
 const MAX_HEIGHT = 120;
+// Idle window after the last keystroke before we publish `typing.stop`.
+const TYPING_IDLE_MS = 3_000;
 
 type Props = {
   // Caller wires this to useSendMessage's `send`. Composer trims
@@ -34,15 +37,53 @@ type Props = {
   // is already visible at this point, but we still gate the send
   // button so a rapid double-tap doesn't double-fire the mutation.
   pending: boolean;
+  // Conversation this composer belongs to — used to publish typing
+  // events. Best-effort: `sendWS` no-ops when the socket is down.
+  conversationId: string;
   testID?: string;
 };
 
-export function Composer({ onSend, pending, testID }: Props) {
+export function Composer({ onSend, pending, conversationId, testID }: Props) {
   const [value, setValue] = React.useState('');
   const fg = useThemeColor('foreground');
   const mutedFg = useThemeColor('muted-foreground');
   const primaryFg = useThemeColor('primary-foreground');
   const border = useThemeColor('border');
+
+  // Typing-indicator throttle (§6.2 / §6.4): publish `typing.start`
+  // once when the user starts, `typing.stop` after 3s of no input
+  // (or on send / blur / unmount).
+  const typingRef = React.useRef(false);
+  const idleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopTyping = React.useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+    if (typingRef.current) {
+      typingRef.current = false;
+      sendWS({ type: 'typing.stop', data: { conversation_id: conversationId } });
+    }
+  }, [conversationId]);
+  const handleChangeText = React.useCallback(
+    (text: string) => {
+      setValue(text);
+      if (text.trim().length === 0) {
+        stopTyping();
+        return;
+      }
+      if (!typingRef.current) {
+        typingRef.current = true;
+        sendWS({ type: 'typing.start', data: { conversation_id: conversationId } });
+      }
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(stopTyping, TYPING_IDLE_MS);
+    },
+    [conversationId, stopTyping]
+  );
+  // conversationId is stable per mounted Composer (the thread screen
+  // is keyed by route param), so this cleanup runs once on unmount.
+  React.useEffect(() => stopTyping, [stopTyping]);
 
   const trimmed = value.trim();
   const canSend = trimmed.length > 0 && !pending;
@@ -51,7 +92,8 @@ export function Composer({ onSend, pending, testID }: Props) {
     if (!canSend) return;
     onSend(trimmed);
     setValue('');
-  }, [canSend, onSend, trimmed]);
+    stopTyping();
+  }, [canSend, onSend, trimmed, stopTyping]);
 
   return (
     <View
@@ -61,7 +103,8 @@ export function Composer({ onSend, pending, testID }: Props) {
       <View className="min-h-10 flex-1 justify-center rounded-2xl bg-background px-3 py-1.5">
         <TextInput
           value={value}
-          onChangeText={setValue}
+          onChangeText={handleChangeText}
+          onBlur={stopTyping}
           placeholder="Message"
           placeholderTextColor={mutedFg}
           multiline
