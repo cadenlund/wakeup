@@ -14,6 +14,7 @@ import type {
 import { setActiveConversation } from '@/lib/banner/active-conversation';
 import { setPresenceIntent } from '@/lib/banner/presence-intent';
 import { useBannerStore } from '@/lib/banner/store';
+import { resetTypingStore, useTypingStore } from '@/lib/typing/store';
 import { applyWSEvent } from '@/lib/ws/dispatcher';
 
 type ConversationList = InternalHandlerHttpConversationListResponse;
@@ -26,10 +27,11 @@ const presenceKey = ['/v1/presence/friends'];
 const friendsKey = ['/v1/friends'];
 const friendRequestsKey = ['/v1/friends/requests'];
 
-// The banner store + active-conversation / presence-intent trackers
-// are module-level singletons; reset them before each test.
+// The banner / typing stores + active-conversation / presence-intent
+// trackers are module-level singletons; reset them before each test.
 beforeEach(() => {
   useBannerStore.setState({ queue: [] });
+  resetTypingStore();
   setActiveConversation(null);
   setPresenceIntent('online');
 });
@@ -157,8 +159,36 @@ describe('applyWSEvent — conversation.*', () => {
   });
 });
 
+describe('applyWSEvent — typing.* (§6.4)', () => {
+  test('typing.start marks the user typing; typing.stop clears them', () => {
+    const qc = newClient();
+    applyWSEvent(qc, { type: 'typing.start', data: { conversation_id: CONV, user_id: 'u9' } });
+    expect(useTypingStore.getState().typing[CONV]).toEqual({ u9: true });
+    applyWSEvent(qc, { type: 'typing.stop', data: { conversation_id: CONV, user_id: 'u9' } });
+    expect(useTypingStore.getState().typing[CONV]).toEqual({});
+  });
+
+  test('the local user’s own typing echo is ignored', () => {
+    const qc = newClient();
+    applyWSEvent(
+      qc,
+      { type: 'typing.start', data: { conversation_id: CONV, user_id: 'me' } },
+      { myUserId: 'me' }
+    );
+    expect(useTypingStore.getState().typing[CONV]).toBeUndefined();
+  });
+
+  test('a payload missing conversation_id or user_id is ignored', () => {
+    const qc = newClient();
+    applyWSEvent(qc, { type: 'typing.start', data: { conversation_id: CONV } });
+    applyWSEvent(qc, { type: 'typing.start', data: { user_id: 'u9' } });
+    applyWSEvent(qc, { type: 'typing.start' });
+    expect(useTypingStore.getState().typing).toEqual({});
+  });
+});
+
 describe('applyWSEvent — deliberate no-ops', () => {
-  test('room.* / typing.* / message.read / notification.new touch nothing', async () => {
+  test('room.* / message.read / notification.new touch nothing', async () => {
     const qc = newClient();
     await seedQuery(qc, messagesKey, { pages: [{ data: [] }], pageParams: [undefined] });
     await seedQuery(qc, conversationsKey, { data: [] });
@@ -168,8 +198,6 @@ describe('applyWSEvent — deliberate no-ops', () => {
       'room.participant_left',
       'room.video_changed',
       'room.ended',
-      'typing.start',
-      'typing.stop',
       'message.read',
       'notification.new',
     ]) {

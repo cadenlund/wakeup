@@ -21,8 +21,10 @@
 //      mark their lists stale the same way.
 //   2. setQueryData patch — `presence.update` patches the friend's
 //      presence row directly (the event carries its full state).
-//   3. side-effect — `room.*` (call store), `typing.*` (typing store)
-//      land in later phases; explicit no-op cases.
+//   3. side-effect — `typing.start` / `typing.stop` poke
+//      `useTypingStore` (after dropping the local user's own echo);
+//      `room.*` will drive the call store in Phase 9 (no-op cases
+//      for now).
 //
 // Banner enqueues (per §4.13): `message.new` (unless you're on that
 // thread or it's muted), `friend.request_received`,
@@ -47,6 +49,7 @@ import type {
 import { getActiveConversation } from '@/lib/banner/active-conversation';
 import { getPresenceIntent } from '@/lib/banner/presence-intent';
 import { enqueueBanner, type BannerEvent } from '@/lib/banner/store';
+import { clearTyping, markTyping } from '@/lib/typing/store';
 import type { WSEnvelope } from '@/lib/ws/client';
 
 type ConversationList = InternalHandlerHttpConversationListResponse;
@@ -250,10 +253,21 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       void qc.invalidateQueries({ queryKey: [CONVERSATIONS_KEY] });
       return;
     }
+    case 'typing.start':
+    case 'typing.stop': {
+      // Payload is `{ conversation_id, user_id }` (server fills
+      // user_id on the S→C path). Drop our own echo, then poke the
+      // typing store; `<TypingIndicator>` renders off it.
+      const d = asRecord(env.data);
+      const convId = d && str(d.conversation_id);
+      const userId = d && str(d.user_id);
+      if (!convId || !userId || userId === ctx.myUserId) return;
+      if (env.type === 'typing.start') markTyping(convId, userId);
+      else clearTyping(convId, userId);
+      return;
+    }
     // --- known events handled by later phases (deliberate no-ops) ---
     case 'message.read': // read receipts — Phase 6.3 rendering wiring
-    case 'typing.start': // typing store — Phase 6.4
-    case 'typing.stop':
     case 'room.started': // call store + RoomBanner — Phase 9 (no banner: CallOverlay owns it)
     case 'room.participant_joined':
     case 'room.participant_left':

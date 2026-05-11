@@ -1,0 +1,46 @@
+# Phase 6.4 — typing indicator.
+#
+# A real "X is typing…" row only appears when a `typing.start` WS
+# event arrives from another user — not reproducible from a single
+# fresh account. Matches the conversation-thread / composer pattern:
+# mount-only smoke proving the new useTypingStore + <TypingIndicator>
+# + composer typing-publish subgraph is wired into the bundle without
+# crashing at load time.
+#
+# What this flow asserts:
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs) Chats tab with the empty state — i.e. the bundle loads
+#      with the typing-indicator dependency tree imported into the
+#      thread route + composer.
+#   2. No typing indicator is showing (testID "typing-indicator"
+#      absent) on a quiet, freshly-registered session.
+#   The populated peer-typing → indicator-renders path lands when the
+#   multi-user fixture work for §5+ flows finalises.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. Mount-without-crash proves the new
+# useTypingStore + <TypingIndicator> + composer typing-publish
+# subgraph doesn't break the bundle.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+- assertNotVisible:
+    id: 'typing-indicator'
+- takeScreenshot: typing-indicator-chats-empty
+# End on a hard assertion — takeScreenshot doesn't check anything on
+# its own, so without this final guard a post-screenshot regression
+# would slip past CI silently.
+- assertVisible: 'No conversations yet'
