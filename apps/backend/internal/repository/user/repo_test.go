@@ -280,6 +280,55 @@ func TestListByPrefix_PrefixMatch(t *testing.T) {
 	}
 }
 
+// TestListByPrefix_ExactMatchRanksFirst regresses the match-rank
+// ordering: an exact username match leads, then username-prefix
+// matches, regardless of which was created more recently. (Before,
+// the only tiebreaker within a tier was created_at DESC, so a newer
+// "user499" outranked the exact "user4".)
+func TestListByPrefix_ExactMatchRanksFirst(t *testing.T) {
+	t.Parallel()
+	repo, _ := newRepo(t)
+	ctx := context.Background()
+
+	// Create the EXACT match FIRST (so it's the oldest) and the
+	// prefix matches after — under the old recency-only ordering
+	// (created_at DESC within a tier) the exact match would have
+	// landed last; match-rank ordering must float it to the top.
+	suffix := makeBaseParams().Username[1:9] // 8 hex chars — unique enough
+	mk := func(name string) {
+		p := makeBaseParams()
+		p.Username = name
+		p.DisplayName = name
+		p.Email = name + "-" + suffix + "@x.test"
+		if _, err := repo.Create(ctx, p); err != nil {
+			t.Fatalf("Create %s: %v", name, err)
+		}
+	}
+	base := "qz" + suffix // unlikely to collide with other test rows
+	mk(base)              // exact match, created first (oldest)
+	mk(base + "99")       // username-prefix match
+	mk(base + "7")        // username-prefix match, created last (newest)
+
+	got, err := repo.ListByPrefix(ctx, base, nil, nil, 10)
+	if err != nil {
+		t.Fatalf("ListByPrefix: %v", err)
+	}
+	if len(got) < 3 {
+		t.Fatalf("expected ≥3 hits, got %d (%+v)", len(got), got)
+	}
+	if got[0].User.Username != base {
+		t.Fatalf("exact match should rank first; got %q (rows: %+v)", got[0].User.Username, got)
+	}
+	if got[0].MatchRank != 0 {
+		t.Errorf("exact match should have MatchRank 0, got %d", got[0].MatchRank)
+	}
+	for _, h := range got[1:3] {
+		if h.MatchRank != 1 {
+			t.Errorf("prefix match %q should have MatchRank 1, got %d", h.User.Username, h.MatchRank)
+		}
+	}
+}
+
 // LIKE-metacharacter input must NOT behave as a wildcard. A user typing
 // "%" into the search box should see only literal-percent matches, not
 // every row.
@@ -385,18 +434,23 @@ func TestListByPrefix_CursorAdvances(t *testing.T) {
 		t.Fatalf("page1: %v", err)
 	}
 	// Use the LAST KEPT row (index limit-1 = 1) as the next cursor.
-	// The cursor must include the tier so the new keyset chain
-	// resumes inside the same rel_tier bucket; here the rows have
-	// no caller context so they all land in tier 2.
-	tier := page1[1].Tier
+	// The cursor must carry the tier AND match_rank so the new keyset
+	// chain resumes inside the same (rel_tier, match_rank) bucket;
+	// here the rows have no caller context so they all land in tier 2,
+	// and the empty query gives them all match_rank 1.
+	tier, mr := page1[1].Tier, page1[1].MatchRank
 	cursor := &pagination.Cursor{
 		Timestamp: page1[1].User.CreatedAt,
 		ID:        page1[1].User.ID,
 		Tier:      &tier,
+		MatchRank: &mr,
 	}
 	page2, err := repo.ListByPrefix(ctx, "", nil, cursor, 2)
 	if err != nil {
 		t.Fatalf("page2: %v", err)
+	}
+	if len(page2) == 0 {
+		t.Fatal("page2 is empty — the keyset chain ended early instead of advancing")
 	}
 	// page2 must not contain rows from page1.
 	for _, p2 := range page2 {
@@ -407,6 +461,45 @@ func TestListByPrefix_CursorAdvances(t *testing.T) {
 		}
 	}
 	_ = created
+}
+
+// TestListByPrefix_CursorWithoutMatchRank guards backward compat for
+// the omitempty match_rank slot: a cursor minted before the rank
+// ordering shipped carries rel_tier but no match_rank. The SQL
+// COALESCEs $8 to -1 so such a cursor resumes from the start of its
+// tier's rank ordering (a few seen rows may repeat) rather than
+// silently ending the page early — which a bare `match_rank > NULL`
+// (always false) would have done.
+func TestListByPrefix_CursorWithoutMatchRank(t *testing.T) {
+	t.Parallel()
+	repo, _ := newRepo(t)
+	ctx := context.Background()
+
+	for i := 0; i < 4; i++ {
+		if _, err := repo.Create(ctx, makeBaseParams()); err != nil {
+			t.Fatalf("Create %d: %v", i, err)
+		}
+	}
+	page1, err := repo.ListByPrefix(ctx, "", nil, nil, 2)
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	tier := page1[1].Tier
+	legacyCursor := &pagination.Cursor{
+		Timestamp: page1[1].User.CreatedAt,
+		ID:        page1[1].User.ID,
+		Tier:      &tier,
+		// MatchRank intentionally nil — a pre-rollout cursor.
+	}
+	page2, err := repo.ListByPrefix(ctx, "", nil, legacyCursor, 10)
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	// Must not drop the rest of the tier: all 4 rows are reachable
+	// (the legacy cursor restarts the tier, so page2 holds all of it).
+	if len(page2) < 4 {
+		t.Fatalf("legacy tier-only cursor lost rows: got %d, want ≥4", len(page2))
+	}
 }
 
 func TestListByIDs_ReturnsRequestedIncludingSoftDeleted(t *testing.T) {

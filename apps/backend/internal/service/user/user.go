@@ -147,8 +147,13 @@ func (s *Service) Search(ctx context.Context, p SearchParams) (SearchResult, err
 		return SearchResult{}, apierror.Internal("count users").WithCause(err)
 	}
 	data, next, hasMore := pagination.Page(overFetched, p.Limit, func(h repo.SearchHit) pagination.Cursor {
-		tier := h.Tier
-		return pagination.Cursor{Timestamp: h.User.CreatedAt, ID: h.User.ID, Tier: &tier}
+		tier, matchRank := h.Tier, h.MatchRank
+		return pagination.Cursor{
+			Timestamp: h.User.CreatedAt,
+			ID:        h.User.ID,
+			Tier:      &tier,
+			MatchRank: &matchRank,
+		}
 	})
 	users := make([]domain.User, 0, len(data))
 	for _, h := range data {

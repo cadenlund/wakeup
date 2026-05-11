@@ -133,19 +133,34 @@ WHERE deleted_at IS NULL
 // behavior the conversation search uses for group member names so
 // the two sections feel consistent.
 //
-// rel_tier ranks the result set "friends → pending → everyone else"
-// so the first page of a search always starts with people the
-// caller has a relationship with, regardless of trigram score.
-// The LEFT JOIN attaches at most one friendships row per user (the
-// pair-unique index guarantees that), and the CASE maps it into a
-// {0,1,2} tier. When $5 is NULL (admin path) the JOIN matches
-// nothing and every user lands in tier 2, which collapses the
-// ORDER BY into the legacy (created_at DESC, id DESC) shape.
+// Two rank columns drive the ordering, ahead of recency:
+//   - rel_tier: friends (0) → pending (1) → strangers (2). The LEFT
+//     JOIN attaches at most one friendships row per user (the
+//     pair-unique index guarantees that). When $5 is NULL (admin
+//     path) the JOIN matches nothing and every user lands in tier 2.
+//   - match_rank: how closely the row matches the query — exact
+//     username (0) → username starts-with (1) → exact display_name
+//     (2) → display_name starts-with (3) → substring-only (4). So a
+//     search for "user4" surfaces the exact "user4" above "user499".
+//     $1 is the LIKE-escaped query (for the prefix checks); $7 is
+//     the raw query (for the exact-equality checks — usernames can
+//     contain `_`, which $1 would have escaped).
 //
-// Keyset pagination with (tier ASC, created_at DESC, id DESC):
-// "the row after the cursor" is one of three states, expressed as
-// the OR-block below. $6 is the cursor tier — NULL on the first
-// page disables the keyset filter entirely.
+// Within a (rel_tier, match_rank) bucket the tiebreak is
+// created_at ASC, id ASC — oldest accounts first. For sequentially
+// named accounts that reads as "closest first" ("user4" → "user40"
+// → … → "user499" rather than the newest "user4*" jumping ahead);
+// for everything else "established account first" is a sane default.
+//
+// Keyset pagination with (rel_tier ASC, match_rank ASC, created_at
+// ASC, id ASC): "the row after the cursor" is the OR-block below.
+// $6 is the cursor's rel_tier (NULL on the first page → no keyset
+// filter); $8 is the cursor's match_rank. $8 is COALESCEd to -1 so
+// a pre-rollout cursor that carries rel_tier but no match_rank (the
+// field is omitempty) resumes from the very start of that tier's
+// rank ordering — a few already-seen rows may repeat, but none are
+// dropped, which a bare `match_rank > NULL` (always NULL → false)
+// would have silently done by ending the page early.
 const listByPrefixSQL = `-- name: ListByPrefix :many
 WITH ranked AS (
   SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.avatar_url,
@@ -156,7 +171,15 @@ WITH ranked AS (
            WHEN f.status = 'accepted' THEN 0
            WHEN f.status = 'pending' THEN 1
            ELSE 2
-         END AS rel_tier
+         END AS rel_tier,
+         CASE
+           WHEN $7::text = '' THEN 1
+           WHEN lower(u.username) = lower($7::text) THEN 0
+           WHEN lower(u.username) LIKE lower($1::text) || '%' ESCAPE '\' THEN 1
+           WHEN lower(u.display_name) = lower($7::text) THEN 2
+           WHEN lower(u.display_name) LIKE lower($1::text) || '%' ESCAPE '\' THEN 3
+           ELSE 4
+         END AS match_rank
   FROM users u
   LEFT JOIN friendships f
     ON (
@@ -182,13 +205,14 @@ WITH ranked AS (
 )
 SELECT id, username, display_name, email, password_hash, avatar_url, bio,
        status_emoji, color_scheme, role, onboarded_at,
-       created_at, updated_at, deleted_at, rel_tier
+       created_at, updated_at, deleted_at, rel_tier, match_rank
 FROM ranked
 WHERE $6::int IS NULL
    OR rel_tier > $6::int
-   OR (rel_tier = $6::int AND created_at < $2::timestamptz)
-   OR (rel_tier = $6::int AND created_at = $2::timestamptz AND id < $3::uuid)
-ORDER BY rel_tier ASC, created_at DESC, id DESC
+   OR (rel_tier = $6::int AND match_rank > COALESCE($8::int, -1))
+   OR (rel_tier = $6::int AND match_rank = COALESCE($8::int, -1) AND created_at > $2::timestamptz)
+   OR (rel_tier = $6::int AND match_rank = COALESCE($8::int, -1) AND created_at = $2::timestamptz AND id > $3::uuid)
+ORDER BY rel_tier ASC, match_rank ASC, created_at ASC, id ASC
 LIMIT $4`
 
 // escapeLikePrefix backslash-escapes the LIKE metacharacters \, %, and _
@@ -418,21 +442,26 @@ func (q *Queries) ClearAvatar(ctx context.Context, id uuid.UUID) (string, error)
 
 // SearchHit pairs a user with the caller's relationship tier
 // (0 = accepted friend, 1 = pending in either direction, 2 = no
-// relationship / admin path). The service uses Tier to build the
-// keyset cursor and the mobile client gets friends-first order
-// without doing any client-side sort.
+// relationship / admin path) and the row's match rank against the
+// query (0 = exact username … 4 = substring-only; see
+// listByPrefixSQL). The service uses both to build the keyset
+// cursor; the client gets friends-first, closest-match-first order
+// without any client-side sort.
 type SearchHit struct {
-	User domain.User
-	Tier int
+	User      domain.User
+	Tier      int
+	MatchRank int
 }
 
 // ListByPrefix returns up to limit search hits whose username or
 // display_name contains the query (case-insensitive substring).
-// Results are ordered "friends → pending → everyone else" then by
-// (created_at DESC, id DESC) within each tier, so the first page
-// always surfaces the caller's people first regardless of trigram
-// score. Pass cursor=nil for the first page; subsequent pages
-// supply a cursor whose Tier field comes from the previous page's
+// Results are ordered "friends → pending → everyone else", then by
+// match rank (exact username → username prefix → display-name
+// matches → substring-only), then by (created_at ASC, id ASC)
+// within each (tier, rank) bucket — so an exact "user4" leads,
+// followed by "user40", "user41", … rather than "user499". Pass
+// cursor=nil for the first page; subsequent pages supply a cursor
+// whose Tier and MatchRank fields come from the previous page's
 // last row.
 //
 // callerID, when non-nil, hides users on either side of a 'blocked'
@@ -453,16 +482,21 @@ func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uui
 	var ts *time.Time
 	var id *uuid.UUID
 	var tier *int
+	var matchRank *int
 	if cursor != nil {
 		ts = &cursor.Timestamp
 		id = &cursor.ID
 		tier = cursor.Tier
+		matchRank = cursor.MatchRank
 	}
 
-	// Escape LIKE metachars so a search for "100%" matches the literal
-	// string "100%" instead of becoming a wildcard. The SQL has an explicit
-	// `ESCAPE '\'` clause to honor the escapes.
-	rows, err := q.db.Query(ctx, listByPrefixSQL, escapeLikePrefix(prefix), ts, id, overFetch, callerID, tier)
+	// $1 = LIKE-escaped query (prefix/substring checks); $7 = raw query
+	// (exact-equality checks — usernames can contain `_`, which the
+	// escape would have turned into `\_`). The SQL's `ESCAPE '\'`
+	// clauses honor the escapes on $1.
+	rows, err := q.db.Query(
+		ctx, listByPrefixSQL, escapeLikePrefix(prefix), ts, id, overFetch, callerID, tier, prefix, matchRank,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("user: list by prefix: %w", err)
 	}
@@ -471,7 +505,7 @@ func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uui
 	hits := make([]SearchHit, 0, overFetch)
 	for rows.Next() {
 		var u domain.User
-		var relTier int
+		var relTier, matchRankCol int
 		if scanErr := rows.Scan(
 			&u.ID,
 			&u.Username,
@@ -488,10 +522,11 @@ func (q *Queries) ListByPrefix(ctx context.Context, prefix string, callerID *uui
 			&u.UpdatedAt,
 			&u.DeletedAt,
 			&relTier,
+			&matchRankCol,
 		); scanErr != nil {
 			return nil, fmt.Errorf("user: list by prefix scan: %w", scanErr)
 		}
-		hits = append(hits, SearchHit{User: u, Tier: relTier})
+		hits = append(hits, SearchHit{User: u, Tier: relTier, MatchRank: matchRankCol})
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
 		return nil, fmt.Errorf("user: list by prefix rows: %w", rowsErr)
