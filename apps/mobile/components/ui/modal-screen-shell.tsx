@@ -94,6 +94,15 @@ export function ModalScreenShell({
       }}
       className="items-center justify-center bg-black/50 p-4">
       <Pressable
+        // This Pressable exists ONLY to swallow taps so a click on
+        // the card surface doesn't bubble up to the backdrop and
+        // dismiss the modal. It has no semantic action. accessibilityRole
+        // 'none' tells screen readers to skip it; we still give it
+        // an accessibilityLabel so any tooling (Maestro tap-by-label,
+        // testing-library) that walks the tree by label finds a
+        // stable identifier per the project's a11y baseline.
+        accessibilityRole="none"
+        accessibilityLabel="Modal content"
         onPress={() => {}}
         testID={testID}
         style={{

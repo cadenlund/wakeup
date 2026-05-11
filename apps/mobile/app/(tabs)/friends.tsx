@@ -580,7 +580,11 @@ export default function FriendsScreen() {
         value={rawQuery}
         onChange={setRawQuery}
         rightAddon={
-          Platform.OS === 'web' ? (
+          // Hide the refresh button while searching — `onRefresh` only
+          // refetches friends/requests/presence, not the live `/v1/users`
+          // search query, so leaving the button visible during search
+          // would feel like a no-op tap.
+          Platform.OS === 'web' && !isSearchMode ? (
             <WebRefreshButton onPress={onRefresh} refreshing={refreshing} />
           ) : undefined
         }
