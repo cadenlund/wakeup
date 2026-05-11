@@ -41,7 +41,7 @@ import {
   type MessageActionTarget,
 } from '@/components/message-action-popover';
 import { AGGREGATE_GAP_MS, TimeDivider } from '@/components/time-divider';
-import { List } from '@/components/ui/list';
+import { List, type ListRef } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
 import { flatten, useInfiniteMessages } from '@/lib/api/use-infinite';
 import type {
@@ -51,11 +51,23 @@ import type {
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { useTypingUserIds } from '@/lib/typing/store';
 import { useDeleteMessage } from '@/lib/use-delete-message';
 import { useMarkReadOnFocus } from '@/lib/use-mark-read';
 import type { LocalSendStatus } from '@/lib/use-send-message';
 
 type Message = InternalHandlerHttpMessageResponse;
+
+// The FlashList renders a flat list of dividers + message bubbles.
+type Row =
+  | { kind: 'divider'; key: string; iso: string }
+  | {
+      kind: 'message';
+      key: string;
+      message: Message;
+      sameAsOlder: boolean;
+      sameAsNewer: boolean;
+    };
 
 type Props = {
   conversationId: string;
@@ -94,6 +106,17 @@ export function MessageList({
   // Long-press action popover: which bubble was pressed (null = closed).
   const [actionTarget, setActionTarget] = React.useState<MessageActionTarget | null>(null);
   const { deleteMessage } = useDeleteMessage(conversationId);
+  // The typing indicator (sibling below this list) takes vertical
+  // space when it appears, shrinking this list's viewport — so we
+  // re-pin the bottom when typing starts, otherwise the last message
+  // gets clipped under the typing bubble.
+  const someoneTyping = useTypingUserIds(conversationId).length > 0;
+  const listRef = React.useRef<ListRef<Row>>(null);
+  React.useEffect(() => {
+    if (!someoneTyping) return;
+    const id = requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    return () => cancelAnimationFrame(id);
+  }, [someoneTyping]);
 
   const messagesQ = useInfiniteMessages(conversationId, undefined, {
     query: { staleTime: 15_000 },
@@ -268,17 +291,9 @@ export function MessageList({
     );
   }
 
-  type Row =
-    | { kind: 'divider'; key: string; iso: string }
-    | {
-        kind: 'message';
-        key: string;
-        message: Message;
-        sameAsOlder: boolean;
-        sameAsNewer: boolean;
-      };
   const list = (
     <List<Row>
+      ref={listRef}
       data={rows}
       // Stable per-row keys. Dividers carry a synthetic
       // `div-<id>` key; messages reuse the server-issued id.

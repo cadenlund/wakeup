@@ -1,17 +1,25 @@
 // Phase 6.4 — typing indicator for the conversation thread.
 //
 // Renders the WS-fed typing state (`useTypingUserIds`) as an
-// incoming message bubble: the exact "theirs" chrome — `bg-card`,
+// incoming message bubble: the "theirs" chrome — `bg-card`,
 // `rounded-2xl rounded-bl-sm`, `px-3 py-2`, the group avatar gutter
-// — sized to a single-line bubble (the dots sit in a 24px row). Sits
-// below the message list, above the composer; the list is `flex-1`
-// so it shrinks to make room when the bubble appears. Inside: a
-// staggered three-dot pulse. In a DM the dots stand alone (you know
-// the peer); in a group they get a "{name}" / "{a} and {b}" /
-// "Several people" label above, like a sender label. Renders nothing
-// when quiet.
+// — sized to a single-line bubble (the dots sit in a 24px row).
+//
+// Enter / exit are a height-collapse animation: the wrapper's
+// `maxHeight` (and opacity) animates 0 ↔ full over ~200ms, driven on
+// the JS thread so the message list above grows / shrinks in
+// lock-step every frame — no layout snap, no transient overlap with
+// the last message, and a smooth fade-out when typing stops (RN's
+// LayoutAnimation `delete` is unreliable on the new arch). The
+// bubble stays mounted through the exit, still showing who *was*
+// typing. Renders nothing when fully collapsed.
+//
+// In a DM the dots stand alone (you know the peer); in a group they
+// get a "{name}" / "{a} and {b}" / "Several people" label above,
+// like a sender label, plus the (first) typist's avatar in the
+// gutter.
 import * as React from 'react';
-import { AccessibilityInfo, Animated, LayoutAnimation, View } from 'react-native';
+import { AccessibilityInfo, Animated, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
@@ -25,14 +33,11 @@ const DOT_MIN_OPACITY = 0.3;
 const DOT_DURATION_MS = 360;
 const DOT_STAGGER_MS = 180;
 
-// Eased layout change when the bubble appears / disappears so the
-// message list above smoothly makes room instead of snapping.
-const TYPING_LAYOUT_ANIM: Parameters<typeof LayoutAnimation.configureNext>[0] = {
-  duration: 220,
-  create: { type: 'easeInEaseOut', property: 'opacity' },
-  update: { type: 'easeInEaseOut' },
-  delete: { type: 'easeInEaseOut', property: 'opacity' },
-};
+const ENTER_EXIT_MS = 200;
+// Generous clamp so the bubble shows at its natural height (DM ~48px,
+// group ~70px with the name label) — `maxHeight` is a cap, not a
+// fixed height — while still animating cleanly from 0.
+const MAX_HEIGHT = 100;
 
 function userFor(members: Member[] | undefined, userId: string) {
   return members?.find((m) => m.user?.id === userId)?.user;
@@ -127,52 +132,79 @@ export function TypingIndicator({
 }): React.ReactElement | null {
   const ids = useTypingUserIds(conversationId);
   const hasTyping = ids.length > 0;
-  // Animate the surrounding layout (the list above shrinking /
-  // growing) when typing starts or stops, so the thread doesn't jump.
-  // Done during render — `configureNext` must run before React
-  // commits the add/remove of the bubble below.
-  const prevHasTyping = React.useRef(hasTyping);
-  if (prevHasTyping.current !== hasTyping) {
-    LayoutAnimation.configureNext(TYPING_LAYOUT_ANIM);
-    prevHasTyping.current = hasTyping;
-  }
-  if (!hasTyping) return null;
 
-  const label = isGroup ? groupLabel(members, ids) : undefined;
-  // In a group, show the typing user's avatar in the gutter (the
-  // first one, when several are typing) — same slot/size as a
-  // "theirs" message bubble's avatar.
-  const headUser = isGroup ? userFor(members, ids[0]) : undefined;
+  // Keep the last non-empty typing set so the bubble can finish its
+  // exit animation still showing who *was* typing.
+  const shownIdsRef = React.useRef<string[]>(ids);
+  if (hasTyping) shownIdsRef.current = ids;
+
+  // `rendered` lags `hasTyping` — stays true through the exit anim.
+  const [rendered, setRendered] = React.useState(hasTyping);
+  const expand = React.useRef(new Animated.Value(hasTyping ? 1 : 0)).current;
+  React.useEffect(() => {
+    if (hasTyping) {
+      setRendered(true);
+      Animated.timing(expand, {
+        toValue: 1,
+        duration: ENTER_EXIT_MS,
+        useNativeDriver: false,
+      }).start();
+      return;
+    }
+    Animated.timing(expand, {
+      toValue: 0,
+      duration: ENTER_EXIT_MS,
+      useNativeDriver: false,
+    }).start(({ finished }) => {
+      if (finished) setRendered(false);
+    });
+  }, [hasTyping, expand]);
+
+  if (!rendered) return null;
+
+  const shownIds = hasTyping ? ids : shownIdsRef.current;
+  const label = isGroup ? groupLabel(members, shownIds) : undefined;
+  const headUser = isGroup ? userFor(members, shownIds[0]) : undefined;
 
   return (
-    // Mirrors <MessageBubble>'s "theirs" row: avatar gutter in groups
-    // so the bubble lines up with incoming messages; left-aligned.
-    <View
-      className="flex-row items-end gap-2 px-3 py-1"
-      accessibilityLiveRegion="polite"
-      accessibilityLabel={label ? `${label} is typing` : 'Typing'}
-      testID="typing-indicator">
-      {isGroup ? (
-        <View className="w-8">
-          <Avatar source={headUser?.avatar_url} fallbackName={nameFor(members, ids[0])} size={32} />
-        </View>
-      ) : null}
-      <View className="max-w-[80%] items-start">
-        {label ? (
-          <Text variant="muted" className="mb-0.5 px-1 text-xs">
-            {label}
-          </Text>
+    <Animated.View
+      style={{
+        overflow: 'hidden',
+        opacity: expand,
+        maxHeight: expand.interpolate({ inputRange: [0, 1], outputRange: [0, MAX_HEIGHT] }),
+      }}>
+      {/* Mirrors <MessageBubble>'s "theirs" row: avatar gutter in
+          groups so the bubble lines up with incoming messages. */}
+      <View
+        className="flex-row items-end gap-2 px-3 py-1"
+        accessibilityLiveRegion="polite"
+        accessibilityLabel={label ? `${label} is typing` : 'Typing'}
+        testID="typing-indicator">
+        {isGroup ? (
+          <View className="w-8">
+            <Avatar
+              source={headUser?.avatar_url}
+              fallbackName={nameFor(members, shownIds[0])}
+              size={32}
+            />
+          </View>
         ) : null}
-        {/* Same chrome AND footprint as a one-line "theirs" bubble:
-            `bg-card`, `px-3 py-2`, and the dots sit in a 24px row —
-            text-base's line height — so the bubble is exactly the
-            size of a single-line incoming message. */}
-        <View className="rounded-2xl rounded-bl-sm bg-card px-3 py-2">
-          <View className="h-6 justify-center">
-            <TypingDots />
+        <View className="max-w-[80%] items-start">
+          {label ? (
+            <Text variant="muted" className="mb-0.5 px-1 text-xs">
+              {label}
+            </Text>
+          ) : null}
+          {/* Same chrome AND footprint as a one-line "theirs" bubble:
+              `bg-card`, `px-3 py-2`, dots in a 24px row (text-base's
+              line height) — so it's the size of a single-line msg. */}
+          <View className="rounded-2xl rounded-bl-sm bg-card px-3 py-2">
+            <View className="h-6 justify-center">
+              <TypingDots />
+            </View>
           </View>
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
