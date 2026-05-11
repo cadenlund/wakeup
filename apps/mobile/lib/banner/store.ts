@@ -1,16 +1,19 @@
-// Phase 7.5 — in-app event-banner queue (WAKEUPEXPO §4.13).
+// Phase 7.5 — in-app event hand-off queue (WAKEUPEXPO §4.13).
 //
 // A tiny FIFO of "heads-up" events the dispatcher decides to surface
 // while the app is foregrounded: a message in a conversation you're
 // not looking at, a friend request, getting added to a group. The
-// `<EventBanner>` component renders the HEAD of the queue as a card
-// that drops in from the top; when it's dismissed (tap-to-route,
-// swipe-up, or the 4s timer) `dismissHead()` advances to the next.
+// `<EventToastBridge>` component drains the HEAD of the queue into a
+// `toast.event(...)` pill (the §4.13 banner is folded into the toast
+// surface) and immediately drops it; the toast lib owns the display.
 //
-// The dispatcher (`lib/ws/dispatcher.ts`) owns the enqueue/skip
-// decision — this store never filters. Dedup is by `id` only: an
-// event whose id is already queued is dropped (the dispatcher mints
-// stable ids so a duplicate WS delivery doesn't double-banner).
+// This store exists purely as the RN-free seam: the dispatcher is
+// kept off `react-native` so its `bun test` suite runs, so it can't
+// touch `lib/toast` directly — it enqueues here and the bridge does
+// the rest. The dispatcher owns the enqueue/skip decision; this
+// store never filters. Dedup is by `id` only: an event whose id is
+// already queued is dropped (the dispatcher mints stable ids so a
+// duplicate WS delivery doesn't double-notify).
 import { create } from 'zustand';
 
 export type BannerEvent = {
