@@ -1199,6 +1199,11 @@ function SectionHeader({
   onToggle: () => void;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
+  // Resolve the card colour to a literal hex/rgb so the sticky
+  // overlay paints with a fully opaque fill — Tailwind classes
+  // alone weren't sticking through FlashList's sticky wrapper
+  // (the overlay rendered translucent, showing rows underneath).
+  const cardBg = useThemeColor('card');
   // Caret reads "current state": ChevronRight when closed (rotated
   // 90°), ChevronDown when open. Same convention as macOS Finder
   // disclosure triangles.
@@ -1214,11 +1219,8 @@ function SectionHeader({
       accessibilityLabel={`${title}, ${count} ${count === 1 ? 'item' : 'items'}`}
       accessibilityState={{ expanded: !collapsed }}
       testID={`friend-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
-      // Opaque background — sticky-header bleed-through let the
-      // user see avatar rows underneath the chevron strip while
-      // scrolling. `bg-card` matches the chrome around the modal
-      // and keeps the slight elevation read.
-      className="flex-row items-center gap-2 border-b border-border bg-card px-4 py-2 active:bg-muted">
+      style={{ backgroundColor: cardBg }}
+      className="flex-row items-center gap-2 border-b border-border px-4 py-2 active:bg-muted">
       <Caret size={14} color={mutedFg} />
       <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}

@@ -1278,6 +1278,13 @@ function SectionHeader({
   onToggle: () => void;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
+  // Resolve the card colour to a literal hex/rgb so the sticky
+  // overlay paints with a fully opaque fill — Tailwind's bg-card
+  // class wasn't reliably opaque through FlashList's sticky
+  // wrapper, which left avatar rows visible underneath the
+  // chevron. Focus state still gets a primary tint via the
+  // class, layered on top of the opaque card fill.
+  const cardBg = useThemeColor('card');
   // Same chevron convention the friends tab uses for its
   // disclosure headers — ChevronRight when closed, ChevronDown
   // when open. Keeps the two collapse surfaces visually identical.
@@ -1289,12 +1296,8 @@ function SectionHeader({
       accessibilityLabel={`${title}, ${count} ${count === 1 ? 'item' : 'items'}`}
       accessibilityState={{ expanded: !collapsed }}
       testID={`search-section-${title.toLowerCase().replace(/\s+/g, '-')}`}
-      // Opaque background — sticky-header bleed-through let the
-      // user see rows underneath the chevron strip while
-      // scrolling. `bg-card` matches the modal chrome and keeps
-      // the slight elevation read. Focus state tints with the
-      // same primary/10 the row-focus ring uses.
-      className={`flex-row items-center gap-2 border-b border-border px-4 py-2 active:bg-muted ${isFocused ? 'bg-primary/10' : 'bg-card'}`}>
+      style={{ backgroundColor: cardBg }}
+      className={`flex-row items-center gap-2 border-b border-border px-4 py-2 active:bg-muted ${isFocused ? 'bg-primary/10' : ''}`}>
       <Caret size={14} color={mutedFg} />
       <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}
