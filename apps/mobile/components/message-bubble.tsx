@@ -11,7 +11,7 @@
 // coherent (gaps would make a reply chain unreadable).
 import { MoreHorizontal } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
+import { ActivityIndicator, LayoutAnimation, Platform, Pressable, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
@@ -22,6 +22,18 @@ import type { LocalSendStatus } from '@/lib/use-send-message';
 import { cn } from '@/lib/utils';
 
 const isWeb = Platform.OS === 'web';
+
+// A send that lands faster than this never shows the spinner — it
+// just sends. Only a noticeably-slow send gets the in-flight marker.
+const SPINNER_DELAY_MS = 350;
+// Eased layout change for the bubble sliding over / spinner fading
+// in & out.
+const SPINNER_LAYOUT_ANIM: Parameters<typeof LayoutAnimation.configureNext>[0] = {
+  duration: 200,
+  create: { type: 'easeInEaseOut', property: 'opacity' },
+  update: { type: 'easeInEaseOut' },
+  delete: { type: 'easeInEaseOut', property: 'opacity' },
+};
 
 type Props = {
   body: string | null | undefined;
@@ -106,6 +118,29 @@ export function MessageBubble({
   // rect for the action popover's anchor.
   const bubbleRef = React.useRef<View>(null);
   const BubbleColumn = onLongPress ? Pressable : View;
+
+  // Sending state: show a small spinner to the RIGHT of the bubble —
+  // but only once the send has been in flight ≥SPINNER_DELAY_MS, so a
+  // fast send never flashes it. Toggling it animates the layout so
+  // the bubble slides over to make room (and slides back when the
+  // delivered row replaces this placeholder, or it fails).
+  const [showSpinner, setShowSpinner] = React.useState(false);
+  const showSpinnerRef = React.useRef(false);
+  const setSpinner = React.useCallback((next: boolean) => {
+    if (showSpinnerRef.current === next) return;
+    showSpinnerRef.current = next;
+    LayoutAnimation.configureNext(SPINNER_LAYOUT_ANIM);
+    setShowSpinner(next);
+  }, []);
+  React.useEffect(() => {
+    if (sendStatus === 'sending') {
+      const t = setTimeout(() => setSpinner(true), SPINNER_DELAY_MS);
+      return () => clearTimeout(t);
+    }
+    setSpinner(false);
+    return undefined;
+  }, [sendStatus, setSpinner]);
+
   const handleLongPress = React.useCallback(() => {
     if (!onLongPress) return;
     haptics.tap();
@@ -241,15 +276,6 @@ export function MessageBubble({
           </View>
         ) : null}
 
-        {mine && sendStatus === 'sending' ? (
-          // A small spinner under the bubble while the send is in
-          // flight — no caption (the spinner says it). Vanishes when
-          // the delivered server row replaces this placeholder.
-          <View className="mt-1 px-1" accessibilityLabel="Sending">
-            <ActivityIndicator size="small" color={mutedFg} />
-          </View>
-        ) : null}
-
         {mine && sendStatus === 'failed' ? (
           onRetrySend ? (
             <Pressable
@@ -274,6 +300,14 @@ export function MessageBubble({
           )
         ) : null}
       </BubbleColumn>
+
+      {/* In-flight spinner sits to the right of the bubble (the row
+          is `justify-end` for "mine", so the bubble slides left to
+          make room — animated via LayoutAnimation). Only "mine"
+          rows ever have a sending state. */}
+      {mine && showSpinner ? (
+        <ActivityIndicator size="small" color={mutedFg} accessibilityLabel="Sending" />
+      ) : null}
     </View>
   );
 }
