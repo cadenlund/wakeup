@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 	"unicode/utf8"
 
@@ -29,9 +30,11 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
+	"github.com/cadenlund/wakeup/apps/backend/internal/wsproto"
 )
 
 // MinGroupMembers is the §4.6 minimum (2 — including the creator). 1-person
@@ -48,14 +51,19 @@ type Service struct {
 	convs   *convrepo.Queries
 	users   *userrepo.Queries
 	friends *friendrepo.Queries
+	broker  pubsub.Broker // optional — nil ⇒ read-receipt fan-out is a no-op
+	logger  *slog.Logger
 }
 
-// Config builds the service.
+// Config builds the service. Broker may be nil (tests that don't care
+// about WS fan-out); MarkRead then skips the `message.read` publish.
 type Config struct {
 	Pool    *pgxpool.Pool
 	Convs   *convrepo.Queries
 	Users   *userrepo.Queries
 	Friends *friendrepo.Queries
+	Broker  pubsub.Broker
+	Logger  *slog.Logger
 }
 
 // New constructs the service.
@@ -72,7 +80,18 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Friends == nil {
 		return nil, errors.New("conversation: Config.Friends is required")
 	}
-	return &Service{pool: cfg.Pool, convs: cfg.Convs, users: cfg.Users, friends: cfg.Friends}, nil
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Service{
+		pool:    cfg.Pool,
+		convs:   cfg.Convs,
+		users:   cfg.Users,
+		friends: cfg.Friends,
+		broker:  cfg.Broker,
+		logger:  logger,
+	}, nil
 }
 
 // CreateParams is the input to Create. Type=direct: MemberIDs MUST hold
@@ -666,6 +685,12 @@ func (s *Service) RemoveMember(ctx context.Context, actor, convID, target uuid.U
 // must be a member of the conversation. Doesn't validate that the
 // message belongs to the conversation — that's the message service's
 // job at write time and would require a join here.
+//
+// On success it fans out a `message.read` event on the conversation's
+// `conv:<id>:messages` channel so every member's open thread can
+// advance that member's read pointer live (the §6.3 receipt captions
+// recompute off it). The fan-out is best-effort: a broker outage
+// can't undo the already-committed pointer write.
 func (s *Service) MarkRead(ctx context.Context, actor, convID, messageID uuid.UUID) error {
 	if _, err := s.convs.GetMember(ctx, convID, actor); err != nil {
 		if errors.Is(err, convrepo.ErrNotFound) {
@@ -676,7 +701,36 @@ func (s *Service) MarkRead(ctx context.Context, actor, convID, messageID uuid.UU
 	if err := s.convs.UpdateLastReadMessage(ctx, convID, actor, messageID); err != nil {
 		return apierror.Internal("update last read").WithCause(err)
 	}
+	s.publishReadEvent(ctx, convID, actor, messageID)
 	return nil
+}
+
+// publishReadEvent fires-and-forgets a `message.read` envelope on the
+// `conv:<id>:messages` channel. No-op when the broker isn't wired.
+// Wire shape mirrors §7.1 so the WS bridge fans the bytes straight
+// through; `last_read_message_id` matches the field name the
+// conversation-member DTO already uses, so the client patch is a
+// direct field copy.
+func (s *Service) publishReadEvent(ctx context.Context, convID, userID, messageID uuid.UUID) {
+	if s.broker == nil {
+		return
+	}
+	payload, err := wsproto.Encode(wsproto.EventMessageRead, map[string]any{
+		"conversation_id":      convID,
+		"user_id":              userID,
+		"last_read_message_id": messageID,
+	})
+	if err != nil {
+		s.logger.Warn("conversation: encode read event", slog.String("error", err.Error()))
+		return
+	}
+	channel := fmt.Sprintf("conv:%s:messages", convID)
+	if err := s.broker.Publish(ctx, channel, payload); err != nil {
+		s.logger.Warn("conversation: publish read event",
+			slog.String("channel", channel),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // validateGroupName checks the §4.6 rules: name must be 1-MaxNameLen
