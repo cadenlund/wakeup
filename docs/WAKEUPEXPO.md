@@ -568,6 +568,79 @@ All three of the above are per-member (not per-conversation) — muting a group 
 
 **Do not** persist any of these client-side in AsyncStorage. They live in the server response; AsyncStorage is for theme / biometric / draft text only.
 
+### 4.14 In-app activity feed
+
+A persistent companion to the §4.13 `<EventBanner>`. The banner is
+transient (4s, then gone forever); the feed is the catch-up surface
+for users who missed the banner or want to see what happened while
+they were away. Backend writes a `notifications` row per qualifying
+event; the client renders the list and marks rows read on tap or
+"mark all read."
+
+**Bell + badge.** A small bell icon sits in the chats-tab + friends-tab
+header (next to the §4.13 web refresh button on web; same slot on
+native). A red dot sits over the bell when `unread_count > 0`. Tapping
+the bell pushes `/notifications`.
+
+**Unread count source.** `GET /v1/notifications/unread_count` is the
+cheap read used at app open and on every focus event. The WS hub
+also fires `notification.new` so the badge updates live without a
+poll. The mobile dispatcher reads the WS event and calls
+`setQueryData(['notifications','unread_count'])`.
+
+**Kinds in v1 — intentionally narrow:**
+
+| Kind | Copy | Tap routes to |
+|---|---|---|
+| `friend_request_received` | "{actor} sent you a friend request" | `(tabs)/friends` |
+| `friend_request_accepted` | "{actor} accepted your friend request" | `conversation/<auto-DM>` |
+| `conversation_member_added` (caller is the added member) | "{actor} added you to {group_name}" | `conversation/[id]` |
+
+Explicitly NOT included: `message.new` (already surfaced via the chats
+tab unread dot + the §4.13 banner; logging every message would spam
+the feed) and `room.started` (`<CallOverlay>` already takes the
+screen). Same shortlist the banner enqueues — banner is "right now,"
+feed is "since you last looked."
+
+**Mark-as-read semantics — simple but efficient.** Two write paths:
+
+- `POST /v1/notifications/{id}/read` — fires when the user taps a
+  row. Does NOT auto-mark on render (too easy to mark something
+  read that the user only saw out of the corner of their eye while
+  scrolling).
+- `POST /v1/notifications/read-all` — fires when the user taps
+  "Mark all read" in the screen header. One round-trip clears the
+  badge.
+
+Marking the row read locally is optimistic; `unread_count` decrements
+in cache immediately and reconciles against the server response.
+
+**Screen: `/notifications`.** Modal-on-web / pushed-route on native,
+same `<ModalScreenShell>` pattern the search modal and members modal
+use. Header has X / title / "Mark all read" button (disabled when
+`unread_count === 0`). FlashList of `<NotificationRow>` items —
+avatar (actor) + body + relative time — with infinite scroll via
+`onEndReached` + cursor pagination. Empty state: a soft "no
+notifications yet" placeholder.
+
+**Component: `<NotificationRow>`.** Visual identical to a friends
+row: avatar, two-line identity (actor handle + copy), trailing
+relative-time text. Unread rows render with a small dot indicator
+on the leading edge. Tapping the row POSTs `/read`, routes to the
+table's `tap routes to` column, and dismisses the modal.
+
+**Producer rule.** The backend is the single source of truth for
+which events produce a notification row (see `WAKEUP.md` §10.3 In-app
+notification feed). The mobile client never inserts; it just reads
+and marks read. This keeps the producer logic and the kind catalog
+in one place.
+
+**No auto-cleanup.** Notifications never delete on a TTL — the user
+controls retention via "mark all read." A future polish phase can
+add a hard 30-day cap if the table grows; v1 trusts the bounded
+event volume + the existing `friend_requests` / `conversation_member_added`
+write frequency.
+
 ---
 
 ## 5. Screens & components
@@ -587,6 +660,7 @@ Every screen has: route path, primary endpoints it consumes, primary WS events i
 | `(tabs)/friends` | accepted friends + incoming/outgoing requests. Pull-to-refresh refetches all three queries | `GET /v1/friends`, `GET /v1/friends/requests`, `GET /v1/presence/friends` | `friend.*`, `presence.update` |
 | `(tabs)/profile` | "me" card + entry to settings | `GET /v1/auth/me` | `presence.update` (self) |
 | `search` | global search modal: users + conversations + messages, debounced 200ms. Triggered by a header search icon on the conversations tab. | `GET /v1/search?q=…&types=users,conversations,messages` (shipped in PR #107; `types` is optional, omit for all three) | — |
+| `notifications` | in-app activity feed (§4.14). Modal-on-web / pushed-route on native. Bell icon in the chats + friends tab headers opens it; red dot when `unread_count > 0`. Tap a row → POST `{id}/read` + route. Header "Mark all read" → POST `read-all`. | `GET /v1/notifications`, `GET /v1/notifications/unread_count`, `POST /v1/notifications/{id}/read`, `POST /v1/notifications/read-all` | `notification.new` |
 | `conversation/[id]` | message thread + RoomBanner. Long-press a bubble opens a context menu (copy / react / report / delete-mine). Read-receipt rendering reads `message.read` to mark a sent bubble as "read by N". | `GET /v1/conversations/{id}`, `GET /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/messages`, `POST /v1/conversations/{id}/read` | `message.new`, `message.edited`, `message.deleted`, `message.read`, `typing.*`, `room.*`, `conversation.updated`, `conversation.member_added`, `conversation.member_removed` |
 | `conversation/new` | create group | `GET /v1/users?q=…`, `POST /v1/conversations` | — |
 | `conversation/[id]/info` | group info + member list + admin actions. Tap the conversation header in `conversation/[id]` to open. Group admins see Add Member + Remove Member; every member sees Leave Group. DM rendering of this screen is the peer's profile (no member list, no leave). | `GET /v1/conversations/{id}`, `POST /v1/conversations/{id}/members` (add), `DELETE /v1/conversations/{id}/members/{user_id}` (admin remove), `DELETE /v1/conversations/{id}` (caller leaves) | `conversation.updated`, `conversation.member_added`, `conversation.member_removed` |
@@ -1585,6 +1659,12 @@ The `expo` plugin gives the implementer these skills (use the `Skill` tool to in
   - Commit: `feat(mobile): group notifications by thread id`
 - [ ] **8.7** App icon badge count from WS heartbeat `unread_total` per §7.5. Optimistic decrement on `MarkRead`. `X-Unread-Total` header consumed at launch.
   - Commit: `feat(mobile): wire unread badge count`
+- [ ] **8.8** In-app activity feed per §4.14. `lib/api/use-notifications.ts` wraps the orval hooks for `GET /v1/notifications` (paginated), `GET /v1/notifications/unread_count`, `POST /v1/notifications/{id}/read`, `POST /v1/notifications/read-all`. WS dispatcher (`lib/ws/dispatcher.ts`) handles `notification.new`: increments the cached unread_count and invalidates the list query.
+  - Commit: `feat(mobile): wire in-app notifications hooks and ws handler`
+- [ ] **8.9** `<NotificationBell>` component placed in the chats-tab + friends-tab headers. Reads `unread_count` from the cache; renders a red dot when > 0. Tap pushes `/notifications`. Component is shared across web and native; on web it sits next to `<WebRefreshButton>` in the existing header right-slot.
+  - Commit: `feat(mobile): add notification bell with unread badge`
+- [ ] **8.10** `/notifications` screen. `<ModalScreenShell>` on web, pushed route on native. Header has X / "Notifications" title / "Mark all read" button (disabled when `unread_count === 0`). Body is a FlashList of `<NotificationRow>` (avatar + actor + verb + relative time + unread dot indicator). Tap → POST `{id}/read` + route per the §4.14 table. Infinite scroll via `onEndReached` + cursor pagination. Empty state per §4.14. Maestro flow `notifications-feed.yaml` (seed two friend requests → bell shows badge → tap bell → screen lists rows → tap row → routes + clears badge).
+  - Commit: `feat(mobile): build notifications feed screen`
 
 ### Phase 9 — Voice & video
 

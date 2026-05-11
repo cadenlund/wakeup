@@ -3018,6 +3018,8 @@ For each package: write the package, write exhaustive tests (every error path), 
   - Commit: `feat(backend): add device token http handlers`
 - [ ] **11.5** Wire into `MessageService.Send`: if recipient has no live WS connection (check Redis presence), call `notification.SendOfflinePush` with category `direct_messages` or `group_messages` based on conversation type. Wire similarly into `FriendService.SendRequest` (`friend_requests`) and `CallService.InitiateCall` (`calls`).
   - Commit: `feat(backend): trigger expo push for offline events with category routing`
+- [ ] **11.6** In-app activity feed backend per `WAKEUPEXPO.md` §4.14. New migration `0013_notifications.sql` with table `notifications (id uuid pk, user_id uuid fk users, actor_id uuid fk users, kind text check, payload jsonb, read_at timestamptz null, created_at timestamptz)`, index `(user_id, created_at desc)` and partial unread index `(user_id, created_at desc) where read_at is null`. Producer hooks in `FriendService.SendRequest` / `FriendService.AcceptRequest` / `ConversationService.AddMembers` write one row per qualifying event. Endpoints: `GET /v1/notifications` (cursor-paginated), `GET /v1/notifications/unread_count`, `POST /v1/notifications/{id}/read`, `POST /v1/notifications/read-all`. WS hub fires `notification.new` to the recipient's live socket. Land as a single PR pair with mobile Phase 8.8–8.10 so the API shape is validated by its only consumer at build time.
+  - Commit: `feat(backend): add in-app notifications table, endpoints, and ws fanout`
 
 ### Phase 12 — Admin
 
