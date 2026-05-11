@@ -704,14 +704,16 @@ function SectionsPane({
 }) {
   const listRef = React.useRef<ListRef<Row>>(null);
 
-  // The previous "snap tapped header to the top" effect (a
-  // scrollToIndex on every section toggle) was the same auto-scroll
-  // bug the search modal had: tapping a chevron to expand 1000 rows
-  // animated the viewport down to chase the section header, which
-  // felt like the list was scrolling itself. Drop the effect; the
-  // section toggles in place. (justToggledRef is still threaded
-  // through because the parent reads it elsewhere; we just no
-  // longer act on it here.)
+  // FlashList 2.0.2 stickyHeaderIndices paints the sticky overlay
+  // ON TOP of the inline header row at scrollY=0, doubling the
+  // first section header. Workaround: only enable sticky once the
+  // user has scrolled past ~50px so the inline header has left
+  // the viewport before the overlay takes over.
+  const [stickyEnabled, setStickyEnabled] = React.useState(false);
+  const stickyHeaderIndices = React.useMemo(() => {
+    if (!stickyEnabled) return undefined;
+    return rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0);
+  }, [stickyEnabled, rows]);
 
   const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
 
@@ -746,13 +748,18 @@ function SectionsPane({
       // and the rows under them disappearing when the user toggled
       // the Friends section.
       getItemType={(item) => item.kind}
-      // Sticky chevron headers so a long scroll keeps the
-      // collapse affordance reachable. The earlier "duplicate
-      // FRIENDS header" symptom traced to a scrollToIndex on
-      // toggle that's now gone, not to FlashList sticky itself.
-      stickyHeaderIndices={rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0)}
+      // Sticky chevron headers — see stickyEnabled state above;
+      // undefined turns sticky off entirely (used at scrollY < 50
+      // to avoid the FlashList 2.0.2 duplicate-header bug).
+      stickyHeaderIndices={stickyHeaderIndices}
       onEndReachedThreshold={0.5}
       onEndReached={onEndReached}
+      scrollEventThrottle={32}
+      onScroll={(e) => {
+        const y = e.nativeEvent.contentOffset.y;
+        const next = y > 50;
+        if (next !== stickyEnabled) setStickyEnabled(next);
+      }}
       ListFooterComponent={isFetchingNextPage ? <SectionsListLoader /> : null}
       renderItem={({ item }) => (
         <RenderedRow

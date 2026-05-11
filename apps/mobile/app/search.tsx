@@ -614,6 +614,17 @@ export default function SearchModalScreen() {
 
   const mutedFg = useThemeColor('muted-foreground');
 
+  // FlashList 2.0.2 stickyHeaderIndices paints the sticky overlay
+  // on top of the inline header at scrollY=0, doubling the first
+  // section header. Gate sticky behind a small scroll so the
+  // inline header has left the viewport before the overlay takes
+  // over.
+  const [stickyEnabled, setStickyEnabled] = React.useState(false);
+  const stickyHeaderIndices = React.useMemo(() => {
+    if (!stickyEnabled) return undefined;
+    return rows.map((r, i) => (r.kind === 'header' ? i : -1)).filter((i) => i >= 0);
+  }, [stickyEnabled, rows]);
+
   return (
     <ModalScreenShell onClose={goCancel} testID="search-modal-shell">
       <View className="flex-1 bg-background">
@@ -650,12 +661,17 @@ export default function SearchModalScreen() {
             // users, conversations, messages, and show-all rows in
             // separate pools so each renders with the right shape.
             getItemType={(item) => item.kind}
-            // Sticky chevron headers so a long expanded People
-            // section can be collapsed mid-scroll without paging
-            // back up to find the chevron.
-            stickyHeaderIndices={rows
-              .map((r, i) => (r.kind === 'header' ? i : -1))
-              .filter((i) => i >= 0)}
+            // Sticky chevron headers — gated behind a small scroll
+            // so the inline header has left the viewport before
+            // the overlay takes over (FlashList 2.0.2 duplicate
+            // bug). undefined disables sticky entirely.
+            stickyHeaderIndices={stickyHeaderIndices}
+            scrollEventThrottle={32}
+            onScroll={(e) => {
+              const y = e.nativeEvent.contentOffset.y;
+              const next = y > 50;
+              if (next !== stickyEnabled) setStickyEnabled(next);
+            }}
             onEndReachedThreshold={0.5}
             onEndReached={() => {
               if (!usersExpanded) return;
