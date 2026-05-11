@@ -27,6 +27,7 @@ import { MuteSheet } from '@/components/mute-sheet';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
+import { WebRefreshButton } from '@/components/ui/web-refresh-button';
 import {
   conversationDisplay,
   filterConversations,
@@ -134,7 +135,19 @@ export default function ChatsScreen() {
         // the filter input — there's plenty of horizontal room and
         // a separate header would just steal a row. Native keeps
         // the floating FAB; the addon is undefined.
-        rightAddon={Platform.OS === 'web' ? <NewChatButton onPress={goCompose} /> : undefined}
+        // Web-only chrome on the right of the filter row: a
+        // refresh button (no pull-to-refresh gesture on desktop)
+        // plus the New chat button. Native gets neither — the
+        // pull gesture covers refresh, the floating FAB covers
+        // compose.
+        rightAddon={
+          Platform.OS === 'web' ? (
+            <View className="flex-row items-center gap-2">
+              <WebRefreshButton onPress={onRefresh} refreshing={refreshing} />
+              <NewChatButton onPress={goCompose} />
+            </View>
+          ) : undefined
+        }
       />
       {isInitialLoad ? (
         <ChatsLoading />

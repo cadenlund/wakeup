@@ -21,11 +21,22 @@ type Props = {
   /** Cap the card height so long lists scroll inside instead of
    * pushing the modal off-screen. */
   maxHeightVh?: number;
+  /** Floor the card height (web only) so an empty list state
+   * doesn't collapse the modal to a tiny box mid-screen.
+   * Defaults to 60vh — same vertical bounds as the search modal
+   * + create-group flow, so every modal feels the same size. */
+  minHeightVh?: number;
   testID?: string;
   children: React.ReactNode;
 };
 
-export function ModalScreenShell({ onClose, maxHeightVh = 80, testID, children }: Props) {
+export function ModalScreenShell({
+  onClose,
+  maxHeightVh = 80,
+  minHeightVh = 60,
+  testID,
+  children,
+}: Props) {
   // Wire the keyboard escape so desktop users can dismiss without
   // reaching for the cancel button. Native is a no-op (no DOM).
   // Listener runs in the capture phase so an autofocused
@@ -85,7 +96,11 @@ export function ModalScreenShell({ onClose, maxHeightVh = 80, testID, children }
       <Pressable
         onPress={() => {}}
         testID={testID}
-        style={{ maxHeight: `${maxHeightVh}vh` as unknown as number, width: '100%' }}
+        style={{
+          maxHeight: `${maxHeightVh}vh` as unknown as number,
+          minHeight: `${minHeightVh}vh` as unknown as number,
+          width: '100%',
+        }}
         className="w-full max-w-2xl overflow-hidden rounded-2xl bg-card shadow-2xl shadow-black/40">
         <View className="flex-1">{children}</View>
       </Pressable>

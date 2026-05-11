@@ -32,7 +32,7 @@
 import { ChevronDown, ChevronRight, Search, Users, X } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as React from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { FriendActionMenu, FriendRowMenuButton } from '@/components/friend-action-menu';
@@ -43,6 +43,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List, type ListRef } from '@/components/ui/list';
+import { WebRefreshButton } from '@/components/ui/web-refresh-button';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
@@ -575,7 +576,15 @@ export default function FriendsScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      <SearchBar value={rawQuery} onChange={setRawQuery} />
+      <SearchBar
+        value={rawQuery}
+        onChange={setRawQuery}
+        rightAddon={
+          Platform.OS === 'web' ? (
+            <WebRefreshButton onPress={onRefresh} refreshing={refreshing} />
+          ) : undefined
+        }
+      />
 
       {isSearchMode ? (
         <SearchPane
@@ -635,11 +644,22 @@ export default function FriendsScreen() {
   );
 }
 
-function SearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function SearchBar({
+  value,
+  onChange,
+  rightAddon,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  // Right-aligned chrome (web refresh button) — kept generic so
+  // additional buttons can stack here later without another prop
+  // per affordance.
+  rightAddon?: React.ReactNode;
+}) {
   const mutedFg = useThemeColor('muted-foreground');
   return (
-    <View className="border-b border-border bg-background px-4 pb-3 pt-3">
-      <View className="relative">
+    <View className="flex-row items-center gap-3 border-b border-border bg-background px-4 pb-3 pt-3">
+      <View className="relative flex-1">
         <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
           <Search size={16} color={mutedFg} />
         </View>
@@ -667,6 +687,7 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
           </Pressable>
         ) : null}
       </View>
+      {rightAddon}
     </View>
   );
 }
