@@ -84,6 +84,9 @@ type Props = {
   // duplicate; the lifted copy fills the gap. Restores when the
   // popover closes.
   lifted?: boolean;
+  // OS "reduce motion" setting — when true the send-spinner layout
+  // change is applied without an animation.
+  reduceMotion?: boolean;
   testID?: string;
 };
 
@@ -105,6 +108,7 @@ export function MessageBubble({
   onRetrySend,
   onLongPress,
   lifted,
+  reduceMotion,
   testID,
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
@@ -126,12 +130,15 @@ export function MessageBubble({
   // delivered row replaces this placeholder, or it fails).
   const [showSpinner, setShowSpinner] = React.useState(false);
   const showSpinnerRef = React.useRef(false);
-  const setSpinner = React.useCallback((next: boolean) => {
-    if (showSpinnerRef.current === next) return;
-    showSpinnerRef.current = next;
-    LayoutAnimation.configureNext(SPINNER_LAYOUT_ANIM);
-    setShowSpinner(next);
-  }, []);
+  const setSpinner = React.useCallback(
+    (next: boolean) => {
+      if (showSpinnerRef.current === next) return;
+      showSpinnerRef.current = next;
+      if (!reduceMotion) LayoutAnimation.configureNext(SPINNER_LAYOUT_ANIM);
+      setShowSpinner(next);
+    },
+    [reduceMotion]
+  );
   React.useEffect(() => {
     if (sendStatus === 'sending') {
       const t = setTimeout(() => setSpinner(true), SPINNER_DELAY_MS);

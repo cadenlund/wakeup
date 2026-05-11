@@ -54,6 +54,7 @@ import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { useTypingUserIds } from '@/lib/typing/store';
 import { useDeleteMessage } from '@/lib/use-delete-message';
 import { useMarkReadOnFocus } from '@/lib/use-mark-read';
+import { useReduceMotion } from '@/lib/use-reduce-motion';
 import type { LocalSendStatus } from '@/lib/use-send-message';
 
 type Message = InternalHandlerHttpMessageResponse;
@@ -102,6 +103,7 @@ export function MessageList({
 }: Props) {
   const fg = useThemeColor('foreground');
   const mutedFg = useThemeColor('muted-foreground');
+  const reduceMotion = useReduceMotion();
 
   // Long-press action popover: which bubble was pressed (null = closed).
   const [actionTarget, setActionTarget] = React.useState<MessageActionTarget | null>(null);
@@ -140,7 +142,12 @@ export function MessageList({
   // the new row.
   const lastMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : undefined;
   const prevLastMessageId = React.useRef<string | undefined>(undefined);
-  if (lastMessageId && prevLastMessageId.current && lastMessageId !== prevLastMessageId.current) {
+  if (
+    !reduceMotion &&
+    lastMessageId &&
+    prevLastMessageId.current &&
+    lastMessageId !== prevLastMessageId.current
+  ) {
     LayoutAnimation.configureNext({
       duration: 220,
       create: { type: 'easeInEaseOut', property: 'opacity' },
@@ -370,6 +377,7 @@ export function MessageList({
             isDeleted={m.is_deleted}
             mine={mine}
             isGroup={isGroup}
+            reduceMotion={reduceMotion}
             // Per-bubble send status only applies to "mine" rows
             // — the recipient never has a local send state for
             // someone else's message.

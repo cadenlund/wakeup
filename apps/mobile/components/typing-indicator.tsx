@@ -19,13 +19,14 @@
 // like a sender label, plus the (first) typist's avatar in the
 // gutter.
 import * as React from 'react';
-import { AccessibilityInfo, Animated, View } from 'react-native';
+import { Animated, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import type { InternalHandlerHttpConversationMemberRow } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { useTypingUserIds } from '@/lib/typing/store';
+import { useReduceMotion } from '@/lib/use-reduce-motion';
 
 type Member = InternalHandlerHttpConversationMemberRow;
 
@@ -53,13 +54,11 @@ function groupLabel(members: Member[] | undefined, ids: string[]): string {
   return 'Several people';
 }
 
-// Three small circles whose opacity pulses in a staggered loop.
-// Honours the OS "reduce motion" setting — when it's on the dots
-// stay fully visible and the loop never starts (matches the
-// reduced-motion handling elsewhere in the app).
-function TypingDots(): React.ReactElement {
+// Three small circles whose opacity pulses in a staggered loop. When
+// the OS "reduce motion" setting is on the dots stay fully visible
+// and the loop never starts.
+function TypingDots({ reduceMotion }: { reduceMotion: boolean }): React.ReactElement {
   const color = useThemeColor('muted-foreground');
-  const [reduceMotion, setReduceMotion] = React.useState(false);
   const dotsRef = React.useRef<Animated.Value[] | null>(null);
   if (!dotsRef.current) {
     dotsRef.current = [
@@ -69,18 +68,6 @@ function TypingDots(): React.ReactElement {
     ];
   }
   const dots = dotsRef.current;
-
-  React.useEffect(() => {
-    let mounted = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (mounted) setReduceMotion(enabled);
-    });
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
-    return () => {
-      mounted = false;
-      sub.remove();
-    };
-  }, []);
 
   React.useEffect(() => {
     if (reduceMotion) return;
@@ -132,6 +119,7 @@ export function TypingIndicator({
 }): React.ReactElement | null {
   const ids = useTypingUserIds(conversationId);
   const hasTyping = ids.length > 0;
+  const reduceMotion = useReduceMotion();
 
   // Keep the last non-empty typing set so the bubble can finish its
   // exit animation still showing who *was* typing.
@@ -142,23 +130,19 @@ export function TypingIndicator({
   const [rendered, setRendered] = React.useState(hasTyping);
   const expand = React.useRef(new Animated.Value(hasTyping ? 1 : 0)).current;
   React.useEffect(() => {
+    // reduce-motion → snap (duration 0) instead of the collapse.
+    const duration = reduceMotion ? 0 : ENTER_EXIT_MS;
     if (hasTyping) {
       setRendered(true);
-      Animated.timing(expand, {
-        toValue: 1,
-        duration: ENTER_EXIT_MS,
-        useNativeDriver: false,
-      }).start();
+      Animated.timing(expand, { toValue: 1, duration, useNativeDriver: false }).start();
       return;
     }
-    Animated.timing(expand, {
-      toValue: 0,
-      duration: ENTER_EXIT_MS,
-      useNativeDriver: false,
-    }).start(({ finished }) => {
-      if (finished) setRendered(false);
-    });
-  }, [hasTyping, expand]);
+    Animated.timing(expand, { toValue: 0, duration, useNativeDriver: false }).start(
+      ({ finished }) => {
+        if (finished) setRendered(false);
+      }
+    );
+  }, [hasTyping, expand, reduceMotion]);
 
   if (!rendered) return null;
 
@@ -200,7 +184,7 @@ export function TypingIndicator({
               line height) — so it's the size of a single-line msg. */}
           <View className="rounded-2xl rounded-bl-sm bg-card px-3 py-2">
             <View className="h-6 justify-center">
-              <TypingDots />
+              <TypingDots reduceMotion={reduceMotion} />
             </View>
           </View>
         </View>
