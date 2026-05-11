@@ -159,15 +159,8 @@ export default function ChatsScreen() {
           // current view to one row — otherwise typing a query would
           // freeze pagination at the rows we've happened to fetch so
           // far.
-          // Pagination drives off momentum-scroll-end so a list
-          // shorter than the viewport doesn't chain through every
-          // page on render. Same pattern the friends + search
-          // surfaces use.
-          onMomentumScrollEnd={(e) => {
-            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-            const distanceFromBottom =
-              contentSize.height - (contentOffset.y + layoutMeasurement.height);
-            if (distanceFromBottom > layoutMeasurement.height * 0.5) return;
+          onEndReachedThreshold={0.5}
+          onEndReached={() => {
             if (conversationsQ.hasNextPage && !conversationsQ.isFetchingNextPage) {
               void conversationsQ.fetchNextPage();
             }

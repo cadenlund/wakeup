@@ -725,18 +725,6 @@ function SectionsPane({
 
   const refreshControl = useThemedRefreshControl(refreshing, onRefresh);
 
-  // Pagination is driven off onMomentumScrollEnd so a sub-viewport
-  // list never chains through every page on render. Same pattern
-  // the search modal uses.
-  const onMomentumScrollEnd = React.useCallback(
-    (offsetY: number, contentH: number, viewportH: number) => {
-      const distanceFromBottom = contentH - (offsetY + viewportH);
-      if (distanceFromBottom > viewportH * 0.5) return;
-      onEndReached();
-    },
-    [onEndReached]
-  );
-
   // Section-header rows stick to the top of the viewport while
   // their section is in view, so scrolling deep into Friends still
   // leaves the chevron tappable for collapse without scrolling
@@ -772,10 +760,8 @@ function SectionsPane({
       data={rows}
       keyExtractor={(item) => item.key}
       stickyHeaderIndices={stickyHeaderIndices}
-      onMomentumScrollEnd={(e) => {
-        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-        onMomentumScrollEnd(contentOffset.y, contentSize.height, layoutMeasurement.height);
-      }}
+      onEndReachedThreshold={0.5}
+      onEndReached={onEndReached}
       ListFooterComponent={isFetchingNextPage ? <SectionsListLoader /> : null}
       renderItem={({ item }) => (
         <RenderedRow
@@ -919,20 +905,12 @@ function SearchPaneList({
   onEndReached: () => void;
   isFetchingNextPage: boolean;
 }) {
-  // Pagination drives off onMomentumScrollEnd so a sub-viewport
-  // list never chains through every page on render — same fix
-  // SectionsPane and the search modal use.
   return (
     <List
       data={rows}
       keyExtractor={(r, i) => r.user.id ?? r.user.username ?? `idx-${i}`}
-      onMomentumScrollEnd={(e) => {
-        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-        const distanceFromBottom =
-          contentSize.height - (contentOffset.y + layoutMeasurement.height);
-        if (distanceFromBottom > layoutMeasurement.height * 0.5) return;
-        onEndReached();
-      }}
+      onEndReachedThreshold={0.5}
+      onEndReached={onEndReached}
       ListFooterComponent={
         <SearchListFooter loading={isFetchingNextPage} loaded={rows.length} total={total} />
       }
