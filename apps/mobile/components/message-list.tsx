@@ -72,8 +72,19 @@ type Row =
     };
 
 // "Seen by Ada" / "Seen by Ada and Ben" / "Seen by Ada, Ben and 2 others".
-function formatSeenBy(users: InternalHandlerHttpUserResponse[]): string {
-  const names = users.map((u) => userDisplayName(u));
+// The viewer (if present) is rendered as "you" and moved to the front,
+// so it reads "Seen by you, Ada and 2 others".
+function formatSeenBy(
+  users: InternalHandlerHttpUserResponse[],
+  myUserId: string | undefined
+): string {
+  const names: string[] = [];
+  let mine: string | undefined;
+  for (const u of users) {
+    if (myUserId && u.id === myUserId) mine = 'you';
+    else names.push(userDisplayName(u));
+  }
+  if (mine) names.unshift(mine);
   if (names.length === 1) return `Seen by ${names[0]}`;
   if (names.length === 2) return `Seen by ${names[0]} and ${names[1]}`;
   const rest = names.length - 2;
@@ -206,15 +217,17 @@ export function MessageList({
   //   - DM: a single caption under your last delivered sent message
   //     — "Delivered" until the peer's read pointer reaches it,
   //     then "Seen".
-  //   - Group: "Seen by Ada" / "Seen by Ada and Ben" / "Seen by
-  //     Ada, Ben and 2 others" under every message someone's read
-  //     pointer has reached (listing all such members; "Seen by" is
-  //     public so you the viewer appear too — only the message's own
-  //     sender is filtered out, you don't "see" what you sent). The
-  //     newest message additionally falls back to "Delivered" when
-  //     no one has reached it yet (the "Delivered at the bottom"
-  //     state); older un-reached messages stay caption-less so the
-  //     thread doesn't fill with "Delivered" lines.
+  //   - Group: a "Seen by …" marker only at messages that are
+  //     *someone's* read frontier — the message their
+  //     `last_read_message_id` points at. Older messages are
+  //     implicitly read, so they stay caption-less (the next marker
+  //     down aggregates them). At a marker we list EVERYONE who's
+  //     read at or past it — the same set the long-press popover
+  //     shows — formatted "Seen by Ada, Ben and 2 others". "Seen by"
+  //     is public so the viewer appears; only the message's own
+  //     sender is filtered out (you don't "see" what you sent — so a
+  //     message you sent that no one else has reached shows nothing,
+  //     except the newest one, which falls back to "Delivered").
   // Members with a NULL / out-of-window read pointer haven't reached
   // any loaded message and contribute nothing.
   const receiptByMessageId = React.useMemo(() => {
@@ -222,18 +235,27 @@ export function MessageList({
     if (messages.length === 0) return out;
 
     if (isGroup) {
+      const frontierIds = new Set<string>();
+      for (const row of members) {
+        if (row.last_read_message_id) frontierIds.add(row.last_read_message_id);
+      }
       const lastIdx = messages.length - 1;
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         if (!msg.id) continue;
-        const seers: InternalHandlerHttpUserResponse[] = [];
-        for (const row of members) {
-          const u = row.user;
-          if (!u?.id || u.id === msg.sender_id) continue;
-          if ((readPointerIdxByUser.get(u.id) ?? -1) >= i) seers.push(u);
+        if (frontierIds.has(msg.id)) {
+          const seers: InternalHandlerHttpUserResponse[] = [];
+          for (const row of members) {
+            const u = row.user;
+            if (!u?.id || u.id === msg.sender_id) continue;
+            if ((readPointerIdxByUser.get(u.id) ?? -1) >= i) seers.push(u);
+          }
+          if (seers.length > 0) {
+            out.set(msg.id, formatSeenBy(seers, myUserId));
+            continue;
+          }
         }
-        if (seers.length > 0) out.set(msg.id, formatSeenBy(seers));
-        else if (i === lastIdx) out.set(msg.id, 'Delivered');
+        if (i === lastIdx) out.set(msg.id, 'Delivered');
       }
       return out;
     }
@@ -429,21 +451,27 @@ export function MessageList({
             ? (rect: { x: number; y: number; width: number; height: number } | undefined) => {
                 // Who's read this message — every member whose read
                 // pointer is at or past it, minus the message's own
-                // sender. In a group the list is public so the
-                // viewer is included; in a DM only the peer counts
-                // (the popover renders it as "Seen"/"Delivered").
+                // sender (you don't "see" what you sent). Same shape
+                // for DMs and groups: in a DM that resolves to "just
+                // the peer" on your own messages. The viewer renders
+                // as "you" and is moved to the front of the list.
                 const msgIdx = msgIdxById.get(m.id as string) ?? -1;
-                const seenBy =
+                const all =
                   msgIdx < 0
                     ? []
                     : members.flatMap((row) => {
                         const u = row.user;
                         if (!u?.id || u.id === m.sender_id) return [];
-                        if (!isGroup && u.id === myUserId) return [];
-                        const ptr = readPointerIdxByUser.get(u.id) ?? -1;
-                        if (ptr < msgIdx) return [];
-                        return [{ id: u.id, name: userDisplayName(u), avatarUrl: u.avatar_url }];
+                        if ((readPointerIdxByUser.get(u.id) ?? -1) < msgIdx) return [];
+                        const name = u.id === myUserId ? 'you' : userDisplayName(u);
+                        return [{ id: u.id, name, avatarUrl: u.avatar_url }];
                       });
+                const seenBy = all.some((r) => r.id === myUserId)
+                  ? [
+                      ...all.filter((r) => r.id === myUserId),
+                      ...all.filter((r) => r.id !== myUserId),
+                    ]
+                  : all;
                 setActionTarget({
                   id: m.id as string,
                   body: m.body ?? '',
@@ -496,7 +524,6 @@ export function MessageList({
       {list}
       <MessageActionPopover
         target={actionTarget}
-        isGroup={isGroup}
         onClose={() => setActionTarget(null)}
         onDelete={deleteMessage}
         testID="message-action-popover"

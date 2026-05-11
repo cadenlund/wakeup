@@ -54,9 +54,6 @@ export type MessageActionTarget = {
 
 type Props = {
   target: MessageActionTarget | null;
-  // Group threads list readers by avatar + name; DMs show a single
-  // "Seen" / "Delivered" line on your own messages.
-  isGroup: boolean;
   onClose: () => void;
   // Caller owns the optimistic cache patch + the DELETE call.
   onDelete: (messageId: string) => void;
@@ -104,30 +101,20 @@ type Action = {
   destructive?: boolean;
 };
 
-export function MessageActionPopover({ target, isGroup, onClose, onDelete, testID }: Props) {
+export function MessageActionPopover({ target, onClose, onDelete, testID }: Props) {
   // Inner component so the spring-in animation runs on every open
   // (its mount lifecycle == the popover's open lifecycle).
   if (!target) return null;
-  return (
-    <PopoverContent
-      target={target}
-      isGroup={isGroup}
-      onClose={onClose}
-      onDelete={onDelete}
-      testID={testID}
-    />
-  );
+  return <PopoverContent target={target} onClose={onClose} onDelete={onDelete} testID={testID} />;
 }
 
 function PopoverContent({
   target,
-  isGroup,
   onClose,
   onDelete,
   testID,
 }: {
   target: MessageActionTarget;
-  isGroup: boolean;
   onClose: () => void;
   onDelete: (messageId: string) => void;
   testID?: string;
@@ -218,22 +205,20 @@ function PopoverContent({
     return t ? `Sent · ${t}` : '';
   })();
 
-  // "Seen by …" section, INSIDE the pill, below the icons. Group →
-  // a row per reader (avatar + name), capped at MAX_SEEN_ROWS with
-  // an "and N more" tail; DM → a single "Seen" / "Delivered" note,
-  // and only on your own messages (a peer's message has no receipt).
+  // "Seen by …" section, INSIDE the pill, below the icons — same
+  // shape for DMs and groups, and on every message: a "Seen by"
+  // header + one row per reader (avatar + name), capped at
+  // MAX_SEEN_ROWS with an "and N more" tail, or "No one yet" when
+  // empty. Even a DM message *you* received shows it — "Seen by you"
+  // is a given, but listing it keeps the affordance consistent.
   const readers = target.seenBy ?? [];
-  const showSeenSection = isGroup || target.mine;
-  const seenRows = isGroup ? Math.min(readers.length, MAX_SEEN_ROWS) : 0;
-  const seenHasOverflow = isGroup && readers.length > MAX_SEEN_ROWS;
-  const seenSectionHeight = showSeenSection
-    ? SEEN_PAD_V * 2 +
-      (isGroup
-        ? SEEN_HEADER_H +
-          (readers.length === 0 ? SEEN_ROW_H : seenRows * SEEN_ROW_H) +
-          (seenHasOverflow ? SEEN_ROW_H : 0)
-        : SEEN_ROW_H)
-    : 0;
+  const seenRows = Math.min(readers.length, MAX_SEEN_ROWS);
+  const seenHasOverflow = readers.length > MAX_SEEN_ROWS;
+  const seenSectionHeight =
+    SEEN_PAD_V * 2 +
+    SEEN_HEADER_H +
+    (readers.length === 0 ? SEEN_ROW_H : seenRows * SEEN_ROW_H) +
+    (seenHasOverflow ? SEEN_ROW_H : 0);
 
   // Card width hugs its content: the widest of the icon row, the
   // timestamp caption (estimated — see CAPTION_CHAR_PX), and a
@@ -242,8 +227,7 @@ function PopoverContent({
   const captionWidth = sentLabel
     ? Math.ceil(sentLabel.length * CAPTION_CHAR_PX) + CAPTION_PAD * 2
     : 0;
-  const seenWidth = showSeenSection && isGroup ? SEEN_MIN_WIDTH : 0;
-  const pillWidth = Math.max(iconRowWidth, captionWidth, seenWidth);
+  const pillWidth = Math.max(iconRowWidth, captionWidth, SEEN_MIN_WIDTH);
   const pillHeight = ICON_ROW_H + (sentLabel ? CAPTION_ROW_H : 0) + seenSectionHeight;
 
   // --- Positioning -------------------------------------------------
@@ -384,42 +368,34 @@ function PopoverContent({
                 </Pressable>
               ))}
             </View>
-            {showSeenSection ? (
-              <View className="border-t border-border px-3" style={{ paddingVertical: SEEN_PAD_V }}>
-                {isGroup ? (
-                  <>
-                    <Text variant="muted" className="mb-1 text-[11px] font-medium">
-                      Seen by
-                    </Text>
-                    {readers.length === 0 ? (
-                      <Text variant="muted" className="text-xs">
-                        No one yet
+            <View className="border-t border-border px-3" style={{ paddingVertical: SEEN_PAD_V }}>
+              <Text variant="muted" className="mb-1 text-[11px] font-medium">
+                Seen by
+              </Text>
+              {readers.length === 0 ? (
+                <Text variant="muted" className="text-xs">
+                  No one yet
+                </Text>
+              ) : (
+                <>
+                  {readers.slice(0, MAX_SEEN_ROWS).map((p, idx) => (
+                    <View
+                      key={p.id ?? `${p.name}-${idx}`}
+                      className="flex-row items-center gap-2 py-0.5">
+                      <Avatar source={p.avatarUrl} fallbackName={p.name} size={18} />
+                      <Text numberOfLines={1} className="flex-1 text-xs">
+                        {p.name}
                       </Text>
-                    ) : (
-                      <>
-                        {readers.slice(0, MAX_SEEN_ROWS).map((p) => (
-                          <View key={p.id ?? p.name} className="flex-row items-center gap-2 py-0.5">
-                            <Avatar source={p.avatarUrl} fallbackName={p.name} size={18} />
-                            <Text numberOfLines={1} className="flex-1 text-xs">
-                              {p.name}
-                            </Text>
-                          </View>
-                        ))}
-                        {seenHasOverflow ? (
-                          <Text variant="muted" className="pt-0.5 text-xs">
-                            and {readers.length - MAX_SEEN_ROWS} more
-                          </Text>
-                        ) : null}
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <Text variant="muted" className="text-xs">
-                    {readers.length > 0 ? 'Seen' : 'Delivered'}
-                  </Text>
-                )}
-              </View>
-            ) : null}
+                    </View>
+                  ))}
+                  {seenHasOverflow ? (
+                    <Text variant="muted" className="pt-0.5 text-xs">
+                      and {readers.length - MAX_SEEN_ROWS} more
+                    </Text>
+                  ) : null}
+                </>
+              )}
+            </View>
           </Pressable>
         </Animated.View>
       </Pressable>
