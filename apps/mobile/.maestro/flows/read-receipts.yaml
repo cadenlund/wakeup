@@ -1,0 +1,42 @@
+# Phase 6.3 — read receipts + mark-read on focus.
+#
+# A single-account fresh run has no conversations to open, so the
+# populated path (open thread → fire MarkRead → another account
+# sees the read-receipt avatar under their own message) needs a
+# multi-user fixture. Matches the conversation-thread / composer
+# pattern: mount-only smoke proving the new useMarkRead hook +
+# read-receipt rendering subgraph doesn't crash the bundle at
+# bundle-load time.
+#
+# What this flow asserts:
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs) Chats tab with the empty state.
+#   2. The chats screen renders cleanly with the new useMarkRead
+#      hook + MessageBubble read-receipt slot pulled into the
+#      bundle. The populated mark-read → avatar-row path lands
+#      when the multi-user fixture work for §5+ flows finalises.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. Mount-without-crash proves the new
+# useMarkRead + read-receipt subgraph doesn't break the bundle.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+- takeScreenshot: read-receipts-chats-empty
+# End on a hard assertion — takeScreenshot doesn't check anything
+# on its own, so without this final guard a post-screenshot
+# regression would slip past CI silently.
+- assertVisible: 'No conversations yet'

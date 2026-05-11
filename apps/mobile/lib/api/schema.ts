@@ -6222,6 +6222,8 @@ export interface components {
         "internal_handler_http.ConversationMemberRow": {
             /** @example 2026-05-02T09:31:21.810Z */
             joined_at?: string;
+            /** @example 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c */
+            last_read_message_id?: string;
             /** @example admin */
             role?: string;
             user?: components["schemas"]["internal_handler_http.UserResponse"];

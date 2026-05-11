@@ -5103,6 +5103,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "2026-05-02T09:31:21.810Z"
                 },
+                "last_read_message_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
                 "role": {
                     "type": "string",
                     "example": "admin"

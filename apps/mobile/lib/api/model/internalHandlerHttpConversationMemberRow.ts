@@ -9,6 +9,7 @@ import type { InternalHandlerHttpUserResponse } from './internalHandlerHttpUserR
 
 export interface InternalHandlerHttpConversationMemberRow {
   joined_at?: string;
+  last_read_message_id?: string;
   role?: string;
   user?: InternalHandlerHttpUserResponse;
 }
