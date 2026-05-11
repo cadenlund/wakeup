@@ -62,6 +62,11 @@ export default function TabLayout() {
         headerStyle: { backgroundColor: card },
         headerTintColor: fg,
         headerShadowVisible: false,
+        // React Navigation left-aligns the header title on Android by
+        // default (centered only on iOS). Force center on both so the
+        // tab title sits between the search icon and the logout pill
+        // consistently across platforms.
+        headerTitleAlign: 'center',
         sceneStyle: { backgroundColor: bg },
         tabBarStyle: {
           backgroundColor: card,
