@@ -17,10 +17,17 @@ import {
   getGetV1ConversationsQueryKey,
   useDeleteV1ConversationsIdMembersUserId,
 } from '@/lib/api/hooks/conversations/conversations';
+import { getGetV1SearchQueryKey } from '@/lib/api/hooks/search/search';
 import { toast } from '@/lib/toast';
 
+// Hook resolves to a void Promise regardless of outcome. Callers
+// fire-and-forget (`void leave(id)`); errors surface as toasts
+// inside the hook so an unawaited rejection can't bubble up as
+// an "unhandled promise" warning at the React tree level. The
+// boolean return tells callers whether the call succeeded if
+// they want to chain follow-up navigation.
 export function useLeaveConversation(): {
-  leave: (conversationId: string) => Promise<void>;
+  leave: (conversationId: string) => Promise<boolean>;
   isPending: boolean;
 } {
   const qc = useQueryClient();
@@ -29,24 +36,34 @@ export function useLeaveConversation(): {
   const del = useDeleteV1ConversationsIdMembersUserId();
 
   const leave = React.useCallback(
-    async (conversationId: string) => {
+    async (conversationId: string): Promise<boolean> => {
       const userId = me?.id;
       if (!userId) {
-        // No caller id known — refuse to attempt the call rather
-        // than letting the backend 404 ambiguously.
-        throw new Error('Cannot leave without an authenticated user');
+        // No caller id known — surface as a toast and short-circuit
+        // rather than letting the backend 404 ambiguously. Returning
+        // false lets a caller know not to route away.
+        toast.error("Couldn't leave: not signed in.");
+        return false;
       }
       try {
         await del.mutateAsync({ id: conversationId, userId });
-        await qc.invalidateQueries({ queryKey: getGetV1ConversationsQueryKey() });
+        // Invalidate both the conversations list (chats tab) AND
+        // the unified-search query (search modal renders chat rows
+        // straight from /v1/search) so a just-left group disappears
+        // from every surface at once.
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: getGetV1ConversationsQueryKey() }),
+          qc.invalidateQueries({ queryKey: getGetV1SearchQueryKey() }),
+        ]);
         toast.info('Left group');
+        return true;
       } catch (err) {
         const msg =
           err instanceof APIError && err.message
             ? err.message
             : "Couldn't leave this group right now.";
         toast.error(msg);
-        throw err;
+        return false;
       }
     },
     [del, me?.id, qc]

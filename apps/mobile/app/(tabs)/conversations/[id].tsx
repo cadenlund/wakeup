@@ -171,10 +171,13 @@ export default function ConversationThreadScreen() {
         onLeave={() => {
           if (!convId) return;
           closeSheet();
-          void leave(convId).then(() => {
-            // After leaving, the conversation is no longer in the
-            // user's list — bounce back to the chats tab so the
-            // route doesn't dead-end.
+          // After leaving the conversation is no longer in the
+          // user's list — bounce back to the chats tab so the
+          // route doesn't dead-end. Only route on success; a
+          // failed leave (network blip, etc.) keeps the user
+          // here with the toast already surfaced by the hook.
+          void leave(convId).then((ok) => {
+            if (!ok) return;
             if (router.canGoBack()) router.back();
             else router.replace('/');
           });

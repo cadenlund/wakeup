@@ -154,6 +154,7 @@ export default function ManageMembersScreen() {
     for (const f of friends) {
       const u = f.user;
       if (!u?.id) continue;
+      if (me?.id && u.id === me.id) continue; // self — can't add yourself
       if (existingMemberIds.has(u.id)) continue; // already in
       if (debouncedQuery) {
         const hay = `${u.username ?? ''} ${u.display_name ?? ''}`.toLowerCase();
@@ -162,7 +163,7 @@ export default function ManageMembersScreen() {
       out.push(u);
     }
     return out;
-  }, [friendsQ.data, existingMemberIds, debouncedQuery]);
+  }, [friendsQ.data, existingMemberIds, debouncedQuery, me?.id]);
 
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const toggleSelect = React.useCallback(
@@ -309,7 +310,16 @@ export default function ManageMembersScreen() {
             showAdd
               ? {
                   kind: 'back',
-                  onPress: () => setShowAdd(false),
+                  // Backing out of the add pane clears any
+                  // half-staged selection + filter so reopening
+                  // the pane starts clean (otherwise a user who
+                  // back-and-forth-ed could accidentally add the
+                  // residual selection on a later tap).
+                  onPress: () => {
+                    setShowAdd(false);
+                    setQuery('');
+                    setSelectedIds(new Set());
+                  },
                   testID: 'manage-members-back',
                 }
               : { kind: 'close', onPress: goCancel, testID: 'manage-members-close' }
@@ -336,6 +346,8 @@ export default function ManageMembersScreen() {
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
             loading={friendsQ.isLoading && !friendsQ.data}
+            error={friendsQ.isError && !friendsQ.data}
+            onRetry={() => friendsQ.refetch()}
           />
         ) : (
           <MembersPane
@@ -348,6 +360,15 @@ export default function ManageMembersScreen() {
             openingDmFor={openingDmFor}
             onTapMember={onTapMember}
             onOpenFriendMenu={setFriendMenuTarget}
+            onManageRequest={() => {
+              // Dismiss this modal first, then route to the
+              // friends tab where accept / decline lives. Same
+              // double-step pattern the search modal uses when
+              // it opens a thread — lets the dismiss animation
+              // finish before the push.
+              if (router.canGoBack()) router.back();
+              setTimeout(() => router.push('/friends'), 0);
+            }}
             onAdd={() => setShowAdd(true)}
           />
         )}
@@ -380,6 +401,7 @@ function MembersPane({
   openingDmFor,
   onTapMember,
   onOpenFriendMenu,
+  onManageRequest,
   onAdd,
 }: {
   members: InternalHandlerHttpConversationMemberRow[];
@@ -391,6 +413,7 @@ function MembersPane({
   openingDmFor: string | null;
   onTapMember: (u: UserRow) => void;
   onOpenFriendMenu: (u: UserRow) => void;
+  onManageRequest: () => void;
   onAdd: () => void;
 }) {
   const fg = useThemeColor('foreground');
@@ -433,6 +456,7 @@ function MembersPane({
           openingDmFor={openingDmFor}
           onTap={onTapMember}
           onOpenFriendMenu={onOpenFriendMenu}
+          onManageRequest={onManageRequest}
         />
       )}
     />
@@ -448,6 +472,7 @@ function MemberRow({
   openingDmFor,
   onTap,
   onOpenFriendMenu,
+  onManageRequest,
 }: {
   member: InternalHandlerHttpConversationMemberRow;
   myUserId: string | undefined;
@@ -457,6 +482,9 @@ function MemberRow({
   openingDmFor: string | null;
   onTap: (u: UserRow) => void;
   onOpenFriendMenu: (u: UserRow) => void;
+  // Tapped on the "Manage" affordance next to an incoming-request
+  // member — routes to the friends tab where accept/decline live.
+  onManageRequest: () => void;
 }) {
   const u = member.user;
   if (!u) return null;
@@ -501,6 +529,24 @@ function MemberRow({
         />
       </View>
     );
+  } else if (status?.kind === 'incoming') {
+    // Incoming pending request — surface a "Manage" button that
+    // routes to the friends tab where accept / decline live. The
+    // bare "Sent you a request" text didn't give the user a way
+    // to act on it from here.
+    trailing = (
+      <View className="flex-row items-center gap-2">
+        <RelationshipBadge label="Sent you a request" />
+        <Pressable
+          onPress={onManageRequest}
+          accessibilityRole="button"
+          accessibilityLabel="Manage friend request"
+          testID={u.id ? `member-${u.id}-manage-request` : undefined}
+          className="rounded-md border border-border bg-card px-3 py-1.5 active:bg-muted">
+          <Text className="text-xs font-medium">Manage</Text>
+        </Pressable>
+      </View>
+    );
   } else {
     trailing = (
       <FriendStatusAction
@@ -537,6 +583,8 @@ function AddPane({
   selectedIds,
   onToggleSelect,
   loading,
+  error,
+  onRetry,
 }: {
   query: string;
   onQueryChange: (v: string) => void;
@@ -547,6 +595,11 @@ function AddPane({
   selectedIds: Set<string>;
   onToggleSelect: (uid: string) => void;
   loading: boolean;
+  // True when the friends fetch failed cold (no data). The pane
+  // surfaces a retry affordance rather than letting the failure
+  // masquerade as "no friends matched."
+  error: boolean;
+  onRetry: () => void;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
   // Mirror /conversations/new's selected-pills strip so a user
@@ -596,6 +649,20 @@ function AddPane({
       {loading ? (
         <View className="flex-1 items-center justify-center py-12">
           <ActivityIndicator color={mutedFg} />
+        </View>
+      ) : error ? (
+        <View className="flex-1 items-center justify-center gap-3 px-6">
+          <Text variant="muted" className="text-center text-sm">
+            Couldn&apos;t load your friends. Check your connection and try again.
+          </Text>
+          <Pressable
+            onPress={onRetry}
+            accessibilityRole="button"
+            accessibilityLabel="Retry"
+            testID="manage-members-add-retry"
+            className="rounded-md border border-border bg-card px-4 py-2 active:bg-muted">
+            <Text className="text-sm font-medium">Retry</Text>
+          </Pressable>
         </View>
       ) : results.length === 0 ? (
         <View className="flex-1 items-center justify-center px-6">
