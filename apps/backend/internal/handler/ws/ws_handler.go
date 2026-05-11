@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
@@ -112,8 +114,43 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 		hub: cfg.Hub, bridge: cfg.Bridge, broker: cfg.Broker,
 		auth: cfg.Auth, convs: cfg.Convs, unread: cfg.Unread,
 		logger:         logger,
-		allowedOrigins: cfg.AllowedOrigins, writeError: we,
+		allowedOrigins: originHostPatterns(cfg.AllowedOrigins), writeError: we,
 	}, nil
+}
+
+// originHostPatterns normalizes CORS-style origin values into the host
+// patterns nhooyr.io/websocket's AcceptOptions.OriginPatterns expects.
+// The CORS config (and the HTTP CORS middleware) deal in full origins
+// like "http://localhost:8081", but websocket.Accept matches patterns
+// against the request's Origin *host* — "localhost:8081" — so a
+// full-URL pattern never matches and every browser WebSocket gets a
+// 403. Strip the scheme; pass `*` and bare hosts through untouched.
+func originHostPatterns(origins []string) []string {
+	if len(origins) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(origins))
+	for _, o := range origins {
+		o = strings.TrimSpace(o)
+		switch {
+		case o == "":
+			continue
+		case o == "*" || !strings.Contains(o, "://"):
+			out = append(out, o)
+		default:
+			if u, err := url.Parse(o); err == nil && u.Host != "" {
+				out = append(out, u.Host)
+			} else {
+				// Unparseable — keep it verbatim rather than silently
+				// dropping; a misconfigured origin is better surfaced.
+				out = append(out, o)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Mount attaches /v1/ws onto r.
