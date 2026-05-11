@@ -140,7 +140,12 @@ export function MessageList({ conversationId, myUserId, isGroup, members }: Prop
   return (
     <List<Message>
       data={messages}
-      keyExtractor={(m, i) => m.id ?? `idx-${i}`}
+      // Messages always have a server-issued id (`id?: string` is
+      // OpenAPI-optional, runtime-required). Falling back to a
+      // positional `idx-${i}` key would shift on every prepend when
+      // an older page lands and FlashList would remount the wrong
+      // cells (CodeRabbit on PR #141).
+      keyExtractor={(m) => m.id as string}
       // Anchor at the bottom on first paint so the user lands on
       // the newest message; lets older content prepend cleanly as
       // the cursor walks back through history.
@@ -177,7 +182,6 @@ export function MessageList({ conversationId, myUserId, isGroup, members }: Prop
           <MessageBubble
             body={item.body}
             createdAt={item.created_at}
-            editedAt={item.edited_at}
             isDeleted={item.is_deleted}
             mine={mine}
             senderName={isGroup ? (sender?.display_name ?? undefined) : undefined}

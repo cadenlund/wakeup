@@ -20,7 +20,6 @@ import { cn } from '@/lib/utils';
 type Props = {
   body: string | null | undefined;
   createdAt: string | null | undefined;
-  editedAt: string | null | undefined;
   isDeleted: boolean | undefined;
   mine: boolean;
   // Identity for the avatar fallback (always supplied in groups so
@@ -42,7 +41,6 @@ type Props = {
 export function MessageBubble({
   body,
   createdAt,
-  editedAt,
   isDeleted,
   mine,
   senderName,
@@ -54,7 +52,10 @@ export function MessageBubble({
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
   const time = formatRelative(createdAt);
-  const wasEdited = !!editedAt && !isDeleted;
+  // edited_at is in the backend response but v1 has no message-edit
+  // UI (deferred to v2 — §6.5 context menu lands a stub only), so
+  // we don't surface an "edited" indicator yet. The prop stays
+  // omitted to avoid drifting away from the locked v1 scope.
 
   return (
     <View
@@ -101,7 +102,6 @@ export function MessageBubble({
         {time ? (
           <Text variant="muted" className="mt-0.5 px-1 text-[10px]">
             {time}
-            {wasEdited ? ' · edited' : ''}
           </Text>
         ) : null}
       </View>
