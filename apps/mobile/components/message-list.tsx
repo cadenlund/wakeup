@@ -36,7 +36,10 @@ import * as React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 import { MessageBubble } from '@/components/message-bubble';
-import { MessageContextMenu, type MessageMenuTarget } from '@/components/message-context-menu';
+import {
+  MessageActionPopover,
+  type MessageActionTarget,
+} from '@/components/message-action-popover';
 import { AGGREGATE_GAP_MS, TimeDivider } from '@/components/time-divider';
 import { List } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
@@ -88,8 +91,8 @@ export function MessageList({
   const fg = useThemeColor('foreground');
   const mutedFg = useThemeColor('muted-foreground');
 
-  // Long-press context menu: which bubble was pressed (null = closed).
-  const [menuTarget, setMenuTarget] = React.useState<MessageMenuTarget | null>(null);
+  // Long-press action popover: which bubble was pressed (null = closed).
+  const [actionTarget, setActionTarget] = React.useState<MessageActionTarget | null>(null);
   const { deleteMessage } = useDeleteMessage(conversationId);
 
   const messagesQ = useInfiniteMessages(conversationId, undefined, {
@@ -270,6 +273,13 @@ export function MessageList({
       // try to reuse a divider's tiny height for a full bubble
       // and vice-versa, causing flicker on prepend.
       getItemType={(row) => row.kind}
+      // FlashList memoizes rows by `item`; the `lifted` prop flips
+      // when the action popover opens/closes on a bubble, which
+      // doesn't change the row's `item`. extraData forces a
+      // re-render of the visible rows when the target changes so
+      // the in-thread copy actually hides while the popover holds
+      // it (otherwise a ghost duplicate stays visible).
+      extraData={actionTarget?.id}
       // Breathing room so the newest bubble doesn't sit flush
       // against the composer's top edge.
       contentContainerStyle={{ paddingBottom: 8 }}
@@ -303,19 +313,23 @@ export function MessageList({
         // fallback resolves to initials even on mid-streak bubbles.
         // The streak-head label is gated separately via
         // showSenderLabel.
-        // Long-press opens the context menu — only on a delivered
-        // message (one with a server id that isn't a pending/failed
-        // optimistic placeholder). Copying / deleting an unsent
-        // bubble doesn't make sense.
+        // Long-press opens the action popover — on any real
+        // message, including deleted ones (you can still see when
+        // it was sent + react). Only pending/failed optimistic
+        // placeholders are exempt: there's nothing to copy/delete
+        // on an unsent bubble. The bubble measures its own window
+        // rect and passes it up so the popover anchors to it.
         const isPlaceholder = !!m.id && sendStatusByTempId.has(m.id);
         const onLongPress =
           m.id && !isPlaceholder
-            ? () =>
-                setMenuTarget({
+            ? (rect: { x: number; y: number; width: number; height: number } | undefined) =>
+                setActionTarget({
                   id: m.id as string,
                   body: m.body ?? '',
                   mine,
                   isDeleted: !!m.is_deleted,
+                  createdAt: m.created_at,
+                  rect,
                 })
             : undefined;
         return (
@@ -330,6 +344,9 @@ export function MessageList({
             sendStatus={mine && m.id ? sendStatusByTempId.get(m.id)?.status : undefined}
             onRetrySend={mine && m.id ? () => onRetrySend(m.id as string) : undefined}
             onLongPress={onLongPress}
+            // Hide the in-thread copy while the popover holds it —
+            // its pinned snapshot is the visible one (no duplicate).
+            lifted={!!actionTarget && !!m.id && actionTarget.id === m.id}
             // Read-receipt avatars only appear under "mine" bubbles
             // in group threads (per §6.3 spec). The bubble component
             // ignores `readBy` for non-mine rows.
@@ -352,11 +369,11 @@ export function MessageList({
   return (
     <>
       {list}
-      <MessageContextMenu
-        target={menuTarget}
-        onClose={() => setMenuTarget(null)}
+      <MessageActionPopover
+        target={actionTarget}
+        onClose={() => setActionTarget(null)}
         onDelete={deleteMessage}
-        testID="message-context-menu"
+        testID="message-action-popover"
       />
     </>
   );
