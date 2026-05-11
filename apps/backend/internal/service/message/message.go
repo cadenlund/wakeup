@@ -453,6 +453,11 @@ func (s *Service) ListReads(ctx context.Context, actor, messageID uuid.UUID) ([]
 // Errors are logged at debug level: a broker outage can't undo an
 // already-committed insert.
 //
+// `message.new` / `message.edited` carry MessageEventPayload (ids +
+// `body` for the in-app banner preview); `message.deleted` carries
+// the leaner MessageDeletedPayload — there's nothing left to preview,
+// and re-broadcasting the just-deleted text would be needless.
+//
 // Wire shape is the §7.1 wsproto envelope so the WS bridge can fan
 // the bytes straight to clients without re-wrapping. Earlier code
 // here published a flat map under the type name "message.created",
@@ -462,11 +467,15 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType wsproto.Eve
 	if s.broker == nil {
 		return
 	}
-	data := map[string]any{
-		"message_id":      m.ID,
-		"conversation_id": m.ConversationID,
-		"sender_id":       m.SenderID,
-		"created_at":      m.CreatedAt,
+	var data any = wsproto.MessageEventPayload{
+		MessageID:      m.ID,
+		ConversationID: m.ConversationID,
+		SenderID:       m.SenderID,
+		CreatedAt:      m.CreatedAt,
+		Body:           m.Body,
+	}
+	if eventType == wsproto.EventMessageDeleted {
+		data = wsproto.MessageDeletedPayload{MessageID: m.ID, ConversationID: m.ConversationID}
 	}
 	payload, err := wsproto.Encode(eventType, data)
 	if err != nil {

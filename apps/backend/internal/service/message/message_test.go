@@ -451,8 +451,11 @@ func TestSend_PublishesEvent(t *testing.T) {
 
 	select {
 	case msg := <-ch:
-		if !strings.Contains(string(msg.Payload), "message.new") {
-			t.Errorf("payload missing event type: %s", msg.Payload)
+		p := string(msg.Payload)
+		for _, want := range []string{"message.new", "\"body\":\"watched\"", "conversation_id"} {
+			if !strings.Contains(p, want) {
+				t.Errorf("payload missing %q: %s", want, p)
+			}
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for pubsub event")

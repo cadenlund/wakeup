@@ -186,6 +186,21 @@ type MessageDeletedPayload struct {
 	ConversationID uuid.UUID `json:"conversation_id"`
 }
 
+// MessageEventPayload — `message.new` / `message.edited`. The ids let
+// clients invalidate the right thread; `body` rides along so an
+// in-app banner can show a preview without a fetch (a thread you're
+// not on isn't loaded). Not the full Message DTO — attachments /
+// reply_to / edited_at aren't needed by either consumer (the open
+// thread refetches the page). `message.deleted` uses
+// MessageDeletedPayload (no body to report).
+type MessageEventPayload struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	SenderID       uuid.UUID `json:"sender_id"`
+	CreatedAt      time.Time `json:"created_at"`
+	Body           string    `json:"body"`
+}
+
 // MessageReadPayload — `message.read`. Fans out on the conversation's
 // `conv:<id>:messages` channel (every member, not just the message
 // sender) so each open thread can advance the reader's pointer for the
