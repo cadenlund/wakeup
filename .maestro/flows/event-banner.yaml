@@ -1,0 +1,48 @@
+# Phase 7.5 — in-app event banner (WAKEUPEXPO §4.13).
+#
+# A real banner only appears when a WS event arrives (another user
+# sends a message, sends/accepts a friend request, adds you to a
+# group) — not reproducible from a single fresh account. Matches the
+# conversation-thread / read-receipts pattern: mount-only smoke
+# proving the new <EventBanner> + Zustand banner store + dispatcher
+# enqueue subgraph is wired into the root layout without crashing the
+# bundle at load time.
+#
+# What this flow asserts:
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs) Chats tab with the empty state — i.e. the app boots
+#      with <EventBanner> mounted at the root.
+#   2. No banner is showing (testID "event-banner" absent) on a
+#      quiet, freshly-registered session — the queue starts empty.
+#   The populated open-banner → tap-routes path lands when the
+#   multi-user fixture work for §5+ flows finalises.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. Mount-without-crash proves the new
+# <EventBanner> + banner store + dispatcher enqueue subgraph doesn't
+# break the bundle.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+# A quiet session has an empty banner queue — nothing should be
+# rendered.
+- assertNotVisible:
+    id: 'event-banner'
+- takeScreenshot: event-banner-chats-empty
+# End on a hard assertion — takeScreenshot doesn't check anything on
+# its own, so without this final guard a post-screenshot regression
+# would slip past CI silently.
+- assertVisible: 'No conversations yet'

@@ -1,11 +1,15 @@
 // Phase 7.3 — WebSocket event → React Query cache dispatcher.
+// Phase 7.5 — also enqueues `<EventBanner>` events (WAKEUPEXPO §4.13).
 //
 // The client (`lib/ws/client.ts`) hands every inbound envelope to
 // `applyWSEvent`. This module is the ONLY place that turns a server
 // fact into a cache mutation — it never owns state itself; every
-// fact still lives in TanStack Query (WAKEUPEXPO §4.4 / §6.2).
+// fact still lives in TanStack Query (WAKEUPEXPO §4.4 / §6.2) — and
+// the ONLY place that decides whether an event also surfaces a
+// heads-up banner. The `<EventBanner>` component never filters; it
+// just renders whatever this module queues.
 //
-// Two kinds of action:
+// Cache actions:
 //
 //   1. invalidateQueries — the message-thread events
 //      (`message.new` / `message.edited` / `message.deleted`) only
@@ -13,19 +17,17 @@
 //      sender_id, created_at }` — see backend `publishMessageEvent`),
 //      not the body, so the open thread refetches; `friend.*` and
 //      `conversation.*` mark their lists stale the same way.
-//   2. setQueryData patch — the events that DO carry their full state:
-//      `message.new` also bumps the conversation row's
-//      `last_message_at` and re-sorts the chats list; `presence.update`
-//      patches the friend's presence row.
-//   3. side-effect — `room.*` (call store), `typing.*` (typing store).
-//      Those subsystems land in later phases; the cases are present as
-//      explicit no-ops so an arriving event is silently ignored rather
-//      than logged as "unknown".
+//   2. setQueryData patch — `message.new` also bumps the conversation
+//      row's `last_message_at` and re-sorts the chats list;
+//      `presence.update` patches the friend's presence row.
+//   3. side-effect — `room.*` (call store), `typing.*` (typing store)
+//      land in later phases; explicit no-op cases.
 //
-// Unhandled-but-known events (`message.read`, `notification.new`, …)
-// are deliberate no-ops too — they get wired when their feature lands.
-// A genuinely unknown `type` (one the server added that this build
-// doesn't know) is logged once at warn so the gap is visible.
+// Banner enqueues (per §4.13): `message.new` (unless you're on that
+// thread or it's muted), `friend.request_received`,
+// `friend.request_accepted`, `conversation.member_added` (only when
+// you're the added member). Skipped: muted conversation, on the
+// conversation screen, `room.started` (CallOverlay owns that).
 //
 // Query keys are inlined as URL-prefix literals rather than imported
 // from the orval-generated hook modules — those modules transitively
@@ -33,7 +35,7 @@
 // module (and its `bun test` suite) to the RN runtime. The literals
 // mirror `getGetV1*QueryKey()[0]` and are part of the stable API
 // contract (the same trick `lib/use-send-message.ts` already uses).
-import type { QueryClient } from '@tanstack/react-query';
+import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 
 import type {
   InternalHandlerHttpConversationListResponse,
@@ -41,12 +43,20 @@ import type {
   InternalHandlerHttpPresenceListResponse,
   InternalHandlerHttpPresenceResponse,
 } from '@/lib/api/model';
+import { getActiveConversation } from '@/lib/banner/active-conversation';
+import { enqueueBanner } from '@/lib/banner/store';
 import type { WSEnvelope } from '@/lib/ws/client';
 
 type ConversationList = InternalHandlerHttpConversationListResponse;
 type Conversation = InternalHandlerHttpConversationResponse;
 type PresenceList = InternalHandlerHttpPresenceListResponse;
 type Presence = InternalHandlerHttpPresenceResponse;
+
+// Extra, screen-derived context the WS bridge passes in: who the
+// local user is (so member-added banners can tell "was *I* added").
+// The "which conversation is on screen" check reads
+// `getActiveConversation()` directly so it's always current.
+export type DispatchContext = { myUserId?: string };
 
 // URL-prefix query keys — mirror the orval `getGetV1*QueryKey()[0]`.
 const CONVERSATIONS_KEY = '/v1/conversations';
@@ -56,6 +66,11 @@ const PRESENCE_FRIENDS_KEY = '/v1/presence/friends';
 const messagesKeyFor = (conversationId: string) => `/v1/conversations/${conversationId}/messages`;
 
 // --- conversations list --------------------------------------------
+
+type Cached<P> = P | InfiniteData<P>;
+function isInfinite<P>(d: Cached<P> | undefined): d is InfiniteData<P> {
+  return !!d && Array.isArray((d as InfiniteData<P>).pages);
+}
 
 // Bump a conversation row's last_message_at and re-sort so the thread
 // jumps to the top of the chats list when a new message lands there.
@@ -81,6 +96,33 @@ function bumpConversation(
     return (b.last_message_at ?? '').localeCompare(a.last_message_at ?? '');
   });
   return { ...data, data: rows };
+}
+
+// Find a conversation row across every cached `/v1/conversations`
+// query (the chats tab uses an infinite-query shape). Used to look up
+// the sender's display name and the mute state for a message banner.
+function findConversation(qc: QueryClient, id: string): Conversation | undefined {
+  for (const [, data] of qc.getQueriesData<Cached<ConversationList>>({
+    queryKey: [CONVERSATIONS_KEY],
+  })) {
+    if (!data) continue;
+    const pages = isInfinite(data) ? data.pages : [data];
+    for (const page of pages) {
+      const hit = page.data?.find((c) => c.id === id);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+function isMuted(c: Conversation | undefined): boolean {
+  const until = c?.muted_until;
+  return !!until && new Date(until).getTime() > Date.now();
+}
+
+function senderName(c: Conversation | undefined, senderId: string): string | undefined {
+  const u = c?.members?.find((m) => m.user?.id === senderId)?.user;
+  return u?.display_name?.trim() || u?.username?.trim() || undefined;
 }
 
 // --- presence ------------------------------------------------------
@@ -128,34 +170,40 @@ function stringPatch<K extends string>(
   return out;
 }
 
-// The shared shape of the three message-thread events on the wire.
-function messageEventConversationId(env: WSEnvelope): string | undefined {
-  const d = asRecord(env.data);
-  return d ? str(d.conversation_id) : undefined;
-}
-
 // --- the dispatcher ------------------------------------------------
 
-export function applyWSEvent(qc: QueryClient, env: WSEnvelope): void {
+export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchContext = {}): void {
   switch (env.type) {
     case 'message.new': {
       // `{ message_id, conversation_id, sender_id, created_at }` — no
       // body on the wire, so the thread refetches; the chats list gets
       // an in-place bump so it re-sorts without a round-trip.
-      const convId = messageEventConversationId(env);
-      if (!convId) return;
+      const d = asRecord(env.data);
+      const convId = d && str(d.conversation_id);
+      if (!d || !convId) return;
       void qc.invalidateQueries({ queryKey: [messagesKeyFor(convId)] });
-      const createdAt = str(asRecord(env.data)?.created_at);
+      const createdAt = str(d.created_at);
       qc.setQueriesData<ConversationList>({ queryKey: [CONVERSATIONS_KEY] }, (cur) =>
         bumpConversation(cur, convId, createdAt)
       );
+      // Banner — unless you're already on that thread or it's muted.
+      const conv = findConversation(qc, convId);
+      if (getActiveConversation() === convId || isMuted(conv)) return;
+      const messageId = str(d.message_id);
+      const name = senderName(conv, str(d.sender_id) ?? '');
+      enqueueBanner({
+        id: messageId ?? `msg:${convId}:${createdAt ?? ''}`,
+        title: name ? `New message from ${name}` : 'New message',
+        route: `/conversations/${convId}`,
+      });
       return;
     }
     case 'message.edited':
     case 'message.deleted': {
       // Same id-only wire shape — the open thread refetches to pick up
       // the new body / the deleted placeholder.
-      const convId = messageEventConversationId(env);
+      const d = asRecord(env.data);
+      const convId = d && str(d.conversation_id);
       if (!convId) return;
       void qc.invalidateQueries({ queryKey: [messagesKeyFor(convId)] });
       return;
@@ -174,30 +222,54 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope): void {
     }
     case 'friend.request_received': {
       void qc.invalidateQueries({ queryKey: [FRIEND_REQUESTS_KEY] });
-      // The <EventBanner> enqueue for this event lands in Phase 7.5.
+      const id = str(asRecord(env.data)?.id);
+      enqueueBanner({
+        id: id ? `friend-req:${id}` : `friend-req:${Date.now()}`,
+        title: 'New friend request',
+        route: '/friends',
+      });
       return;
     }
     case 'friend.request_accepted': {
       void qc.invalidateQueries({ queryKey: [FRIENDS_KEY] });
       void qc.invalidateQueries({ queryKey: [FRIEND_REQUESTS_KEY] });
-      // The <EventBanner> enqueue for this event lands in Phase 7.5.
+      const id = str(asRecord(env.data)?.id);
+      enqueueBanner({
+        id: id ? `friend-acc:${id}` : `friend-acc:${Date.now()}`,
+        title: 'Friend request accepted',
+        route: '/friends',
+      });
+      return;
+    }
+    case 'conversation.member_added': {
+      void qc.invalidateQueries({ queryKey: [CONVERSATIONS_KEY] });
+      // Banner only when *you* were the one added (payload is
+      // `{ conversation_id, member: { user: { id, … }, … } }`).
+      const d = asRecord(env.data);
+      const convId = d && str(d.conversation_id);
+      const member = d && asRecord(d.member);
+      const addedUser = member && asRecord(member.user);
+      const addedId = addedUser && str(addedUser.id);
+      if (!convId || !ctx.myUserId || addedId !== ctx.myUserId) return;
+      const name = findConversation(qc, convId)?.name?.trim();
+      enqueueBanner({
+        id: `member-added:${convId}`,
+        title: name ? `Added you to ${name}` : 'Added you to a group',
+        route: `/conversations/${convId}`,
+      });
       return;
     }
     case 'conversation.created':
     case 'conversation.updated':
-    case 'conversation.member_added':
     case 'conversation.member_removed': {
       void qc.invalidateQueries({ queryKey: [CONVERSATIONS_KEY] });
-      // member_added/removed for the open thread also touches its
-      // detail query; the conversation/[id] screen invalidates that
-      // on focus, so a list invalidation is enough here.
       return;
     }
     // --- known events handled by later phases (deliberate no-ops) ---
     case 'message.read': // read receipts — Phase 6.3 rendering wiring
     case 'typing.start': // typing store — Phase 6.4
     case 'typing.stop':
-    case 'room.started': // call store + RoomBanner — Phase 9
+    case 'room.started': // call store + RoomBanner — Phase 9 (no banner: CallOverlay owns it)
     case 'room.participant_joined':
     case 'room.participant_left':
     case 'room.video_changed':
