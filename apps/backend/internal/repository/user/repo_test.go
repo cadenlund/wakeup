@@ -255,7 +255,13 @@ func TestListByPrefix_PrefixMatch(t *testing.T) {
 	}
 	for i := 0; i < 4; i++ {
 		p := makeBaseParams()
-		p.Username = "other-" + p.Username // ensure no "caden" prefix
+		// ListByPrefix is substring search (`ILIKE '%cad%'`), so a bare
+		// "other-" prefix isn't enough — the UUID-derived hex tail can
+		// incidentally contain "cad" (CI hit this when a generated id
+		// was `019e14f6...2cad7984...`). Scrub any "cad" out of the hex
+		// before assembling so the non-match invariant holds regardless
+		// of which UUID we draw.
+		p.Username = "other-" + strings.ReplaceAll(p.Username, "cad", "zzz")
 		p.DisplayName = "Other"
 		if _, err := repo.Create(ctx, p); err != nil {
 			t.Fatalf("Create other %d: %v", i, err)
