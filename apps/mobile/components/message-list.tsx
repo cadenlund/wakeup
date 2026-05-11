@@ -503,7 +503,6 @@ export function MessageList({
       {list}
       <MessageActionPopover
         target={actionTarget}
-        isGroup={isGroup}
         onClose={() => setActionTarget(null)}
         onDelete={deleteMessage}
         testID="message-action-popover"
