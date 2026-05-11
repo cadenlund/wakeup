@@ -405,8 +405,28 @@ export default function SearchModalScreen() {
   const toggleSection = React.useCallback((section: SectionId) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
-      if (next.has(section)) next.delete(section);
-      else next.add(section);
+      if (next.has(section)) {
+        next.delete(section);
+      } else {
+        next.add(section);
+        // Collapsing also drops the show-all expansion for the
+        // section. Two reasons:
+        //   1. UX: re-opening the chevron should reset to the
+        //      cap-5 + "Show all N" affordance, not silently
+        //      restore a 1000-row drill-down state.
+        //   2. Correctness: when usersExpanded stays true behind
+        //      a collapsed section, the rows under it aren't
+        //      rendered but the FlashList is suddenly very short,
+        //      so onEndReached keeps firing fetchNextPage on
+        //      every render and the drill-down query cascades
+        //      every page in the background.
+        setExpandedSections((prevExp) => {
+          if (!prevExp.has(section)) return prevExp;
+          const nextExp = new Set(prevExp);
+          nextExp.delete(section);
+          return nextExp;
+        });
+      }
       return next;
     });
   }, []);
