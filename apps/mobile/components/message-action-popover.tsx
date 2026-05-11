@@ -22,6 +22,7 @@ import * as React from 'react';
 import { Animated, Modal, Platform, Pressable, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import { formatTimeDividerLabel } from '@/components/time-divider';
 import { toast } from '@/lib/toast';
@@ -31,11 +32,16 @@ import { cn } from '@/lib/utils';
 // Window-coordinate rect of the long-pressed bubble.
 export type BubbleRect = { x: number; y: number; width: number; height: number };
 
+// One reader of the message, pre-resolved by <MessageList> so the
+// popover stays free of the user model. Excludes self and the
+// message's own sender.
+export type MessageReader = { id?: string; name: string; avatarUrl?: string | null };
+
 // The bubble the popover was opened on. `mine` gates Delete +
 // hides Report; `isDeleted` hides Copy. `body` is what Copy writes
 // + what the snapshot renders. `createdAt` drives the "Sent …"
 // caption. `rect` anchors the pill; when it's undefined the pill
-// centers itself.
+// centers itself. `seenBy` drives the "Seen by …" section.
 export type MessageActionTarget = {
   id: string;
   body: string;
@@ -43,19 +49,25 @@ export type MessageActionTarget = {
   isDeleted: boolean;
   createdAt: string | null | undefined;
   rect: BubbleRect | undefined;
+  seenBy?: MessageReader[];
 };
 
 type Props = {
   target: MessageActionTarget | null;
+  // Group threads list readers by avatar + name; DMs show a single
+  // "Seen" / "Delivered" line on your own messages.
+  isGroup: boolean;
   onClose: () => void;
   // Caller owns the optimistic cache patch + the DELETE call.
   onDelete: (messageId: string) => void;
   testID?: string;
 };
 
-// Icon button geometry inside the card.
-const ICON_BTN = 44; // touch target — keep ≥44
-const ICON_ROW_PAD = 2; // horizontal padding flanking the icon row
+// Icon button geometry inside the card. 40px keeps a comfortable
+// touch target while letting the icon row hug its contents — iMessage's
+// pill is similarly snug.
+const ICON_BTN = 40;
+const ICON_ROW_PAD = 0; // the buttons' own width is the only horizontal padding
 const CAPTION_PAD = 10; // horizontal padding flanking the timestamp row
 // Rough width-per-char for the timestamp string at the 11px
 // caption font. Timestamps are mostly digits + a few letters +
@@ -72,6 +84,12 @@ const SNAPSHOT_SCALE = 1.04;
 // GAP from the bubble — overestimating pushes it visibly too far.
 const CAPTION_ROW_H = 26; // px + ~14px text + 1px border
 const ICON_ROW_H = ICON_BTN; // the icon row's height is just the buttons
+// "Seen by" section geometry (group only; DMs render a 1-line note).
+const SEEN_PAD_V = 8; // vertical padding wrapping the section
+const SEEN_HEADER_H = 18; // "Seen by" label + its bottom margin
+const SEEN_ROW_H = 24; // one reader row (avatar + name)
+const MAX_SEEN_ROWS = 8; // beyond this → "and N more"
+const SEEN_MIN_WIDTH = 200; // so reader names don't get squeezed
 // Snapshot bubble caps its width like the in-thread bubble's
 // `max-w-[80%]` so short text ("Message deleted") doesn't get
 // re-wrapped narrow and tall. Slightly looser than 80% so it can
@@ -86,20 +104,30 @@ type Action = {
   destructive?: boolean;
 };
 
-export function MessageActionPopover({ target, onClose, onDelete, testID }: Props) {
+export function MessageActionPopover({ target, isGroup, onClose, onDelete, testID }: Props) {
   // Inner component so the spring-in animation runs on every open
   // (its mount lifecycle == the popover's open lifecycle).
   if (!target) return null;
-  return <PopoverContent target={target} onClose={onClose} onDelete={onDelete} testID={testID} />;
+  return (
+    <PopoverContent
+      target={target}
+      isGroup={isGroup}
+      onClose={onClose}
+      onDelete={onDelete}
+      testID={testID}
+    />
+  );
 }
 
 function PopoverContent({
   target,
+  isGroup,
   onClose,
   onDelete,
   testID,
 }: {
   target: MessageActionTarget;
+  isGroup: boolean;
   onClose: () => void;
   onDelete: (messageId: string) => void;
   testID?: string;
@@ -189,16 +217,34 @@ function PopoverContent({
     const t = formatTimeDividerLabel(target.createdAt);
     return t ? `Sent · ${t}` : '';
   })();
-  // Card width hugs its content: the wider of the icon row and the
-  // timestamp caption (estimated — see CAPTION_CHAR_PX). No fixed
-  // floor — for one icon + a long stamp the caption sets the width;
-  // for four icons + a short stamp the icons do.
+
+  // "Seen by …" section, INSIDE the pill, below the icons. Group →
+  // a row per reader (avatar + name), capped at MAX_SEEN_ROWS with
+  // an "and N more" tail; DM → a single "Seen" / "Delivered" note,
+  // and only on your own messages (a peer's message has no receipt).
+  const readers = target.seenBy ?? [];
+  const showSeenSection = isGroup || target.mine;
+  const seenRows = isGroup ? Math.min(readers.length, MAX_SEEN_ROWS) : 0;
+  const seenHasOverflow = isGroup && readers.length > MAX_SEEN_ROWS;
+  const seenSectionHeight = showSeenSection
+    ? SEEN_PAD_V * 2 +
+      (isGroup
+        ? SEEN_HEADER_H +
+          (readers.length === 0 ? SEEN_ROW_H : seenRows * SEEN_ROW_H) +
+          (seenHasOverflow ? SEEN_ROW_H : 0)
+        : SEEN_ROW_H)
+    : 0;
+
+  // Card width hugs its content: the widest of the icon row, the
+  // timestamp caption (estimated — see CAPTION_CHAR_PX), and a
+  // minimum for the reader list so names aren't squeezed.
   const iconRowWidth = actions.length * ICON_BTN + ICON_ROW_PAD * 2;
   const captionWidth = sentLabel
     ? Math.ceil(sentLabel.length * CAPTION_CHAR_PX) + CAPTION_PAD * 2
     : 0;
-  const pillWidth = Math.max(iconRowWidth, captionWidth);
-  const pillHeight = ICON_ROW_H + (sentLabel ? CAPTION_ROW_H : 0);
+  const seenWidth = showSeenSection && isGroup ? SEEN_MIN_WIDTH : 0;
+  const pillWidth = Math.max(iconRowWidth, captionWidth, seenWidth);
+  const pillHeight = ICON_ROW_H + (sentLabel ? CAPTION_ROW_H : 0) + seenSectionHeight;
 
   // --- Positioning -------------------------------------------------
   // Android's measureInWindow returns y relative to the content
@@ -338,6 +384,42 @@ function PopoverContent({
                 </Pressable>
               ))}
             </View>
+            {showSeenSection ? (
+              <View className="border-t border-border px-3" style={{ paddingVertical: SEEN_PAD_V }}>
+                {isGroup ? (
+                  <>
+                    <Text variant="muted" className="mb-1 text-[11px] font-medium">
+                      Seen by
+                    </Text>
+                    {readers.length === 0 ? (
+                      <Text variant="muted" className="text-xs">
+                        No one yet
+                      </Text>
+                    ) : (
+                      <>
+                        {readers.slice(0, MAX_SEEN_ROWS).map((p) => (
+                          <View key={p.id ?? p.name} className="flex-row items-center gap-2 py-0.5">
+                            <Avatar source={p.avatarUrl} fallbackName={p.name} size={18} />
+                            <Text numberOfLines={1} className="flex-1 text-xs">
+                              {p.name}
+                            </Text>
+                          </View>
+                        ))}
+                        {seenHasOverflow ? (
+                          <Text variant="muted" className="pt-0.5 text-xs">
+                            and {readers.length - MAX_SEEN_ROWS} more
+                          </Text>
+                        ) : null}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <Text variant="muted" className="text-xs">
+                    {readers.length > 0 ? 'Seen' : 'Delivered'}
+                  </Text>
+                )}
+              </View>
+            ) : null}
           </Pressable>
         </Animated.View>
       </Pressable>

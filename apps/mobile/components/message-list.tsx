@@ -180,15 +180,38 @@ export function MessageList({
     return m;
   }, [members]);
 
-  // Per-message read-receipt caption shown under "mine" bubbles.
-  // iMessage convention — only the *latest* relevant message gets
-  // one:
-  //   - DM: under your last delivered sent message — "Delivered"
-  //     until the peer's read pointer reaches it, then "Seen".
-  //   - Group: under each message at a member's read frontier —
+  // Each loaded message's index, for read-pointer comparisons.
+  const msgIdxById = React.useMemo(() => {
+    const m = new Map<string, number>();
+    messages.forEach((msg, i) => {
+      if (msg.id) m.set(msg.id, i);
+    });
+    return m;
+  }, [messages]);
+
+  // Each member's read-pointer position in the loaded window (-1 if
+  // their last_read_message_id is null or older than what's loaded).
+  // Self excluded — own pointer isn't a "receipt".
+  const readPointerIdxByUser = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const row of members) {
+      const uid = row.user?.id;
+      if (!uid || uid === myUserId) continue;
+      const readId = row.last_read_message_id;
+      m.set(uid, readId ? (msgIdxById.get(readId) ?? -1) : -1);
+    }
+    return m;
+  }, [members, msgIdxById, myUserId]);
+
+  // Per-message read-receipt caption:
+  //   - DM: a single caption under your last delivered sent message
+  //     — "Delivered" until the peer's read pointer reaches it,
+  //     then "Seen".
+  //   - Group: under EVERY message at a member's read frontier —
   //     "Seen by Ada" / "Seen by Ada and Ben" / "Seen by Ada, Ben
-  //     and 2 others". A member only appears at their frontier;
-  //     older messages are implicitly read.
+  //     and 2 others". A member only shows at their frontier (older
+  //     messages are implicitly read); the message's own sender is
+  //     never listed for their message.
   // Members with a NULL read pointer never opened the thread and
   // contribute nothing. Self is skipped (own receipts are noise).
   const receiptByMessageId = React.useMemo(() => {
@@ -205,7 +228,11 @@ export function MessageList({
         if (arr) arr.push(row.user);
         else frontier.set(readId, [row.user]);
       }
-      for (const [msgId, users] of frontier) out.set(msgId, formatSeenBy(users));
+      for (const msg of messages) {
+        if (!msg.id) continue;
+        const seers = (frontier.get(msg.id) ?? []).filter((u) => u.id !== msg.sender_id);
+        if (seers.length > 0) out.set(msg.id, formatSeenBy(seers));
+      }
       return out;
     }
 
@@ -223,10 +250,10 @@ export function MessageList({
     const otherReadId = members.find(
       (row) => row.user?.id && row.user.id !== myUserId
     )?.last_read_message_id;
-    const otherPtrIdx = otherReadId ? messages.findIndex((m) => m.id === otherReadId) : -1;
+    const otherPtrIdx = otherReadId ? (msgIdxById.get(otherReadId) ?? -1) : -1;
     out.set(lastSentId, otherPtrIdx >= lastSentIdx ? 'Seen' : 'Delivered');
     return out;
-  }, [messages, members, isGroup, myUserId, sendStatusByTempId]);
+  }, [messages, members, isGroup, myUserId, sendStatusByTempId, msgIdxById]);
 
   // Mark-read on focus: post the latest *delivered* message id to
   // the backend so the per-member read pointer advances. The
@@ -397,7 +424,27 @@ export function MessageList({
         const isPlaceholder = !!m.id && sendStatusByTempId.has(m.id);
         const onLongPress =
           m.id && !isPlaceholder
-            ? (rect: { x: number; y: number; width: number; height: number } | undefined) =>
+            ? (rect: { x: number; y: number; width: number; height: number } | undefined) => {
+                // Who's read this message — every member (≠ self,
+                // ≠ this message's sender) whose read pointer is at
+                // or past this message. The popover lists them.
+                const msgIdx = msgIdxById.get(m.id as string) ?? -1;
+                const seenBy =
+                  msgIdx < 0
+                    ? []
+                    : members.flatMap((row) => {
+                        const u = row.user;
+                        if (!u?.id || u.id === myUserId || u.id === m.sender_id) return [];
+                        const ptr = readPointerIdxByUser.get(u.id) ?? -1;
+                        if (ptr < msgIdx) return [];
+                        return [
+                          {
+                            id: u.id,
+                            name: u.display_name?.trim() || u.username?.trim() || 'Someone',
+                            avatarUrl: u.avatar_url,
+                          },
+                        ];
+                      });
                 setActionTarget({
                   id: m.id as string,
                   body: m.body ?? '',
@@ -405,7 +452,9 @@ export function MessageList({
                   isDeleted: !!m.is_deleted,
                   createdAt: m.created_at,
                   rect,
-                })
+                  seenBy,
+                });
+              }
             : undefined;
         return (
           <MessageBubble
@@ -423,9 +472,11 @@ export function MessageList({
             // Hide the in-thread copy while the popover holds it —
             // its pinned snapshot is the visible one (no duplicate).
             lifted={!!actionTarget && !!m.id && actionTarget.id === m.id}
-            // Read-receipt caption — only ever set on "mine" bubbles
-            // (a recipient has no receipt for someone else's message).
-            receiptText={mine && m.id ? receiptByMessageId.get(m.id) : undefined}
+            // Read-receipt caption. DM: only on your last sent
+            // message ("Delivered"/"Seen"). Group: on every message
+            // at someone's read frontier ("Seen by …"), including
+            // other people's messages.
+            receiptText={m.id ? receiptByMessageId.get(m.id) : undefined}
             senderName={isGroup ? (sender?.display_name ?? undefined) : undefined}
             senderUsername={isGroup ? (sender?.username ?? undefined) : undefined}
             senderAvatarUrl={isGroup ? (sender?.avatar_url ?? undefined) : undefined}
@@ -446,6 +497,7 @@ export function MessageList({
       {list}
       <MessageActionPopover
         target={actionTarget}
+        isGroup={isGroup}
         onClose={() => setActionTarget(null)}
         onDelete={deleteMessage}
         testID="message-action-popover"
