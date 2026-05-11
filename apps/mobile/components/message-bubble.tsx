@@ -15,6 +15,7 @@ import { ActivityIndicator, Pressable, View } from 'react-native';
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import type { InternalHandlerHttpUserResponse } from '@/lib/api/model';
+import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import type { LocalSendStatus } from '@/lib/use-send-message';
 import { cn } from '@/lib/utils';
@@ -53,6 +54,11 @@ type Props = {
   // tappable "Not sent · Retry" affordance that calls onRetrySend.
   sendStatus?: LocalSendStatus;
   onRetrySend?: () => void;
+  // Long-press anywhere in the bubble column opens the message
+  // context menu (Copy / React / Report / Delete). The list owns
+  // the menu state; the bubble just reports the gesture. Fires
+  // haptics.tap() internally before the callback.
+  onLongPress?: () => void;
   testID?: string;
 };
 
@@ -69,11 +75,24 @@ export function MessageBubble({
   readBy,
   sendStatus,
   onRetrySend,
+  onLongPress,
   testID,
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
   const mutedFg = useThemeColor('muted-foreground');
   const destructive = useThemeColor('destructive');
+  const BubbleColumn = onLongPress ? Pressable : View;
+  const bubbleColumnProps = onLongPress
+    ? {
+        onLongPress: () => {
+          haptics.tap();
+          onLongPress();
+        },
+        delayLongPress: 300,
+        accessibilityRole: 'button' as const,
+        accessibilityLabel: 'Message actions',
+      }
+    : {};
   // Per-bubble timestamps moved to centered <TimeDivider> rows in
   // the list (Apple Messages convention — gaps between message
   // bursts get a divider; individual bubbles stay quiet).
@@ -101,7 +120,9 @@ export function MessageBubble({
         </View>
       ) : null}
 
-      <View className={cn('max-w-[80%]', mine ? 'items-end' : 'items-start')}>
+      <BubbleColumn
+        {...bubbleColumnProps}
+        className={cn('max-w-[80%]', mine ? 'items-end' : 'items-start')}>
         {showSenderLabel && !mine && displayName ? (
           <Text variant="muted" className="mb-0.5 px-1 text-xs">
             {displayName}
@@ -169,7 +190,7 @@ export function MessageBubble({
             </Text>
           )
         ) : null}
-      </View>
+      </BubbleColumn>
     </View>
   );
 }
