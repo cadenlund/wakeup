@@ -5,13 +5,18 @@
 // fact into a cache mutation — it never owns state itself; every
 // fact still lives in TanStack Query (WAKEUPEXPO §4.4 / §6.2).
 //
-// Three kinds of action (§6.2):
+// Two kinds of action:
 //
-//   1. setQueryData patch — `message.new` (prepend), `message.edited`,
-//      `message.deleted` patch the cached message pages directly so the
-//      open thread updates without a refetch.
-//   2. invalidateQueries — `friend.*` and `conversation.*` mark the
-//      relevant lists stale so they re-fetch on next render.
+//   1. invalidateQueries — the message-thread events
+//      (`message.new` / `message.edited` / `message.deleted`) only
+//      carry ids on the wire (`{ message_id, conversation_id,
+//      sender_id, created_at }` — see backend `publishMessageEvent`),
+//      not the body, so the open thread refetches; `friend.*` and
+//      `conversation.*` mark their lists stale the same way.
+//   2. setQueryData patch — the events that DO carry their full state:
+//      `message.new` also bumps the conversation row's
+//      `last_message_at` and re-sorts the chats list; `presence.update`
+//      patches the friend's presence row.
 //   3. side-effect — `room.*` (call store), `typing.*` (typing store).
 //      Those subsystems land in later phases; the cases are present as
 //      explicit no-ops so an arriving event is silently ignored rather
@@ -28,20 +33,16 @@
 // module (and its `bun test` suite) to the RN runtime. The literals
 // mirror `getGetV1*QueryKey()[0]` and are part of the stable API
 // contract (the same trick `lib/use-send-message.ts` already uses).
-import type { InfiniteData, QueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 
 import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
-  InternalHandlerHttpMessageListResponse,
-  InternalHandlerHttpMessageResponse,
   InternalHandlerHttpPresenceListResponse,
   InternalHandlerHttpPresenceResponse,
 } from '@/lib/api/model';
 import type { WSEnvelope } from '@/lib/ws/client';
 
-type Message = InternalHandlerHttpMessageResponse;
-type MessageList = InternalHandlerHttpMessageListResponse;
 type ConversationList = InternalHandlerHttpConversationListResponse;
 type Conversation = InternalHandlerHttpConversationResponse;
 type PresenceList = InternalHandlerHttpPresenceListResponse;
@@ -53,83 +54,6 @@ const FRIENDS_KEY = '/v1/friends';
 const FRIEND_REQUESTS_KEY = '/v1/friends/requests';
 const PRESENCE_FRIENDS_KEY = '/v1/presence/friends';
 const messagesKeyFor = (conversationId: string) => `/v1/conversations/${conversationId}/messages`;
-
-// A cached list query may be either a single page (`{ data }`) or the
-// `useInfiniteQuery` shape (`{ pages: [{ data }, …] }`); the message
-// thread uses the latter. These helpers patch both transparently —
-// same approach `lib/use-send-message.ts` takes for optimistic sends.
-type Infinite<P> = InfiniteData<P>;
-type Cached<P> = P | Infinite<P>;
-
-function isInfinite<P>(data: Cached<P> | undefined): data is Infinite<P> {
-  return !!data && Array.isArray((data as Infinite<P>).pages);
-}
-
-// Apply `fn` to every page of a cached list (or the single page),
-// returning a new object only if something actually changed so React
-// Query can skip a re-render when the event was a no-op.
-function mapPages<P>(data: Cached<P> | undefined, fn: (page: P) => P): Cached<P> | undefined {
-  if (!data) return data;
-  if (isInfinite(data)) {
-    let touched = false;
-    const pages = data.pages.map((p) => {
-      const next = fn(p);
-      if (next !== p) touched = true;
-      return next;
-    });
-    return touched ? { ...data, pages } : data;
-  }
-  return fn(data);
-}
-
-// --- message.* -----------------------------------------------------
-
-function messageInPage(page: MessageList, id: string): boolean {
-  return !!page.data?.some((m) => m.id === id);
-}
-
-// Prepend a freshly-arrived message to the first page. Skips if a row
-// with that id is already cached — covers the echo of the local
-// user's own send (the POST response already inserted it) and any
-// duplicate delivery.
-function prependMessage(
-  data: Cached<MessageList> | undefined,
-  msg: Message
-): Cached<MessageList> | undefined {
-  const id = msg.id;
-  if (!data || !id) return data;
-  // Already present anywhere → no-op.
-  const present = isInfinite(data)
-    ? data.pages.some((p) => messageInPage(p, id))
-    : messageInPage(data, id);
-  if (present) return data;
-  if (isInfinite(data)) {
-    if (data.pages.length === 0) return { ...data, pages: [{ data: [msg] } as MessageList] };
-    const [first, ...rest] = data.pages;
-    return { ...data, pages: [{ ...first, data: [msg, ...(first.data ?? [])] }, ...rest] };
-  }
-  return { ...data, data: [msg, ...(data.data ?? [])] };
-}
-
-// Replace a cached message with `patch` merged on top — used for
-// `message.edited` (new body + edited_at) and `message.deleted`
-// (is_deleted/deleted_at, body blanked server-side).
-function patchMessage(
-  data: Cached<MessageList> | undefined,
-  id: string,
-  patch: Partial<Message>
-): Cached<MessageList> | undefined {
-  return mapPages<MessageList>(data, (page) => {
-    if (!page.data) return page;
-    let touched = false;
-    const next = page.data.map((m) => {
-      if (m.id !== id) return m;
-      touched = true;
-      return { ...m, ...patch };
-    });
-    return touched ? { ...page, data: next } : page;
-  });
-}
 
 // --- conversations list --------------------------------------------
 
@@ -204,46 +128,36 @@ function stringPatch<K extends string>(
   return out;
 }
 
+// The shared shape of the three message-thread events on the wire.
+function messageEventConversationId(env: WSEnvelope): string | undefined {
+  const d = asRecord(env.data);
+  return d ? str(d.conversation_id) : undefined;
+}
+
 // --- the dispatcher ------------------------------------------------
 
 export function applyWSEvent(qc: QueryClient, env: WSEnvelope): void {
   switch (env.type) {
     case 'message.new': {
-      // `data` is the message DTO (server marshals the response shape).
-      const d = asRecord(env.data);
-      const convId = d && str(d.conversation_id);
-      const id = d && str(d.id);
-      if (!d || !convId || !id) return;
-      const msg = d as Message;
-      qc.setQueriesData<Cached<MessageList>>({ queryKey: [messagesKeyFor(convId)] }, (cur) =>
-        prependMessage(cur, msg)
-      );
+      // `{ message_id, conversation_id, sender_id, created_at }` — no
+      // body on the wire, so the thread refetches; the chats list gets
+      // an in-place bump so it re-sorts without a round-trip.
+      const convId = messageEventConversationId(env);
+      if (!convId) return;
+      void qc.invalidateQueries({ queryKey: [messagesKeyFor(convId)] });
+      const createdAt = str(asRecord(env.data)?.created_at);
       qc.setQueriesData<ConversationList>({ queryKey: [CONVERSATIONS_KEY] }, (cur) =>
-        bumpConversation(cur, convId, msg.created_at)
+        bumpConversation(cur, convId, createdAt)
       );
       return;
     }
-    case 'message.edited': {
-      const d = asRecord(env.data);
-      const convId = d && str(d.conversation_id);
-      const id = d && str(d.id);
-      if (!d || !convId || !id) return;
-      const patch = stringPatch(d, ['body', 'edited_at'] as const);
-      if (Object.keys(patch).length === 0) return;
-      qc.setQueriesData<Cached<MessageList>>({ queryKey: [messagesKeyFor(convId)] }, (cur) =>
-        patchMessage(cur, id, patch)
-      );
-      return;
-    }
+    case 'message.edited':
     case 'message.deleted': {
-      // Payload is `{ message_id, conversation_id }`.
-      const d = asRecord(env.data);
-      const convId = d && str(d.conversation_id);
-      const id = d && str(d.message_id);
-      if (!d || !convId || !id) return;
-      qc.setQueriesData<Cached<MessageList>>({ queryKey: [messagesKeyFor(convId)] }, (cur) =>
-        patchMessage(cur, id, { is_deleted: true, body: '' })
-      );
+      // Same id-only wire shape — the open thread refetches to pick up
+      // the new body / the deleted placeholder.
+      const convId = messageEventConversationId(env);
+      if (!convId) return;
+      void qc.invalidateQueries({ queryKey: [messagesKeyFor(convId)] });
       return;
     }
     case 'presence.update': {
