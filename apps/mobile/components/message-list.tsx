@@ -36,6 +36,7 @@ import * as React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 import { MessageBubble } from '@/components/message-bubble';
+import { AGGREGATE_GAP_MS, TimeDivider } from '@/components/time-divider';
 import { List } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
 import { flatten, useInfiniteMessages } from '@/lib/api/use-infinite';
@@ -142,6 +143,51 @@ export function MessageList({
   const latestMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : undefined;
   useMarkReadOnFocus(conversationId, latestMessageId);
 
+  // Build the interleaved row list:
+  // - A divider precedes every message that starts a new burst
+  //   (the first message overall, or one whose timestamp is more
+  //   than AGGREGATE_GAP_MS after the previous message). Messages
+  //   within the same burst share the single divider at the top.
+  // - Each message row carries pre-computed sameAsOlder /
+  //   sameAsNewer flags. Neighbor lookups happen here (in the
+  //   `messages` array, not the row array, because the row array
+  //   has dividers interspersed and "previous row" wouldn't be a
+  //   sibling message).
+  const rows = React.useMemo(() => {
+    type DividerRow = { kind: 'divider'; key: string; iso: string };
+    type MessageRow = {
+      kind: 'message';
+      key: string;
+      message: Message;
+      sameAsOlder: boolean;
+      sameAsNewer: boolean;
+    };
+    const out: (DividerRow | MessageRow)[] = [];
+    let lastTs = 0;
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      const iso = m.created_at;
+      const t = iso ? Date.parse(iso) : NaN;
+      if (Number.isFinite(t) && (lastTs === 0 || t - lastTs >= AGGREGATE_GAP_MS)) {
+        out.push({ kind: 'divider', key: `div-${m.id ?? t}`, iso: iso as string });
+        lastTs = t;
+      } else if (Number.isFinite(t)) {
+        lastTs = t;
+      }
+      const senderId = m.sender_id ?? '';
+      const sameAsOlder = messages[i - 1]?.sender_id === senderId;
+      const sameAsNewer = messages[i + 1]?.sender_id === senderId;
+      out.push({
+        kind: 'message',
+        key: m.id ?? `idx-${out.length}`,
+        message: m,
+        sameAsOlder,
+        sameAsNewer,
+      });
+    }
+    return out;
+  }, [messages]);
+
   // Older history loads when the user scrolls to the TOP of the
   // list — onStartReached is the v2 equivalent of inverted+onEndReached.
   const onStartReached = React.useCallback(() => {
@@ -186,15 +232,28 @@ export function MessageList({
     );
   }
 
+  type Row =
+    | { kind: 'divider'; key: string; iso: string }
+    | {
+        kind: 'message';
+        key: string;
+        message: Message;
+        sameAsOlder: boolean;
+        sameAsNewer: boolean;
+      };
   return (
-    <List<Message>
-      data={messages}
-      // Messages always have a server-issued id (`id?: string` is
-      // OpenAPI-optional, runtime-required). Falling back to a
-      // positional `idx-${i}` key would shift on every prepend when
-      // an older page lands and FlashList would remount the wrong
-      // cells (CodeRabbit on PR #141).
-      keyExtractor={(m) => m.id as string}
+    <List<Row>
+      data={rows}
+      // Stable per-row keys. Dividers carry a synthetic
+      // `div-<id>` key; messages reuse the server-issued id.
+      // FlashList depends on the key being unique across the
+      // whole data array, not just per type.
+      keyExtractor={(row) => row.key}
+      // getItemType lets FlashList recycle dividers separately
+      // from message bubbles — without this, the recycler would
+      // try to reuse a divider's tiny height for a full bubble
+      // and vice-versa, causing flicker on prepend.
+      getItemType={(row) => row.kind}
       // Anchor at the bottom on first paint so the user lands on
       // the newest message; lets older content prepend cleanly as
       // the cursor walks back through history.
@@ -213,15 +272,13 @@ export function MessageList({
           </View>
         ) : null
       }
-      renderItem={({ item, index }) => {
-        const senderId = item.sender_id ?? '';
+      renderItem={({ item }) => {
+        if (item.kind === 'divider') {
+          return <TimeDivider iso={item.iso} />;
+        }
+        const m = item.message;
+        const senderId = m.sender_id ?? '';
         const mine = !!myUserId && senderId === myUserId;
-        // Array runs oldest → newest, so the older neighbor sits
-        // at index - 1 and the newer one at index + 1.
-        const olderNeighbor = messages[index - 1];
-        const newerNeighbor = messages[index + 1];
-        const sameAsOlder = olderNeighbor?.sender_id === senderId;
-        const sameAsNewer = newerNeighbor?.sender_id === senderId;
         const sender = senderId ? senderByUserId.get(senderId) : undefined;
         // Always pass sender identity in group threads so the avatar
         // fallback resolves to initials even on mid-streak bubbles.
@@ -229,28 +286,28 @@ export function MessageList({
         // showSenderLabel.
         return (
           <MessageBubble
-            body={item.body}
-            createdAt={item.created_at}
-            isDeleted={item.is_deleted}
+            body={m.body}
+            isDeleted={m.is_deleted}
             mine={mine}
+            isGroup={isGroup}
             // Per-bubble send status only applies to "mine" rows
             // — the recipient never has a local send state for
             // someone else's message.
-            sendStatus={mine && item.id ? sendStatusByTempId.get(item.id)?.status : undefined}
-            onRetrySend={mine && item.id ? () => onRetrySend(item.id as string) : undefined}
+            sendStatus={mine && m.id ? sendStatusByTempId.get(m.id)?.status : undefined}
+            onRetrySend={mine && m.id ? () => onRetrySend(m.id as string) : undefined}
             // Read-receipt avatars only appear under "mine" bubbles
             // in group threads (per §6.3 spec). The bubble component
             // ignores `readBy` for non-mine rows.
-            readBy={mine && item.id ? readByMessageId.get(item.id) : undefined}
+            readBy={mine && m.id ? readByMessageId.get(m.id) : undefined}
             senderName={isGroup ? (sender?.display_name ?? undefined) : undefined}
             senderUsername={isGroup ? (sender?.username ?? undefined) : undefined}
             senderAvatarUrl={isGroup ? (sender?.avatar_url ?? undefined) : undefined}
-            showSenderLabel={isGroup && !sameAsOlder}
+            showSenderLabel={isGroup && !item.sameAsOlder}
             // Avatar slot anchors to the streak's tail (newest
             // bubble in a same-sender burst), or to the freshest
             // message overall.
-            showAvatar={isGroup && !sameAsNewer}
-            testID={item.id ? `message-${item.id}` : undefined}
+            showAvatar={isGroup && !item.sameAsNewer}
+            testID={m.id ? `message-${m.id}` : undefined}
           />
         );
       }}

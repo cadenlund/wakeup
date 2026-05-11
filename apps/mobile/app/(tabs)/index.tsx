@@ -19,7 +19,7 @@
 import { MessageCircle, Plus, Search, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, RefreshControl, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 
 import { ConversationActionMenu } from '@/components/conversation-action-menu';
 import { ConversationRow } from '@/components/conversation-row';
@@ -62,6 +62,18 @@ export default function ChatsScreen() {
     () => flatten<Conversation, { data?: Conversation[] }>(conversationsQ.data?.pages),
     [conversationsQ.data]
   );
+
+  // Surface the total as a sleek count next to the screen-title
+  // "Chats" word in the native header. setOptions runs through
+  // useLayoutEffect (not useEffect) so the header paints in the
+  // same frame as the data lands — no one-frame flash of an empty
+  // count.
+  const navigation = useNavigation();
+  React.useLayoutEffect(() => {
+    navigation.setOptions({
+      headerTitle: () => <ChatsHeaderTitle total={conversationsTotal} />,
+    });
+  }, [navigation, conversationsTotal]);
 
   // Presence is keyed by user_id. Cache it once per render so each
   // row's display can look up O(1) without re-deriving the map per
@@ -181,14 +193,7 @@ export default function ChatsScreen() {
               void conversationsQ.fetchNextPage();
             }
           }}
-          ListFooterComponent={
-            <ConversationsFooter
-              loading={conversationsQ.isFetchingNextPage}
-              loaded={visible.length}
-              total={filterActive ? visible.length : conversationsTotal}
-              filterActive={filterActive}
-            />
-          }
+          ListFooterComponent={<ConversationsFooter loading={conversationsQ.isFetchingNextPage} />}
           renderItem={({ item }) => (
             <RenderedConversationRow
               conversation={item}
@@ -455,39 +460,32 @@ function PullableEmpty({ refreshing, onRefresh }: { refreshing: boolean; onRefre
   );
 }
 
-function ConversationsFooter({
-  loading,
-  loaded,
-  total,
-  filterActive,
-}: {
-  loading: boolean;
-  loaded: number;
-  total: number;
-  filterActive: boolean;
-}) {
+function ConversationsFooter({ loading }: { loading: boolean }) {
   const mutedFg = useThemeColor('muted-foreground');
-  if (loading) {
-    return (
-      <View className="items-center py-4">
-        <ActivityIndicator color={mutedFg} />
-      </View>
-    );
-  }
-  // No total hint while filtering — the "N of M" hint would read
-  // wrong (it'd compare filtered visible to global total). Filter
-  // is local only; pagination drives the un-filtered shape.
-  if (filterActive) return null;
-  // Render the footer even after the last page lands so the user
-  // sees "Showing 1000 of 1000" — the previous `total <= loaded`
-  // guard hid it exactly when the count first became authoritative
-  // (CodeRabbit on PR #138).
-  if (total <= 0) return null;
+  if (!loading) return null;
   return (
-    <View className="items-center py-3">
-      <Text variant="muted" className="text-xs">
-        Showing {loaded} of {total}
-      </Text>
+    <View className="items-center py-4">
+      <ActivityIndicator color={mutedFg} />
+    </View>
+  );
+}
+
+// Custom header title for the Chats tab — "Chats" in the standard
+// header weight + a small muted total badge next to it. Renders
+// the bare title when total is 0 (a brand-new account would
+// otherwise read "Chats 0", which scans louder than "Chats"
+// alone).
+function ChatsHeaderTitle({ total }: { total: number }) {
+  return (
+    <View className="flex-row items-center gap-2">
+      <Text className="text-base font-semibold">Chats</Text>
+      {total > 0 ? (
+        <View className="rounded-full bg-muted px-2 py-0.5">
+          <Text variant="muted" className="text-xs font-medium">
+            {total}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

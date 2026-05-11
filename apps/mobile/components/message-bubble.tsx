@@ -15,16 +15,19 @@ import { ActivityIndicator, Pressable, View } from 'react-native';
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
 import type { InternalHandlerHttpUserResponse } from '@/lib/api/model';
-import { formatRelative } from '@/lib/relative-time';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import type { LocalSendStatus } from '@/lib/use-send-message';
 import { cn } from '@/lib/utils';
 
 type Props = {
   body: string | null | undefined;
-  createdAt: string | null | undefined;
   isDeleted: boolean | undefined;
   mine: boolean;
+  // True when the surrounding thread is a group. DM threads hide
+  // the avatar gutter AND the sender label entirely so "theirs"
+  // bubbles hug the left edge (Apple Messages convention). Groups
+  // keep the gutter for sender identity.
+  isGroup: boolean;
   // Identity for the avatar fallback (always supplied in groups so
   // mid-streak bubbles still resolve to initials when the user has
   // no avatar_url). DMs / "mine" rows leave it undefined.
@@ -55,9 +58,9 @@ type Props = {
 
 export function MessageBubble({
   body,
-  createdAt,
   isDeleted,
   mine,
+  isGroup,
   senderName,
   senderUsername,
   senderAvatarUrl,
@@ -69,22 +72,28 @@ export function MessageBubble({
   testID,
 }: Props) {
   const displayName = senderName?.trim() || senderUsername?.trim() || undefined;
-  const time = formatRelative(createdAt);
   const mutedFg = useThemeColor('muted-foreground');
   const destructive = useThemeColor('destructive');
+  // Per-bubble timestamps moved to centered <TimeDivider> rows in
+  // the list (Apple Messages convention — gaps between message
+  // bursts get a divider; individual bubbles stay quiet).
   // edited_at is in the backend response but v1 has no message-edit
   // UI (deferred to v2 — §6.5 context menu lands a stub only), so
   // we don't surface an "edited" indicator yet. The prop stays
   // omitted to avoid drifting away from the locked v1 scope.
 
+  // Avatar gutter only renders in groups. In DMs the "theirs"
+  // bubble hugs the left edge so the conversation reads tighter
+  // — matches Apple Messages.
+  const showGutter = isGroup && !mine;
   return (
     <View
       testID={testID}
-      // Row: avatar gutter + bubble column. "Mine" rows put the
-      // bubble flush right with no avatar; "theirs" rows align
-      // bubble against an avatar gutter on the left.
+      // Row: optional avatar gutter (groups only) + bubble column.
+      // "Mine" rows flush right; "theirs" rows align left against
+      // either the gutter (groups) or the edge (DMs).
       className={cn('flex-row items-end gap-2 px-3 py-1', mine ? 'justify-end' : 'justify-start')}>
-      {!mine ? (
+      {showGutter ? (
         <View className="w-8">
           {showAvatar ? (
             <Avatar source={senderAvatarUrl} fallbackName={displayName} size={32} />
@@ -118,12 +127,6 @@ export function MessageBubble({
             </Text>
           )}
         </View>
-
-        {time ? (
-          <Text variant="muted" className="mt-0.5 px-1 text-[10px]">
-            {time}
-          </Text>
-        ) : null}
 
         {readBy && readBy.length > 0 ? (
           <View className="mt-0.5 flex-row gap-1 px-1">
