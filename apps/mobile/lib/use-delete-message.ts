@@ -68,11 +68,24 @@ function markDeleted(data: CachedList | undefined, messageId: string): CachedLis
   return touched ? { ...data, data: next } : data;
 }
 
+const MESSAGES_KEY_PREFIX = (conversationId: string) =>
+  [`/v1/conversations/${conversationId}/messages`] as const;
+
 export function useDeleteMessage(conversationId: string): {
   deleteMessage: (messageId: string) => void;
   isPending: boolean;
 } {
   const qc = useQueryClient();
+
+  // Per-message Idempotency-Key. The first delete of message X
+  // mints a key and stores it here; a subsequent delete of X
+  // (e.g. the user long-presses → Delete again after a network
+  // blip swallowed the first response) reuses the same key so the
+  // backend dedupes against a success the client never saw. The
+  // entry clears on success — soft-delete is naturally idempotent,
+  // but matching the codebase's key-reuse pattern keeps the
+  // semantics honest. (CR on PR #145.)
+  const keyByMessageRef = React.useRef<Map<string, string>>(new Map());
 
   type Vars = { messageId: string; idempotencyKey: string };
   type Ctx = { snapshots: Snapshot[] };
@@ -84,11 +97,9 @@ export function useDeleteMessage(conversationId: string): {
       } as RequestInit & { idempotencyKey: string });
     },
     onMutate: async (vars): Promise<Ctx> => {
-      await qc.cancelQueries({
-        queryKey: [`/v1/conversations/${conversationId}/messages`],
-      });
+      await qc.cancelQueries({ queryKey: MESSAGES_KEY_PREFIX(conversationId) });
       const entries = qc.getQueriesData<CachedList>({
-        queryKey: [`/v1/conversations/${conversationId}/messages`],
+        queryKey: MESSAGES_KEY_PREFIX(conversationId),
       });
       const snapshots: Snapshot[] = [];
       for (const [key, current] of entries) {
@@ -99,7 +110,15 @@ export function useDeleteMessage(conversationId: string): {
       }
       return { snapshots };
     },
+    onSuccess: (_resp, vars) => {
+      keyByMessageRef.current.delete(vars.messageId);
+    },
     onError: (err, _vars, ctx) => {
+      // Restore the pre-delete snapshot for an instant correct-
+      // looking state, then let onSettled reconcile against the
+      // server — the snapshot is from BEFORE this mutation, so if
+      // another delete landed in between, the restore would
+      // briefly un-delete it; the invalidate below fixes that.
       if (ctx) {
         for (const { key, data } of ctx.snapshots) {
           qc.setQueryData(key, data);
@@ -108,6 +127,14 @@ export function useDeleteMessage(conversationId: string): {
       haptics.warning();
       const msg = err instanceof APIError && err.message ? err.message : "Couldn't delete.";
       toast.error(msg);
+    },
+    onSettled: () => {
+      // Converge to server truth regardless of outcome — covers
+      // the "rollback reverted an unrelated delete" race + the
+      // happy path (server confirms the soft-delete). Background
+      // refetch; the optimistic UI has already settled. (CR on
+      // PR #145.)
+      void qc.invalidateQueries({ queryKey: MESSAGES_KEY_PREFIX(conversationId) });
     },
   });
 
@@ -119,7 +146,12 @@ export function useDeleteMessage(conversationId: string): {
   const deleteMessage = useCallback((messageId: string) => {
     if (!messageId) return;
     haptics.tap();
-    mutateRef.current({ messageId, idempotencyKey: newIdempotencyKey() });
+    let key = keyByMessageRef.current.get(messageId);
+    if (!key) {
+      key = newIdempotencyKey();
+      keyByMessageRef.current.set(messageId, key);
+    }
+    mutateRef.current({ messageId, idempotencyKey: key });
   }, []);
 
   return { deleteMessage, isPending: mut.isPending };
