@@ -378,8 +378,10 @@ function PopoverContent({
                 </Text>
               ) : (
                 <>
-                  {readers.slice(0, MAX_SEEN_ROWS).map((p) => (
-                    <View key={p.id ?? p.name} className="flex-row items-center gap-2 py-0.5">
+                  {readers.slice(0, MAX_SEEN_ROWS).map((p, idx) => (
+                    <View
+                      key={p.id ?? `${p.name}-${idx}`}
+                      className="flex-row items-center gap-2 py-0.5">
                       <Avatar source={p.avatarUrl} fallbackName={p.name} size={18} />
                       <Text numberOfLines={1} className="flex-1 text-xs">
                         {p.name}
