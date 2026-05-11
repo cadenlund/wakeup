@@ -72,8 +72,19 @@ type Row =
     };
 
 // "Seen by Ada" / "Seen by Ada and Ben" / "Seen by Ada, Ben and 2 others".
-function formatSeenBy(users: InternalHandlerHttpUserResponse[]): string {
-  const names = users.map((u) => userDisplayName(u));
+// The viewer (if present) is rendered as "you" and moved to the front,
+// so it reads "Seen by you, Ada and 2 others".
+function formatSeenBy(
+  users: InternalHandlerHttpUserResponse[],
+  myUserId: string | undefined
+): string {
+  const names: string[] = [];
+  let mine: string | undefined;
+  for (const u of users) {
+    if (myUserId && u.id === myUserId) mine = 'you';
+    else names.push(userDisplayName(u));
+  }
+  if (mine) names.unshift(mine);
   if (names.length === 1) return `Seen by ${names[0]}`;
   if (names.length === 2) return `Seen by ${names[0]} and ${names[1]}`;
   const rest = names.length - 2;
@@ -240,7 +251,7 @@ export function MessageList({
             if ((readPointerIdxByUser.get(u.id) ?? -1) >= i) seers.push(u);
           }
           if (seers.length > 0) {
-            out.set(msg.id, formatSeenBy(seers));
+            out.set(msg.id, formatSeenBy(seers, myUserId));
             continue;
           }
         }
@@ -442,19 +453,25 @@ export function MessageList({
                 // pointer is at or past it, minus the message's own
                 // sender (you don't "see" what you sent). Same shape
                 // for DMs and groups: in a DM that resolves to "just
-                // the peer" on your own messages, which is exactly
-                // the "seen by" the popover wants to show there too.
+                // the peer" on your own messages. The viewer renders
+                // as "you" and is moved to the front of the list.
                 const msgIdx = msgIdxById.get(m.id as string) ?? -1;
-                const seenBy =
+                const all =
                   msgIdx < 0
                     ? []
                     : members.flatMap((row) => {
                         const u = row.user;
                         if (!u?.id || u.id === m.sender_id) return [];
-                        const ptr = readPointerIdxByUser.get(u.id) ?? -1;
-                        if (ptr < msgIdx) return [];
-                        return [{ id: u.id, name: userDisplayName(u), avatarUrl: u.avatar_url }];
+                        if ((readPointerIdxByUser.get(u.id) ?? -1) < msgIdx) return [];
+                        const name = u.id === myUserId ? 'you' : userDisplayName(u);
+                        return [{ id: u.id, name, avatarUrl: u.avatar_url }];
                       });
+                const seenBy = all.some((r) => r.id === myUserId)
+                  ? [
+                      ...all.filter((r) => r.id === myUserId),
+                      ...all.filter((r) => r.id !== myUserId),
+                    ]
+                  : all;
                 setActionTarget({
                   id: m.id as string,
                   body: m.body ?? '',
