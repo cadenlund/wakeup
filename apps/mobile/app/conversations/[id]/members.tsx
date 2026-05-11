@@ -19,7 +19,7 @@
 // in <ModalScreenShell> for the centered card; native uses the
 // expo-router `presentation: 'modal'` half-sheet.
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Plus, Search, UserPlus, X } from 'lucide-react-native';
+import { ChevronLeft, Plus, Search, UserPlus, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 import { FullWindowOverlay } from 'react-native-screens';
@@ -304,8 +304,8 @@ export default function ManageMembersScreen() {
       <View className="flex-1 bg-background">
         <Header
           title={showAdd ? 'Add members' : 'Manage members'}
-          onClose={showAdd ? () => setShowAdd(false) : goCancel}
-          closeLabel={showAdd ? 'Cancel' : 'Done'}
+          onBack={showAdd ? () => setShowAdd(false) : undefined}
+          onClose={goCancel}
         />
 
         {showAdd ? (
@@ -354,31 +354,49 @@ export default function ManageMembersScreen() {
 
 function Header({
   title,
+  onBack,
   onClose,
-  closeLabel,
 }: {
   title: string;
+  // When provided, renders a left-side chevron that returns to
+  // the parent surface (e.g. the add-members pane backs out to
+  // the members list without dismissing the whole modal).
+  onBack?: () => void;
+  // Always present — closes the entire modal. Icon-only so the
+  // affordance can't wrap on narrow phones (the earlier "Cancel"
+  // text wrapped to two lines on small viewports).
   onClose: () => void;
-  closeLabel: string;
 }) {
-  const mutedFg = useThemeColor('muted-foreground');
+  const fg = useThemeColor('foreground');
   return (
-    <View className="flex-row items-center justify-between border-b border-border bg-card px-5 py-3">
-      <View className="w-12" />
+    <View className="flex-row items-center border-b border-border bg-card px-3 py-3">
+      <View className="w-10 items-start">
+        {onBack ? (
+          <Pressable
+            onPress={onBack}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            testID="manage-members-back"
+            hitSlop={8}
+            className="h-9 w-9 items-center justify-center rounded-md active:bg-muted">
+            <ChevronLeft size={22} color={fg} />
+          </Pressable>
+        ) : null}
+      </View>
       <Text variant="h4" numberOfLines={1} className="flex-1 text-center">
         {title}
       </Text>
-      <Pressable
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel={closeLabel}
-        testID="manage-members-close"
-        hitSlop={8}
-        className="w-12 items-end">
-        <Text style={{ color: mutedFg }} className="text-base">
-          {closeLabel}
-        </Text>
-      </Pressable>
+      <View className="w-10 items-end">
+        <Pressable
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          testID="manage-members-close"
+          hitSlop={8}
+          className="h-9 w-9 items-center justify-center rounded-md active:bg-muted">
+          <X size={20} color={fg} />
+        </Pressable>
+      </View>
     </View>
   );
 }
