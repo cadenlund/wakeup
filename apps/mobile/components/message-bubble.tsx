@@ -15,7 +15,6 @@ import { ActivityIndicator, LayoutAnimation, Platform, Pressable, View } from 'r
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
-import type { InternalHandlerHttpUserResponse } from '@/lib/api/model';
 import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import type { LocalSendStatus } from '@/lib/use-send-message';
@@ -57,12 +56,11 @@ type Props = {
   // for messages in a streak (only the last bubble of a streak shows
   // the avatar); always false for "mine".
   showAvatar?: boolean;
-  // Members whose last_read_message_id sits at this exact bubble.
-  // Only meaningful on "mine" bubbles in groups — the list builder
-  // (<MessageList>) leaves it undefined for everything else. Renders
-  // as a small dot per reader under the bubble (§6.3 — only the
-  // latest read position per recipient counts).
-  readBy?: InternalHandlerHttpUserResponse[];
+  // Read-receipt caption rendered under the bubble — only ever set
+  // on "mine" bubbles, and only on the latest relevant one (§6.3).
+  // DM: "Delivered" / "Seen". Group: "Seen by Ada, Ben and 2 others".
+  // The list builder (<MessageList>) does the computation.
+  receiptText?: string;
   // Send-pipeline status from useSendMessage. `undefined` = delivered
   // (server-issued row). `'sending'` = the optimistic placeholder is
   // still in flight: a small spinner shows under the bubble until the
@@ -103,7 +101,7 @@ export function MessageBubble({
   senderAvatarUrl,
   showSenderLabel,
   showAvatar,
-  readBy,
+  receiptText,
   sendStatus,
   onRetrySend,
   onLongPress,
@@ -270,17 +268,8 @@ export function MessageBubble({
           ) : null}
         </View>
 
-        {readBy && readBy.length > 0 ? (
-          // §6.3: a small dot per reader (not avatars — keeps the
-          // receipt unobtrusive and unambiguous about whose face
-          // it isn't).
-          <View
-            className="mt-1 flex-row gap-1 px-1"
-            accessibilityLabel={`Read by ${readBy.length}`}>
-            {readBy.map((u) => (
-              <View key={u.id} className="h-1.5 w-1.5 rounded-full bg-primary" />
-            ))}
-          </View>
+        {receiptText && sendStatus !== 'sending' && sendStatus !== 'failed' ? (
+          <Text className="mt-1 px-1 text-[10px] text-muted-foreground">{receiptText}</Text>
         ) : null}
 
         {mine && sendStatus === 'failed' ? (

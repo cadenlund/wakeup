@@ -70,6 +70,19 @@ type Row =
       sameAsNewer: boolean;
     };
 
+function memberName(u: InternalHandlerHttpUserResponse): string {
+  return u.display_name?.trim() || u.username?.trim() || 'Someone';
+}
+
+// "Seen by Ada" / "Seen by Ada and Ben" / "Seen by Ada, Ben and 2 others".
+function formatSeenBy(users: InternalHandlerHttpUserResponse[]): string {
+  const names = users.map(memberName);
+  if (names.length === 1) return `Seen by ${names[0]}`;
+  if (names.length === 2) return `Seen by ${names[0]} and ${names[1]}`;
+  const rest = names.length - 2;
+  return `Seen by ${names[0]}, ${names[1]} and ${rest} other${rest === 1 ? '' : 's'}`;
+}
+
 type Props = {
   conversationId: string;
   // Caller's user id, used to pick "mine" vs "theirs" per bubble.
@@ -167,30 +180,53 @@ export function MessageList({
     return m;
   }, [members]);
 
-  // Read-receipt index: messageId → users who have read up to (and
-  // exactly at) that message. We render the resulting avatar row
-  // under "mine" bubbles only — that's the side the caller cares
-  // about ("did they see it yet?"). Members with NULL last_read
-  // never opened the thread and contribute nothing.
-  //
-  // Note this surfaces each member at exactly one bubble — their
-  // "current pointer." Older bubbles get implicit reads (the
-  // pointer has moved past them), matching the iMessage / Discord
-  // convention where only the latest read receipt is shown.
-  const readByMessageId = React.useMemo(() => {
-    const m = new Map<string, InternalHandlerHttpUserResponse[]>();
-    if (!isGroup) return m;
-    for (const row of members) {
-      const uid = row.user?.id;
-      const readId = row.last_read_message_id;
-      if (!uid || !readId) continue;
-      if (uid === myUserId) continue; // skip self — own receipts are noise
-      const arr = m.get(readId);
-      if (arr) arr.push(row.user!);
-      else m.set(readId, [row.user!]);
+  // Per-message read-receipt caption shown under "mine" bubbles.
+  // iMessage convention — only the *latest* relevant message gets
+  // one:
+  //   - DM: under your last delivered sent message — "Delivered"
+  //     until the peer's read pointer reaches it, then "Seen".
+  //   - Group: under each message at a member's read frontier —
+  //     "Seen by Ada" / "Seen by Ada and Ben" / "Seen by Ada, Ben
+  //     and 2 others". A member only appears at their frontier;
+  //     older messages are implicitly read.
+  // Members with a NULL read pointer never opened the thread and
+  // contribute nothing. Self is skipped (own receipts are noise).
+  const receiptByMessageId = React.useMemo(() => {
+    const out = new Map<string, string>();
+    if (messages.length === 0) return out;
+
+    if (isGroup) {
+      const frontier = new Map<string, InternalHandlerHttpUserResponse[]>();
+      for (const row of members) {
+        const uid = row.user?.id;
+        const readId = row.last_read_message_id;
+        if (!uid || !readId || uid === myUserId || !row.user) continue;
+        const arr = frontier.get(readId);
+        if (arr) arr.push(row.user);
+        else frontier.set(readId, [row.user]);
+      }
+      for (const [msgId, users] of frontier) out.set(msgId, formatSeenBy(users));
+      return out;
     }
-    return m;
-  }, [members, isGroup, myUserId]);
+
+    // DM: a single caption under your last delivered sent message.
+    let lastSentIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg?.id && msg.sender_id === myUserId && !sendStatusByTempId.has(msg.id)) {
+        lastSentIdx = i;
+        break;
+      }
+    }
+    const lastSentId = lastSentIdx >= 0 ? messages[lastSentIdx]?.id : undefined;
+    if (!lastSentId) return out;
+    const otherReadId = members.find(
+      (row) => row.user?.id && row.user.id !== myUserId
+    )?.last_read_message_id;
+    const otherPtrIdx = otherReadId ? messages.findIndex((m) => m.id === otherReadId) : -1;
+    out.set(lastSentId, otherPtrIdx >= lastSentIdx ? 'Seen' : 'Delivered');
+    return out;
+  }, [messages, members, isGroup, myUserId, sendStatusByTempId]);
 
   // Mark-read on focus: post the latest *delivered* message id to
   // the backend so the per-member read pointer advances. The
@@ -387,10 +423,9 @@ export function MessageList({
             // Hide the in-thread copy while the popover holds it —
             // its pinned snapshot is the visible one (no duplicate).
             lifted={!!actionTarget && !!m.id && actionTarget.id === m.id}
-            // Read-receipt avatars only appear under "mine" bubbles
-            // in group threads (per §6.3 spec). The bubble component
-            // ignores `readBy` for non-mine rows.
-            readBy={mine && m.id ? readByMessageId.get(m.id) : undefined}
+            // Read-receipt caption — only ever set on "mine" bubbles
+            // (a recipient has no receipt for someone else's message).
+            receiptText={mine && m.id ? receiptByMessageId.get(m.id) : undefined}
             senderName={isGroup ? (sender?.display_name ?? undefined) : undefined}
             senderUsername={isGroup ? (sender?.username ?? undefined) : undefined}
             senderAvatarUrl={isGroup ? (sender?.avatar_url ?? undefined) : undefined}
