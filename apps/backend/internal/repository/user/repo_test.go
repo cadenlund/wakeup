@@ -269,7 +269,7 @@ func TestListByPrefix_PrefixMatch(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 match, got %d (rows: %+v)", len(got), got)
 	}
-	if got[0].Username != "caden_special" {
+	if got[0].User.Username != "caden_special" {
 		t.Errorf("matched row wrong: %+v", got[0])
 	}
 }
@@ -306,7 +306,7 @@ func TestListByPrefix_EscapesWildcardChars(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 row (only the literal-%% user), got %d: %+v", len(got), got)
 	}
-	if got[0].Username != "%percent_user" {
+	if got[0].User.Username != "%percent_user" {
 		t.Errorf("matched the wrong row: %+v", got[0])
 	}
 }
@@ -379,9 +379,14 @@ func TestListByPrefix_CursorAdvances(t *testing.T) {
 		t.Fatalf("page1: %v", err)
 	}
 	// Use the LAST KEPT row (index limit-1 = 1) as the next cursor.
+	// The cursor must include the tier so the new keyset chain
+	// resumes inside the same rel_tier bucket; here the rows have
+	// no caller context so they all land in tier 2.
+	tier := page1[1].Tier
 	cursor := &pagination.Cursor{
-		Timestamp: page1[1].CreatedAt,
-		ID:        page1[1].ID,
+		Timestamp: page1[1].User.CreatedAt,
+		ID:        page1[1].User.ID,
+		Tier:      &tier,
 	}
 	page2, err := repo.ListByPrefix(ctx, "", nil, cursor, 2)
 	if err != nil {
@@ -390,8 +395,8 @@ func TestListByPrefix_CursorAdvances(t *testing.T) {
 	// page2 must not contain rows from page1.
 	for _, p2 := range page2 {
 		for _, p1 := range page1[:2] {
-			if p1.ID == p2.ID {
-				t.Errorf("page2 contains row from page1: %v", p1.ID)
+			if p1.User.ID == p2.User.ID {
+				t.Errorf("page2 contains row from page1: %v", p1.User.ID)
 			}
 		}
 	}

@@ -539,23 +539,17 @@ export default function FriendsScreen() {
         if (status) return { user: u, status };
         return { user: u };
       });
-    // Prioritise friends > pending requests > strangers in the
-    // search results — typing a name is almost always "find my
-    // friend X" and seeing strangers above the friend match is
-    // the wrong answer. Backend search is sorted by created_at
-    // DESC; we re-sort here without changing the order within
-    // each tier (stable on backend's response order).
-    const tier = (r: SearchRow) => {
-      if (r.isSelf) return 4; // self at the bottom — opens nothing
-      if (r.status?.kind === 'friend') return 0;
-      if (r.status?.kind === 'incoming' || r.status?.kind === 'outgoing') return 1;
-      return 2; // strangers
-    };
+    // Backend orders /v1/users by rel_tier (friend → pending →
+    // stranger) then created_at — no client re-sort. Self lives in
+    // tier 2 from the backend's POV (it isn't a friendship row),
+    // so push it to the bottom here. Everything else stays in the
+    // server's order so pagination cursors remain coherent.
     return mapped
       .map((r, idx) => ({ r, idx }))
       .sort((a, b) => {
-        const t = tier(a.r) - tier(b.r);
-        if (t !== 0) return t;
+        const ta = a.r.isSelf ? 1 : 0;
+        const tb = b.r.isSelf ? 1 : 0;
+        if (ta !== tb) return ta - tb;
         return a.idx - b.idx;
       })
       .map(({ r }) => r);

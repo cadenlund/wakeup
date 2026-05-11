@@ -471,8 +471,6 @@ export default function SearchModalScreen() {
         usersExpanded,
         expanded: expandedSections,
         collapsed: collapsedSections,
-        friendStatusByUser,
-        myUserId: me?.id,
       }),
     [
       data,
@@ -483,8 +481,6 @@ export default function SearchModalScreen() {
       drilledUsers,
       expandedSections,
       collapsedSections,
-      friendStatusByUser,
-      me?.id,
     ]
   );
 
@@ -853,39 +849,12 @@ function stepFocus(
   return tappableIndices[next];
 }
 
-// userTier orders search hits Instagram-style: friends first, then
-// people you've already requested (or who've requested you), then
-// strangers, then self at the very bottom. Stable-sort within each
-// tier preserves whatever ranking the backend returned (trigram
-// score / created_at DESC).
-function userTier(
-  u: InternalHandlerHttpUserResponse,
-  friendStatusByUser: Map<string, FriendStatus>,
-  myUserId: string | undefined
-): number {
-  if (!u.id) return 3;
-  if (myUserId && u.id === myUserId) return 4;
-  const status = friendStatusByUser.get(u.id);
-  if (status?.kind === 'friend') return 0;
-  if (status?.kind === 'incoming' || status?.kind === 'outgoing') return 1;
-  return 2;
-}
-
-function sortByFriendTier(
-  users: InternalHandlerHttpUserResponse[],
-  friendStatusByUser: Map<string, FriendStatus>,
-  myUserId: string | undefined
-): InternalHandlerHttpUserResponse[] {
-  return users
-    .map((u, idx) => ({ u, idx }))
-    .sort((a, b) => {
-      const t =
-        userTier(a.u, friendStatusByUser, myUserId) - userTier(b.u, friendStatusByUser, myUserId);
-      if (t !== 0) return t;
-      return a.idx - b.idx;
-    })
-    .map(({ u }) => u);
-}
+// Backend orders /v1/users by (friend → pending → stranger) tier, then
+// by (created_at DESC, id DESC) within each tier — see the SQL in
+// apps/backend/internal/repository/user/repo.go. The client no longer
+// re-sorts; an earlier client-side tier sort couldn't reach friends
+// that lived past the first page, and removing it keeps the pagination
+// cursor coherent (the cursor encodes tier on the backend side now).
 
 function buildRows({
   data,
@@ -896,16 +865,14 @@ function buildRows({
   usersExpanded,
   expanded,
   collapsed,
-  friendStatusByUser,
-  myUserId,
 }: {
   data: InternalHandlerHttpSearchResponse | undefined;
   usersTotal: number;
   conversationsTotal: number;
   messagesTotal: number;
-  // /v1/users-paginated user matches. Used as the SOLE source for
-  // the People section so the friend-tier sort can reorder across
-  // the full matching set, not just the unified-search top-10.
+  // /v1/users-paginated user matches. Already ordered
+  // friends → pending → strangers by the backend's rel_tier
+  // ranking; the client renders the slice as-is.
   drilledUsers: InternalHandlerHttpUserResponse[];
   // True once the user taps "Show all N people"; the modal then
   // renders every loaded page and lets the FlashList drive
@@ -913,17 +880,15 @@ function buildRows({
   usersExpanded: boolean;
   expanded: Set<SectionId>;
   collapsed: Set<SectionId>;
-  // Sort context — friends first, pending requests second, strangers
-  // last, self at the bottom.
-  friendStatusByUser: Map<string, FriendStatus>;
-  myUserId: string | undefined;
 }): Row[] {
   const out: Row[] = [];
 
   // People section runs against /v1/users from the start so the
-  // tier sort sees the FULL matching set on every keystroke.
-  const sortedUsers = sortByFriendTier(drilledUsers, friendStatusByUser, myUserId);
-  const renderedUsers = usersExpanded ? sortedUsers : sortedUsers.slice(0, VISIBLE_PER_SECTION);
+  // first page already contains the caller's friends — no client
+  // sort needed.
+  // drilledUsers already arrives ordered friends → pending → strangers
+  // per the backend's rel_tier ranking — no client sort needed.
+  const renderedUsers = usersExpanded ? drilledUsers : drilledUsers.slice(0, VISIBLE_PER_SECTION);
   if (usersTotal > 0 || drilledUsers.length > 0) {
     const isCollapsed = collapsed.has('users');
     out.push({

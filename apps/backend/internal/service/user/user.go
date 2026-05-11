@@ -131,10 +131,12 @@ type SearchResult struct {
 }
 
 // Search returns up to limit users whose username/display_name match q
-// (case-insensitive substring). Empty q returns the catalog in
-// (created_at DESC, id DESC) order. The pagination envelope is the §6.4
-// keyset shape — never offset. The total count is fetched in
-// parallel so the slice and the count return on the same response.
+// (case-insensitive substring). Results are ranked friends → pending →
+// strangers (the repo's tier ranking), then by (created_at DESC, id DESC)
+// within each tier — so the first page of a search always surfaces the
+// caller's people first. The pagination envelope is the §6.4 keyset
+// shape with an extra Tier slot in the cursor. The total count is
+// fetched alongside the slice for "showing N of M" UI.
 func (s *Service) Search(ctx context.Context, p SearchParams) (SearchResult, error) {
 	overFetched, err := s.users.ListByPrefix(ctx, p.Query, p.CallerID, p.Cursor, p.Limit)
 	if err != nil {
@@ -144,10 +146,15 @@ func (s *Service) Search(ctx context.Context, p SearchParams) (SearchResult, err
 	if err != nil {
 		return SearchResult{}, apierror.Internal("count users").WithCause(err)
 	}
-	data, next, hasMore := pagination.Page(overFetched, p.Limit, func(u domain.User) pagination.Cursor {
-		return pagination.Cursor{Timestamp: u.CreatedAt, ID: u.ID}
+	data, next, hasMore := pagination.Page(overFetched, p.Limit, func(h repo.SearchHit) pagination.Cursor {
+		tier := h.Tier
+		return pagination.Cursor{Timestamp: h.User.CreatedAt, ID: h.User.ID, Tier: &tier}
 	})
-	return SearchResult{Users: data, Total: total, NextCursor: next, HasMore: hasMore}, nil
+	users := make([]domain.User, 0, len(data))
+	for _, h := range data {
+		users = append(users, h.User)
+	}
+	return SearchResult{Users: users, Total: total, NextCursor: next, HasMore: hasMore}, nil
 }
 
 // UpdateProfile patches the user's writable profile fields.

@@ -37,9 +37,18 @@ const (
 // Cursor is the opaque value sent to/from clients as a base64 string. The
 // (Timestamp, ID) pair tie-breaks rows that share a microsecond — without ID
 // the keyset can drop or duplicate rows when timestamps collide.
+//
+// Tier is an optional secondary keyset slot for endpoints whose ORDER BY
+// starts with a relationship-rank column (e.g. /v1/users returns friends
+// first, then pending, then strangers). When non-nil it sits LEFT of the
+// (timestamp, id) pair in the sort: rows with a higher Tier come after
+// rows with a lower Tier regardless of timestamp. Endpoints that don't
+// rank by tier leave it nil and the field omitempty-drops from the
+// encoded cursor, so existing clients see the same shape.
 type Cursor struct {
 	Timestamp time.Time `json:"ts"`
 	ID        uuid.UUID `json:"id"`
+	Tier      *int      `json:"tier,omitempty"`
 }
 
 // ErrInvalidCursor is the typed error Decode returns on malformed input.
