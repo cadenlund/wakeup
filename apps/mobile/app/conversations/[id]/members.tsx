@@ -52,7 +52,7 @@ import {
 } from '@/lib/api/hooks/friends/friends';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
 import { useFriendActions } from '@/lib/api/use-friend-actions';
-import { flatten, useInfiniteFriends, useInfiniteUsers } from '@/lib/api/use-infinite';
+import { flatten, useInfiniteFriends } from '@/lib/api/use-infinite';
 import type {
   InternalHandlerHttpConversationMemberRow,
   InternalHandlerHttpConversationResponse,
@@ -64,7 +64,6 @@ import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { toast } from '@/lib/toast';
 
 const SEARCH_DEBOUNCE_MS = 200;
-const SEARCH_MIN_CHARS = 2;
 
 type UserRow = InternalHandlerHttpUserResponse;
 
@@ -118,21 +117,14 @@ export default function ManageMembersScreen() {
     return m;
   }, [friendsQ.data, requestsData]);
 
-  // Add-flow state. Selected ids accumulate as the user taps rows in
-  // the search results; tapping "Add" commits the whole batch with one
-  // POST /v1/conversations/{id}/members call.
+  // Add-flow state. The source is the caller's friends list, not the
+  // open /v1/users catalog — group invites are scoped to people you
+  // actually know per the product rule. Filtering happens client-side
+  // (friends lists are bounded by realistic UX, so we can fetch every
+  // page once and substring-filter without server round-trips).
   const [showAdd, setShowAdd] = React.useState(false);
   const [query, setQuery] = React.useState('');
-  const debouncedQuery = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
-  const searchEnabled = debouncedQuery.length >= SEARCH_MIN_CHARS;
-  const usersQ = useInfiniteUsers(
-    { q: debouncedQuery },
-    { query: { enabled: showAdd && searchEnabled, staleTime: 30_000 } }
-  );
-  const { data: searchUsers } = React.useMemo(
-    () => flatten<UserRow, { data?: UserRow[] }>(usersQ.data?.pages),
-    [usersQ.data]
-  );
+  const debouncedQuery = useDebouncedValue(query.trim().toLowerCase(), SEARCH_DEBOUNCE_MS);
 
   const existingMemberIds = React.useMemo(() => {
     const s = new Set<string>();
@@ -141,6 +133,35 @@ export default function ManageMembersScreen() {
     }
     return s;
   }, [members]);
+
+  // Eagerly chain friend pages so the add list is comprehensive
+  // without the user having to scroll. The friends graph is small
+  // by design; one or two extra page fetches on first open is cheap.
+  React.useEffect(() => {
+    if (!showAdd) return;
+    if (friendsQ.hasNextPage && !friendsQ.isFetchingNextPage) {
+      void friendsQ.fetchNextPage();
+    }
+  }, [showAdd, friendsQ, friendsQ.data]);
+
+  const addCandidates = React.useMemo<UserRow[]>(() => {
+    const { data: friends } = flatten<
+      InternalHandlerHttpFriendshipResponse,
+      { data?: InternalHandlerHttpFriendshipResponse[] }
+    >(friendsQ.data?.pages);
+    const out: UserRow[] = [];
+    for (const f of friends) {
+      const u = f.user;
+      if (!u?.id) continue;
+      if (existingMemberIds.has(u.id)) continue; // already in
+      if (debouncedQuery) {
+        const hay = `${u.username ?? ''} ${u.display_name ?? ''}`.toLowerCase();
+        if (!hay.includes(debouncedQuery)) continue;
+      }
+      out.push(u);
+    }
+    return out;
+  }, [friendsQ.data, existingMemberIds, debouncedQuery]);
 
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const toggleSelect = React.useCallback(
@@ -291,20 +312,10 @@ export default function ManageMembersScreen() {
           <AddPane
             query={query}
             onQueryChange={setQuery}
-            searchEnabled={searchEnabled}
-            results={searchUsers}
-            existingMemberIds={existingMemberIds}
+            results={addCandidates}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
-            myUserId={me?.id}
-            friendStatusByUser={friendStatusByUser}
-            isFetching={usersQ.isFetching}
-            isFetchingNextPage={usersQ.isFetchingNextPage}
-            onEndReached={() => {
-              if (usersQ.hasNextPage && !usersQ.isFetchingNextPage) {
-                void usersQ.fetchNextPage();
-              }
-            }}
+            loading={friendsQ.isLoading && !friendsQ.data}
             onCommit={onCommitAdd}
             committing={addMembers.isPending}
           />
@@ -535,31 +546,22 @@ function MemberRow({
 function AddPane({
   query,
   onQueryChange,
-  searchEnabled,
   results,
-  existingMemberIds,
   selectedIds,
   onToggleSelect,
-  myUserId,
-  friendStatusByUser,
-  isFetching,
-  isFetchingNextPage,
-  onEndReached,
+  loading,
   onCommit,
   committing,
 }: {
   query: string;
   onQueryChange: (v: string) => void;
-  searchEnabled: boolean;
+  // Pre-filtered list of friend candidates — already excludes
+  // existing members + self, and already substring-matches against
+  // `query`. The pane just renders.
   results: UserRow[];
-  existingMemberIds: Set<string>;
   selectedIds: Set<string>;
   onToggleSelect: (uid: string) => void;
-  myUserId: string | undefined;
-  friendStatusByUser: Map<string, FriendStatus>;
-  isFetching: boolean;
-  isFetchingNextPage: boolean;
-  onEndReached: () => void;
+  loading: boolean;
   onCommit: () => void;
   committing: boolean;
 }) {
@@ -574,21 +576,21 @@ function AddPane({
           <Input
             value={query}
             onChangeText={onQueryChange}
-            placeholder="Search by username or display name"
+            placeholder="Filter your friends"
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="off"
             returnKeyType="search"
             autoFocus
             testID="manage-members-search-input"
-            accessibilityLabel="Search users to add"
+            accessibilityLabel="Filter your friends"
             className="pl-9 pr-9"
           />
           {query.length > 0 ? (
             <Pressable
               onPress={() => onQueryChange('')}
               accessibilityRole="button"
-              accessibilityLabel="Clear search"
+              accessibilityLabel="Clear filter"
               testID="manage-members-search-clear"
               hitSlop={8}
               className="absolute bottom-0 right-3 top-0 z-10 justify-center">
@@ -598,42 +600,26 @@ function AddPane({
         </View>
       </View>
 
-      {!searchEnabled ? (
-        <View className="flex-1 items-center justify-center px-6">
-          <Text variant="muted" className="text-center text-sm">
-            Type at least 2 characters to search for users.
-          </Text>
-        </View>
-      ) : isFetching && results.length === 0 ? (
+      {loading ? (
         <View className="flex-1 items-center justify-center py-12">
           <ActivityIndicator color={fg} />
         </View>
       ) : results.length === 0 ? (
         <View className="flex-1 items-center justify-center px-6">
           <Text variant="muted" className="text-center text-sm">
-            No users matched.
+            {query.length > 0
+              ? 'No friends matched.'
+              : "You can only add friends to a group. You haven't added anyone yet."}
           </Text>
         </View>
       ) : (
         <List
           data={results}
           keyExtractor={(u, i) => u.id ?? `idx-${i}`}
-          onEndReachedThreshold={0.5}
-          onEndReached={onEndReached}
-          ListFooterComponent={
-            isFetchingNextPage ? (
-              <View className="items-center py-4">
-                <ActivityIndicator color={fg} />
-              </View>
-            ) : null
-          }
           renderItem={({ item }) => (
             <AddRow
               user={item}
-              isMember={!!item.id && existingMemberIds.has(item.id)}
               isSelected={!!item.id && selectedIds.has(item.id)}
-              isSelf={!!myUserId && item.id === myUserId}
-              friendStatus={item.id ? friendStatusByUser.get(item.id) : undefined}
               onToggle={() => item.id && onToggleSelect(item.id)}
             />
           )}
@@ -647,53 +633,30 @@ function AddPane({
 
 function AddRow({
   user,
-  isMember,
   isSelected,
-  isSelf,
-  friendStatus,
   onToggle,
 }: {
   user: UserRow;
-  isMember: boolean;
   isSelected: boolean;
-  isSelf: boolean;
-  friendStatus: FriendStatus | undefined;
   onToggle: () => void;
 }) {
-  const tappable = !isMember && !isSelf;
-  let trailing: React.ReactNode;
-  if (isSelf) {
-    trailing = (
-      <Text variant="muted" className="text-xs">
-        You
-      </Text>
-    );
-  } else if (isMember) {
-    trailing = (
-      <Text variant="muted" className="text-xs">
-        In group
-      </Text>
-    );
-  } else if (isSelected) {
-    trailing = <RelationshipBadge label="Selected" />;
-  } else if (friendStatus?.kind === 'friend') {
-    trailing = <RelationshipBadge label="Friend" />;
-  } else if (friendStatus?.kind === 'outgoing' || friendStatus?.kind === 'incoming') {
-    trailing = <RelationshipBadge label="Pending" />;
-  } else {
-    trailing = (
-      <Text variant="muted" className="text-xs">
-        Tap to add
-      </Text>
-    );
-  }
+  // Every row in this list is an addable friend by construction
+  // (the parent filtered self + existing members out), so the
+  // trailing UI is just "Selected" vs "Tap to add."
+  const trailing = isSelected ? (
+    <RelationshipBadge label="Selected" />
+  ) : (
+    <Text variant="muted" className="text-xs">
+      Tap to add
+    </Text>
+  );
   return (
     <FriendRow
       displayName={user.display_name}
       username={user.username}
       avatarUrl={user.avatar_url}
       hidePresence
-      onPress={tappable ? onToggle : undefined}
+      onPress={onToggle}
       trailing={trailing}
     />
   );
