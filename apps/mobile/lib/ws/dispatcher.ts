@@ -69,6 +69,7 @@ const FRIENDS_KEY = '/v1/friends';
 const FRIEND_REQUESTS_KEY = '/v1/friends/requests';
 const PRESENCE_FRIENDS_KEY = '/v1/presence/friends';
 const messagesKeyFor = (conversationId: string) => `/v1/conversations/${conversationId}/messages`;
+const conversationDetailKeyFor = (conversationId: string) => `/v1/conversations/${conversationId}`;
 
 // --- banner enqueue ------------------------------------------------
 
@@ -130,6 +131,24 @@ function patchPresence(
     return { ...p, ...patch };
   });
   return touched ? { ...data, data: next } : data;
+}
+
+// Advance one member's read pointer inside a cached conversation
+// detail. Returns the same object when nothing changed so React Query
+// can skip the notify.
+function patchMemberReadPointer(
+  c: Conversation | undefined,
+  userId: string,
+  lastReadMessageId: string
+): Conversation | undefined {
+  if (!c?.members) return c;
+  let touched = false;
+  const members = c.members.map((m) => {
+    if (m.user?.id !== userId || m.last_read_message_id === lastReadMessageId) return m;
+    touched = true;
+    return { ...m, last_read_message_id: lastReadMessageId };
+  });
+  return touched ? { ...c, members } : c;
 }
 
 // --- payload guards ------------------------------------------------
@@ -266,8 +285,23 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       else clearTyping(convId, userId);
       return;
     }
+    case 'message.read': {
+      // Payload `{ conversation_id, user_id, last_read_message_id }`
+      // — someone (maybe us, from another device) advanced their read
+      // pointer. Patch that member's row in the cached conversation
+      // detail so the open thread's §6.3 receipt captions recompute.
+      // No banner; no message refetch (the body didn't change).
+      const d = asRecord(env.data);
+      const convId = d && str(d.conversation_id);
+      const userId = d && str(d.user_id);
+      const readId = d && str(d.last_read_message_id);
+      if (!convId || !userId || !readId) return;
+      qc.setQueryData<Conversation>([conversationDetailKeyFor(convId)], (cur) =>
+        patchMemberReadPointer(cur, userId, readId)
+      );
+      return;
+    }
     // --- known events handled by later phases (deliberate no-ops) ---
-    case 'message.read': // read receipts — Phase 6.3 rendering wiring
     case 'room.started': // call store + RoomBanner — Phase 9 (no banner: CallOverlay owns it)
     case 'room.participant_joined':
     case 'room.participant_left':

@@ -187,8 +187,57 @@ describe('applyWSEvent — typing.* (§6.4)', () => {
   });
 });
 
+describe('applyWSEvent — message.read (§6.3)', () => {
+  const detailKey = [`/v1/conversations/${CONV}`];
+
+  test("advances the named member's read pointer in the cached detail", () => {
+    const qc = newClient();
+    qc.setQueryData(detailKey, {
+      id: CONV,
+      members: [
+        { user: { id: 'u1' }, last_read_message_id: 'm1' },
+        { user: { id: 'u2' }, last_read_message_id: null },
+      ],
+    });
+    applyWSEvent(qc, {
+      type: 'message.read',
+      data: { conversation_id: CONV, user_id: 'u2', last_read_message_id: 'm9' },
+    });
+    const detail = qc.getQueryData<{
+      members: { user: { id: string }; last_read_message_id: string | null }[];
+    }>(detailKey);
+    expect(detail?.members.find((m) => m.user.id === 'u2')?.last_read_message_id).toBe('m9');
+    // The untouched member keeps its pointer.
+    expect(detail?.members.find((m) => m.user.id === 'u1')?.last_read_message_id).toBe('m1');
+  });
+
+  test('does not refetch the messages query (the body is unchanged)', async () => {
+    const qc = newClient();
+    await seedQuery(qc, messagesKey, { pages: [{ data: [] }], pageParams: [undefined] });
+    applyWSEvent(qc, {
+      type: 'message.read',
+      data: { conversation_id: CONV, user_id: 'u2', last_read_message_id: 'm9' },
+    });
+    expect(isInvalidated(qc, messagesKey)).toBe(false);
+  });
+
+  test('ignores a malformed payload (missing fields)', () => {
+    const qc = newClient();
+    qc.setQueryData(detailKey, {
+      id: CONV,
+      members: [{ user: { id: 'u1' }, last_read_message_id: 'm1' }],
+    });
+    applyWSEvent(qc, { type: 'message.read', data: { conversation_id: CONV } });
+    applyWSEvent(qc, { type: 'message.read' });
+    const detail = qc.getQueryData<{
+      members: { last_read_message_id: string | null }[];
+    }>(detailKey);
+    expect(detail?.members[0].last_read_message_id).toBe('m1');
+  });
+});
+
 describe('applyWSEvent — deliberate no-ops', () => {
-  test('room.* / message.read / notification.new touch nothing', async () => {
+  test('room.* / notification.new touch nothing', async () => {
     const qc = newClient();
     await seedQuery(qc, messagesKey, { pages: [{ data: [] }], pageParams: [undefined] });
     await seedQuery(qc, conversationsKey, { data: [] });
@@ -198,7 +247,6 @@ describe('applyWSEvent — deliberate no-ops', () => {
       'room.participant_left',
       'room.video_changed',
       'room.ended',
-      'message.read',
       'notification.new',
     ]) {
       applyWSEvent(qc, { type, data: { conversation_id: CONV } });
