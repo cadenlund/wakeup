@@ -4,12 +4,14 @@
 // taps don't dead-end — this placeholder reads the conversation
 // row from the list cache (so we have a title without an extra
 // fetch) and shows an "in progress" message.
-import { Stack, useLocalSearchParams } from 'expo-router';
-import { MessageCircle } from 'lucide-react-native';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { MessageCircle, MoreVertical } from 'lucide-react-native';
 import * as React from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 
+import { ConversationActionMenu } from '@/components/conversation-action-menu';
+import { MuteSheet } from '@/components/mute-sheet';
 import { Text } from '@/components/ui/text';
 import { ThemedBackButton } from '@/components/ui/themed-back-button';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
@@ -21,7 +23,11 @@ import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpConversationResponse,
 } from '@/lib/api/model';
+import { isCurrentlyMuted } from '@/lib/conversation-display';
+import { haptics } from '@/lib/haptics';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { useConversationPinMute } from '@/lib/use-conversation-pin-mute';
+import { useLeaveConversation } from '@/lib/use-conversation-leave';
 
 export default function ConversationThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -71,6 +77,21 @@ export default function ConversationThreadScreen() {
   const card = useThemeColor('card');
   const border = useThemeColor('border');
 
+  // Header three-dots reuses the same ConversationActionMenu the
+  // chats tab opens on row long-press. State machine: 'menu' is
+  // the row of Pin/Mute/Manage/Leave entries; 'mute' is the
+  // duration sheet that opens when the user picks "Mute…".
+  const router = useRouter();
+  const [sheet, setSheet] = React.useState<'menu' | 'mute' | null>(null);
+  const closeSheet = React.useCallback(() => setSheet(null), []);
+  const openMute = React.useCallback(() => setSheet('mute'), []);
+  const { togglePin, setMute, unmute } = useConversationPinMute();
+  const { leave } = useLeaveConversation();
+  const isMuted = isCurrentlyMuted(conversation?.muted_until);
+  const isPinned = !!conversation?.pinned_at;
+  const isGroup = conversation?.type === 'group';
+  const convId = conversation?.id;
+
   return (
     <>
       <Stack.Screen
@@ -82,6 +103,21 @@ export default function ConversationThreadScreen() {
           // suppresses the native one underneath.
           headerLeft: () => <ThemedBackButton label="Chats" testID="conversation-thread-back" />,
           headerBackVisible: false,
+          headerRight: () =>
+            convId ? (
+              <Pressable
+                onPress={() => {
+                  haptics.tap();
+                  setSheet('menu');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Conversation actions"
+                testID="conversation-thread-more"
+                hitSlop={8}
+                className="h-9 w-9 items-center justify-center rounded-md active:bg-muted">
+                <MoreVertical size={20} color={fg} />
+              </Pressable>
+            ) : null,
           headerStyle: { backgroundColor: card },
           headerTintColor: fg,
           headerShadowVisible: false,
@@ -109,6 +145,62 @@ export default function ConversationThreadScreen() {
           The message thread lands in Phase 6.
         </Text>
       </View>
+
+      <ConversationActionMenu
+        visible={sheet === 'menu'}
+        title={title}
+        isPinned={isPinned}
+        isMuted={isMuted}
+        isGroup={isGroup}
+        onTogglePin={() => {
+          if (!convId) return;
+          togglePin(convId, isPinned);
+          closeSheet();
+        }}
+        onMutePress={openMute}
+        onUnmute={() => {
+          if (!convId) return;
+          unmute(convId);
+          closeSheet();
+        }}
+        onManageMembers={() => {
+          if (!convId) return;
+          closeSheet();
+          setTimeout(() => router.push(`/conversations/${convId}/members`), 0);
+        }}
+        onLeave={() => {
+          if (!convId) return;
+          closeSheet();
+          // After leaving the conversation is no longer in the
+          // user's list — bounce back to the chats tab so the
+          // route doesn't dead-end. Only route on success; a
+          // failed leave (network blip, etc.) keeps the user
+          // here with the toast already surfaced by the hook.
+          void leave(convId).then((ok) => {
+            if (!ok) return;
+            if (router.canGoBack()) router.back();
+            else router.replace('/');
+          });
+        }}
+        onClose={closeSheet}
+        testID="conversation-thread-action-menu"
+      />
+      <MuteSheet
+        visible={sheet === 'mute'}
+        isMuted={isMuted}
+        onPickUntil={(until) => {
+          if (!convId) return;
+          setMute(convId, until);
+          closeSheet();
+        }}
+        onUnmute={() => {
+          if (!convId) return;
+          unmute(convId);
+          closeSheet();
+        }}
+        onClose={closeSheet}
+        testID="conversation-thread-mute-sheet"
+      />
     </>
   );
 }

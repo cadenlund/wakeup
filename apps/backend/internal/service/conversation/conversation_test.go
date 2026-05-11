@@ -920,7 +920,10 @@ func TestAddMembers_AdminAdds(t *testing.T) {
 	}
 }
 
-func TestAddMembers_NonAdminForbidden(t *testing.T) {
+// Anyone in the group can add — Wakeup groups are friend circles,
+// not admin-gated workspaces. Non-admin caller successfully adds
+// a third user here; previously this surface returned Forbidden.
+func TestAddMembers_AnyMemberCanAdd(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	st := newStack(t)
@@ -931,11 +934,14 @@ func TestAddMembers_NonAdminForbidden(t *testing.T) {
 		Type: domain.ConversationGroup, Creator: a.ID,
 		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Group"),
 	})
-	_, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
+	res, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
 		Actor: b.ID, ConvID: created.Conversation.ID, UserIDs: []uuid.UUID{c.ID},
 	})
-	if asAPIError(t, err).Code != apierror.CodeForbidden {
-		t.Errorf("Code = %q", asAPIError(t, err).Code)
+	if err != nil {
+		t.Fatalf("AddMembers: %v", err)
+	}
+	if len(res.Added) != 1 || res.Added[0].UserID != c.ID {
+		t.Errorf("Added = %+v", res.Added)
 	}
 }
 

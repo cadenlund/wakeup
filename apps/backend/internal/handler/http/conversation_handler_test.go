@@ -493,12 +493,17 @@ func TestAddMembers_AdminAdds(t *testing.T) {
 	}
 }
 
-func TestAddMembers_NonAdminForbidden(t *testing.T) {
+// Wakeup groups are 25-cap friend circles, not admin-gated workspaces,
+// so any current member can pull in their own friends. The mobile
+// picker scopes the candidate list to the caller's friends; the
+// backend trusts that and just enforces membership + the 25-cap.
+func TestAddMembers_AnyMemberCanAdd(t *testing.T) {
 	t.Parallel()
 	h := testutil.New(t)
-	a, _ := h.AuthClient(t)
+	a, ua := h.AuthClient(t)
 	bClient, ub := h.AuthClient(t)
 	_, uc := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
 
 	id := requireCreateConversation(t, h, a, map[string]any{
 		"type": "group", "name": "Crew", "member_ids": []uuid.UUID{ub.ID},
@@ -508,7 +513,15 @@ func TestAddMembers_NonAdminForbidden(t *testing.T) {
 		"user_ids": []uuid.UUID{uc.ID},
 	})
 	t.Cleanup(func() { _ = resp.Body.Close() })
-	assertCode(t, resp, http.StatusForbidden, apierror.CodeForbidden)
+	if resp.StatusCode != http.StatusOK {
+		rb, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, rb)
+	}
+	got := mustDecode(t, resp.Body)
+	added, _ := got["added"].([]any)
+	if len(added) != 1 {
+		t.Errorf("added len = %d, want 1", len(added))
+	}
 }
 
 func TestRemoveMember_AdminKicks(t *testing.T) {

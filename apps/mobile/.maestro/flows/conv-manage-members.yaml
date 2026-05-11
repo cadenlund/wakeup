@@ -1,0 +1,43 @@
+# Phase 5.7 — manage group members modal.
+#
+# The modal opens from a thread's header 3-dots menu → "Manage
+# members" entry, which only renders when the conversation is a
+# group. A fresh single-account run has no conversations at all,
+# so the populated open-modal → add → leave happy path needs a
+# second-account fixture (same constraint as conv-pin-mute,
+# conversation-create, and dm-auto-create — those flows ship
+# mount-only smokes and the populated path lands in the multi-
+# user Phase 5+ fixture work).
+#
+# What this flow asserts:
+#   1. Cold launch → register-fresh → skip onboarding → land on
+#      (tabs) Chats tab with the empty state.
+#   2. The chats screen mounts cleanly with the new
+#      <ConversationActionMenu> (now extended with Manage members
+#      + Leave entries) wired into the thread header. The modal
+#      itself is a separate route, so this only proves the
+#      group-conversation chrome additions don't crash unrelated
+#      surfaces at render.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to fast-path into (tabs).
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+
+# Land on the Chats tab. Mount-without-crash is the only assertion
+# this flow can run on a single fresh account. The Manage members
+# modal lives at /conversations/[id]/members and requires an
+# existing group to reach.
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+- assertVisible: 'No conversations yet'
+- takeScreenshot: manage-members-chats-empty
