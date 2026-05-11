@@ -791,6 +791,14 @@ function SectionsPane({
       // and the rows under them disappearing when the user toggled
       // the Friends section.
       getItemType={(item) => item.kind}
+      // FlashList v2 enables maintainVisibleContentPosition by
+      // default, which on initial load placed the friends tab
+      // scrolled to the bottom of the list (FlashList anchored
+      // to phantom prior content). Force it off and anchor the
+      // initial render at index 0 so the tab always opens at
+      // the top.
+      maintainVisibleContentPosition={{ disabled: true }}
+      initialScrollIndex={0}
       // Sticky chevron headers — see stickyEnabled state above;
       // undefined turns sticky off entirely (used at scrollY < 50
       // to avoid the FlashList 2.0.2 duplicate-header bug).

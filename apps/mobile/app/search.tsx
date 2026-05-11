@@ -681,6 +681,12 @@ export default function SearchModalScreen() {
             // users, conversations, messages, and show-all rows in
             // separate pools so each renders with the right shape.
             getItemType={(item) => item.kind}
+            // FlashList v2's default maintainVisibleContentPosition
+            // anchors to phantom prior content on first paint and
+            // can land the modal scrolled mid-list. Force it off
+            // and pin initial render to index 0.
+            maintainVisibleContentPosition={{ disabled: true }}
+            initialScrollIndex={0}
             // Sticky chevron headers — gated behind a small scroll
             // so the inline header has left the viewport before
             // the overlay takes over (FlashList 2.0.2 duplicate
