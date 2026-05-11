@@ -25,6 +25,11 @@ export type BannerEvent = {
   body?: string;
   // expo-router path to push when the banner is tapped.
   route: string;
+  // For the toast's avatar: the person this is about (the message
+  // sender) — `senderName` is the avatar's initials fallback. Set
+  // for `message.new`; absent for friend / member-added events.
+  avatarUrl?: string | null;
+  senderName?: string;
 };
 
 type BannerState = {

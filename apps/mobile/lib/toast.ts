@@ -22,12 +22,19 @@
 // on the explicit allowlist, and ambient WS events toast info /
 // event (the dispatcher in `lib/ws/dispatcher.ts` owns that
 // decision; `<EventToastBridge>` drains its queue into `toast.event`).
+import * as React from 'react';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import RNToast from 'react-native-toast-message';
 import { toast as sonnerToast } from 'sonner';
 
+import { Avatar } from '@/components/ui/avatar';
+
 type Variant = 'error' | 'success' | 'info' | 'event';
+
+// The sender, for an `event` toast's avatar (DM or group — it's
+// always the person who sent the message, not the group photo).
+export type ToastSender = { avatarUrl?: string | null; fallbackName?: string };
 
 const ERROR_VISIBILITY_MS = 4000;
 const NORMAL_VISIBILITY_MS = 2500;
@@ -44,12 +51,20 @@ function showWeb(
   title: string,
   message: string | undefined,
   duration: number,
-  route?: string
+  route?: string,
+  sender?: ToastSender
 ) {
   const opts = {
     description: message,
     duration,
     action: route ? { label: 'View', onClick: () => navigate(route) } : undefined,
+    icon: sender
+      ? React.createElement(Avatar, {
+          source: sender.avatarUrl ?? null,
+          fallbackName: sender.fallbackName,
+          size: 22,
+        })
+      : undefined,
   };
   if (variant === 'error') sonnerToast.error(title, opts);
   else if (variant === 'success') sonnerToast.success(title, opts);
@@ -61,13 +76,17 @@ function showNative(
   title: string,
   message: string | undefined,
   duration: number,
-  route?: string
+  route?: string,
+  sender?: ToastSender
 ) {
   RNToast.show({
     type: variant,
     text1: title,
     text2: message,
     visibilityTime: duration,
+    // Forwarded to the `event` renderer in toast-config.tsx as
+    // `props.props`; ignored by the passive renderers.
+    props: sender,
     onPress: route
       ? () => {
           RNToast.hide();
@@ -82,10 +101,11 @@ function fire(
   title: string,
   message: string | undefined,
   duration: number,
-  route?: string
+  route?: string,
+  sender?: ToastSender
 ) {
-  if (Platform.OS === 'web') showWeb(variant, title, message, duration, route);
-  else showNative(variant, title, message, duration, route);
+  if (Platform.OS === 'web') showWeb(variant, title, message, duration, route, sender);
+  else showNative(variant, title, message, duration, route, sender);
 }
 
 function error(title: string, message?: string) {
@@ -102,9 +122,10 @@ function info(title: string, message?: string) {
 
 // Heads-up about something elsewhere. `route` (an expo-router path)
 // makes the toast tappable / adds a "View" action that navigates
-// there; omit it for a non-actionable notice.
-function event(title: string, message?: string, route?: string) {
-  fire('event', title, message, EVENT_VISIBILITY_MS, route);
+// there; `sender` puts an avatar on the left so it reads like a
+// notification. Both optional.
+function event(title: string, message?: string, route?: string, sender?: ToastSender) {
+  fire('event', title, message, EVENT_VISIBILITY_MS, route, sender);
 }
 
 // Cross-navigation toast: stash a single toast in sessionStorage so it

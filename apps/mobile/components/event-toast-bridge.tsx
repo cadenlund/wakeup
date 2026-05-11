@@ -26,7 +26,14 @@ export function EventToastBridge(): null {
   React.useEffect(() => {
     if (!head) return;
     haptics.tap();
-    toast.event(head.title, head.body, head.route);
+    // Only attach a sender (→ avatar) when we actually have one;
+    // otherwise the toast renders without an avatar rather than a
+    // blank "?" placeholder.
+    const sender =
+      head.avatarUrl || head.senderName
+        ? { avatarUrl: head.avatarUrl, fallbackName: head.senderName }
+        : undefined;
+    toast.event(head.title, head.body, head.route, sender);
     // Hand-off complete — the toast lib owns the lifecycle now.
     // Dropping the head re-runs this effect for the next queued event.
     dismissHead();

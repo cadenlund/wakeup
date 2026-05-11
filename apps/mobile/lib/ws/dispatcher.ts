@@ -113,8 +113,10 @@ function isMuted(c: Conversation | undefined): boolean {
   return !!until && new Date(until).getTime() > Date.now();
 }
 
-function senderName(c: Conversation | undefined, senderId: string): string | undefined {
-  const u = c?.members?.find((m) => m.user?.id === senderId)?.user;
+function senderUser(c: Conversation | undefined, senderId: string) {
+  return c?.members?.find((m) => m.user?.id === senderId)?.user;
+}
+function displayName(u: ReturnType<typeof senderUser>): string | undefined {
   return u?.display_name?.trim() || u?.username?.trim() || undefined;
 }
 
@@ -202,7 +204,8 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       if (getActiveConversation() === convId || isMuted(conv)) return;
       const messageId = str(d.message_id);
       const body = str(d.body);
-      const sender = senderName(conv, str(d.sender_id) ?? '');
+      const sUser = senderUser(conv, str(d.sender_id) ?? '');
+      const sender = displayName(sUser);
       const isGroupConv = conv?.type === 'group';
       const groupName = conv?.name?.trim() || undefined;
       maybeBanner({
@@ -214,6 +217,8 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
         title: (isGroupConv ? groupName : sender) ?? 'New message',
         body: isGroupConv && sender && body ? `${sender}: ${body}` : body,
         route: `/conversations/${convId}`,
+        avatarUrl: sUser?.avatar_url ?? undefined,
+        senderName: sender,
       });
       return;
     }

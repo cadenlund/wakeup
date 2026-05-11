@@ -259,14 +259,27 @@ describe('applyWSEvent — deliberate no-ops', () => {
 });
 
 describe('applyWSEvent — event banners (§4.13)', () => {
-  test('message.new (DM) banners "<sender>" / "<body>"', () => {
+  test('message.new (DM) banners "<sender>" / "<body>" with the sender avatar', () => {
     const qc = newClient();
     qc.setQueryData<ConversationList>(conversationsKey, {
-      data: [{ id: CONV, type: 'direct', members: [{ user: { id: 'u9', display_name: 'Ada' } }] }],
+      data: [
+        {
+          id: CONV,
+          type: 'direct',
+          members: [{ user: { id: 'u9', display_name: 'Ada', avatar_url: 'https://a/ada.png' } }],
+        },
+      ],
     });
     applyWSEvent(qc, messageEvent('message.new'));
     expect(bannerQueue()).toEqual([
-      { id: 'm1', title: 'Ada', body: 'hello there', route: `/conversations/${CONV}` },
+      {
+        id: 'm1',
+        title: 'Ada',
+        body: 'hello there',
+        route: `/conversations/${CONV}`,
+        avatarUrl: 'https://a/ada.png',
+        senderName: 'Ada',
+      },
     ]);
   });
 
@@ -284,7 +297,13 @@ describe('applyWSEvent — event banners (§4.13)', () => {
     });
     applyWSEvent(qc, messageEvent('message.new'));
     expect(bannerQueue()).toEqual([
-      { id: 'm1', title: 'Roommates', body: 'Ada: hello there', route: `/conversations/${CONV}` },
+      {
+        id: 'm1',
+        title: 'Roommates',
+        body: 'Ada: hello there',
+        route: `/conversations/${CONV}`,
+        senderName: 'Ada',
+      },
     ]);
   });
 
