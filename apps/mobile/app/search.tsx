@@ -56,6 +56,7 @@ import {
   getGetV1FriendsRequestsQueryKey,
   useDeleteV1FriendsUserId,
   useGetV1FriendsRequests,
+  usePostV1FriendsRequestsIdAccept,
   usePostV1FriendsUserIdBlock,
 } from '@/lib/api/hooks/friends/friends';
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
@@ -226,6 +227,7 @@ export default function SearchModalScreen() {
   const qc = useQueryClient();
   const unfriend = useDeleteV1FriendsUserId();
   const blockUser = usePostV1FriendsUserIdBlock();
+  const acceptRequest = usePostV1FriendsRequestsIdAccept();
   const [friendMenuTarget, setFriendMenuTarget] =
     React.useState<InternalHandlerHttpUserResponse | null>(null);
   const [pendingFriendAction, setPendingFriendAction] = React.useState<Set<string>>(new Set());
@@ -290,6 +292,27 @@ export default function SearchModalScreen() {
       }
     },
     [blockUser, invalidateRelationships, markFriendPending, unmarkFriendPending]
+  );
+
+  // Accept/decline a pending incoming request. Wired into the
+  // keyboard activation path (Enter on a pending row in the
+  // People section fires Accept) and the row-tap on incoming
+  // rows that surface the trailing icon pair.
+  const onAcceptIncoming = React.useCallback(
+    async (requestId: string, handle: string | undefined) => {
+      try {
+        await acceptRequest.mutateAsync({ id: requestId });
+        await invalidateRelationships();
+        toast.success("You're now friends", handle ? `Say hi to ${handle}.` : undefined);
+      } catch (err) {
+        const msg =
+          err instanceof APIError && err.message
+            ? err.message
+            : "Couldn't accept this request right now.";
+        toast.error(msg);
+      }
+    },
+    [acceptRequest, invalidateRelationships]
   );
 
   // Conversation "more actions" — Pin / Mute. Reuses the same
@@ -467,31 +490,68 @@ export default function SearchModalScreen() {
   }, [tappableRowIndices]);
 
   // Activate the row at a given index (Enter, or programmatic).
-  // Different row kinds have different tap callbacks; this routes
-  // each kind to its own handler so we don't duplicate the
-  // "ensure DM / open thread" logic that already lives there.
+  // Each row kind has a "primary action" — Enter does what the
+  // most-prominent visual affordance on that row would do:
+  //
+  //   header           → toggle the chevron (expand/collapse)
+  //   user (friend)    → open DM
+  //   user (outgoing)  → unsend the pending request
+  //   user (incoming)  → accept the request
+  //   user (none)      → send a friend request
+  //   conversation     → open the thread
+  //   message          → open the parent conversation
+  //   show-all         → expand the section
   const activateRow = React.useCallback(
     (rowIdx: number | null) => {
       if (rowIdx == null) return;
       const row = rows[rowIdx];
       if (!row) return;
       if (row.kind === 'header') {
-        // Enter on a section header collapses / expands the
-        // chevron, same as tapping it. Lets keyboard users skip
-        // past a long stranger-filled section without arrowing
-        // through every row.
         toggleSection(row.section);
-      } else if (row.kind === 'user' && row.user.id) {
-        void onTapUser(row.user);
-      } else if (row.kind === 'conversation' && row.conversation.id) {
+        return;
+      }
+      if (row.kind === 'user') {
+        const u = row.user;
+        if (!u.id) return;
+        if (me?.id && u.id === me.id) return;
+        const status = friendStatusByUser.get(u.id);
+        if (status?.kind === 'friend') {
+          void onTapUser(u);
+        } else if (status?.kind === 'outgoing') {
+          friendActions.cancelFriendRequest(status.requestId);
+        } else if (status?.kind === 'incoming') {
+          void onAcceptIncoming(
+            status.requestId,
+            u.username ? `@${u.username}` : (u.display_name ?? undefined)
+          );
+        } else if (u.username) {
+          friendActions.sendFriendRequest(u.username);
+        }
+        return;
+      }
+      if (row.kind === 'conversation' && row.conversation.id) {
         dismissThenGoToConversation(row.conversation.id);
-      } else if (row.kind === 'message' && row.message.conversation_id) {
+        return;
+      }
+      if (row.kind === 'message' && row.message.conversation_id) {
         dismissThenGoToConversation(row.message.conversation_id);
-      } else if (row.kind === 'show-all') {
+        return;
+      }
+      if (row.kind === 'show-all') {
         expandSection(row.section);
       }
     },
-    [rows, onTapUser, dismissThenGoToConversation, expandSection, toggleSection]
+    [
+      rows,
+      me?.id,
+      friendStatusByUser,
+      friendActions,
+      onAcceptIncoming,
+      onTapUser,
+      dismissThenGoToConversation,
+      expandSection,
+      toggleSection,
+    ]
   );
 
   // Web-only keyboard nav: ↑/↓ cycles tappable rows, Enter activates.
@@ -572,6 +632,13 @@ export default function SearchModalScreen() {
             ref={listRef}
             data={rows}
             keyExtractor={(item) => item.key}
+            // FlashList recycles view instances across rows in the
+            // same pool. Without an explicit type-tag, a 'header'
+            // slot could be reused for a 'user' row on scroll and
+            // show stale text. Tagging by `kind` keeps headers,
+            // users, conversations, messages, and show-all rows in
+            // separate pools so each renders with the right shape.
+            getItemType={(item) => item.kind}
             stickyHeaderIndices={stickyHeaderIndices}
             onEndReachedThreshold={0.5}
             onEndReached={() => {
@@ -695,14 +762,17 @@ function isTappableRow(
   // surface.
   if (r.kind === 'header') return true;
   if (r.kind === 'user') {
-    // The rendered user row only allows the row tap when the
-    // peer is an accepted friend AND not self. Mirror that here
-    // so ↓ + Enter on a non-friend hit doesn't drive ensureDM
-    // into a 403 / self-DM branch the rendered Pressable would
-    // have refused.
+    // Every non-self user row is keyboard-focusable; the
+    // activation routes by status (friend → DM, outgoing →
+    // unsend, incoming → accept, none → add). Strangers need a
+    // username because the Add endpoint targets one — skip rows
+    // without it.
     if (!r.user.id) return false;
     if (myUserId && r.user.id === myUserId) return false;
-    return friendStatusByUser.get(r.user.id)?.kind === 'friend';
+    const status = friendStatusByUser.get(r.user.id);
+    if (status?.kind === 'friend') return true;
+    if (status?.kind === 'outgoing' || status?.kind === 'incoming') return true;
+    return r.user.username != null;
   }
   if (r.kind === 'conversation') return !!r.conversation.id;
   if (r.kind === 'message') return !!r.message.conversation_id;
@@ -943,6 +1013,7 @@ function RenderedRow({
         title={row.title}
         count={row.count}
         collapsed={row.collapsed}
+        isFocused={isFocused}
         onToggle={() => onToggleSection(row.section)}
       />
     );
@@ -1179,11 +1250,15 @@ function SectionHeader({
   title,
   count,
   collapsed,
+  isFocused,
   onToggle,
 }: {
   title: string;
   count: number;
   collapsed: boolean;
+  // Web keyboard focus — Enter on a focused header toggles the
+  // section. The visual tint mirrors the other rows' focus ring.
+  isFocused?: boolean;
   onToggle: () => void;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
@@ -1201,8 +1276,9 @@ function SectionHeader({
       // Opaque background — sticky-header bleed-through let the
       // user see rows underneath the chevron strip while
       // scrolling. `bg-card` matches the modal chrome and keeps
-      // the slight elevation read.
-      className="flex-row items-center gap-2 border-b border-border bg-card px-4 py-2 active:bg-muted">
+      // the slight elevation read. Focus state tints with the
+      // same primary/10 the row-focus ring uses.
+      className={`flex-row items-center gap-2 border-b border-border px-4 py-2 active:bg-muted ${isFocused ? 'bg-primary/10' : 'bg-card'}`}>
       <Caret size={14} color={mutedFg} />
       <Text variant="muted" className="flex-1 text-xs font-semibold uppercase tracking-wider">
         {title}

@@ -759,6 +759,12 @@ function SectionsPane({
       ref={listRef}
       data={rows}
       keyExtractor={(item) => item.key}
+      // Recycling pools per row kind — without this, FlashList can
+      // reuse a 'header' view slot for a 'friend' row on scroll,
+      // which manifested as every section header reading "Friends"
+      // and the rows under them disappearing when the user toggled
+      // the Friends section.
+      getItemType={(item) => item.kind}
       stickyHeaderIndices={stickyHeaderIndices}
       onEndReachedThreshold={0.5}
       onEndReached={onEndReached}
