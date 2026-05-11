@@ -19,6 +19,7 @@ import { ForceUpgradeGate } from '@/components/force-upgrade-gate';
 import { NetworkBanner } from '@/components/network-banner';
 import { ToastRoot } from '@/components/toast-root';
 import { RootErrorBoundary } from '@/components/ui/root-error-boundary';
+import { WSDispatcher } from '@/components/ws-dispatcher';
 import { WSLifecycle } from '@/components/ws-lifecycle';
 import { queryClient, queryPersister, shouldPersistQuery } from '@/lib/api/query-client';
 import { ThemeProvider } from '@/lib/theme/provider';
@@ -153,6 +154,7 @@ function RootLayout() {
         <ThemeProvider>
           <NetworkBanner />
           <WSLifecycle />
+          <WSDispatcher />
           <RootErrorBoundary>
             <ForceUpgradeGate>
               <ProtectedStack />
