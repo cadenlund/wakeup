@@ -33,7 +33,7 @@
 // Group conversations show the sender label + avatar slot.
 // DMs hide both — the screen header already names the peer.
 import * as React from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, LayoutAnimation, View } from 'react-native';
 
 import { MessageBubble } from '@/components/message-bubble';
 import {
@@ -41,7 +41,7 @@ import {
   type MessageActionTarget,
 } from '@/components/message-action-popover';
 import { AGGREGATE_GAP_MS, TimeDivider } from '@/components/time-divider';
-import { List } from '@/components/ui/list';
+import { List, type ListRef } from '@/components/ui/list';
 import { Text } from '@/components/ui/text';
 import { flatten, useInfiniteMessages } from '@/lib/api/use-infinite';
 import type {
@@ -51,11 +51,24 @@ import type {
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
+import { useTypingUserIds } from '@/lib/typing/store';
 import { useDeleteMessage } from '@/lib/use-delete-message';
 import { useMarkReadOnFocus } from '@/lib/use-mark-read';
+import { useReduceMotion } from '@/lib/use-reduce-motion';
 import type { LocalSendStatus } from '@/lib/use-send-message';
 
 type Message = InternalHandlerHttpMessageResponse;
+
+// The FlashList renders a flat list of dividers + message bubbles.
+type Row =
+  | { kind: 'divider'; key: string; iso: string }
+  | {
+      kind: 'message';
+      key: string;
+      message: Message;
+      sameAsOlder: boolean;
+      sameAsNewer: boolean;
+    };
 
 type Props = {
   conversationId: string;
@@ -90,10 +103,22 @@ export function MessageList({
 }: Props) {
   const fg = useThemeColor('foreground');
   const mutedFg = useThemeColor('muted-foreground');
+  const reduceMotion = useReduceMotion();
 
   // Long-press action popover: which bubble was pressed (null = closed).
   const [actionTarget, setActionTarget] = React.useState<MessageActionTarget | null>(null);
   const { deleteMessage } = useDeleteMessage(conversationId);
+  // The typing indicator (sibling below this list) takes vertical
+  // space when it appears, shrinking this list's viewport — so we
+  // re-pin the bottom when typing starts, otherwise the last message
+  // gets clipped under the typing bubble.
+  const someoneTyping = useTypingUserIds(conversationId).length > 0;
+  const listRef = React.useRef<ListRef<Row>>(null);
+  React.useEffect(() => {
+    if (!someoneTyping) return;
+    const id = requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    return () => cancelAnimationFrame(id);
+  }, [someoneTyping]);
 
   const messagesQ = useInfiniteMessages(conversationId, undefined, {
     query: { staleTime: 15_000 },
@@ -108,6 +133,28 @@ export function MessageList({
     );
     return data.slice().reverse();
   }, [messagesQ.data]);
+
+  // When a new message lands at the *bottom* (incoming, or your own
+  // optimistic placeholder), ease the layout so the thread lifts up
+  // smoothly instead of teleporting. Older-page prepends (pagination)
+  // leave the last id unchanged, so they don't trigger this. Done
+  // during render — `configureNext` must run before React commits
+  // the new row.
+  const lastMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : undefined;
+  const prevLastMessageId = React.useRef<string | undefined>(undefined);
+  if (
+    !reduceMotion &&
+    lastMessageId &&
+    prevLastMessageId.current &&
+    lastMessageId !== prevLastMessageId.current
+  ) {
+    LayoutAnimation.configureNext({
+      duration: 220,
+      create: { type: 'easeInEaseOut', property: 'opacity' },
+      update: { type: 'easeInEaseOut' },
+    });
+  }
+  if (lastMessageId) prevLastMessageId.current = lastMessageId;
 
   // Sender lookup once per render. The members array is small
   // (cap-25 per group; 2 in DMs), so a plain Map is cheaper than
@@ -251,17 +298,9 @@ export function MessageList({
     );
   }
 
-  type Row =
-    | { kind: 'divider'; key: string; iso: string }
-    | {
-        kind: 'message';
-        key: string;
-        message: Message;
-        sameAsOlder: boolean;
-        sameAsNewer: boolean;
-      };
   const list = (
     <List<Row>
+      ref={listRef}
       data={rows}
       // Stable per-row keys. Dividers carry a synthetic
       // `div-<id>` key; messages reuse the server-issued id.
@@ -338,6 +377,7 @@ export function MessageList({
             isDeleted={m.is_deleted}
             mine={mine}
             isGroup={isGroup}
+            reduceMotion={reduceMotion}
             // Per-bubble send status only applies to "mine" rows
             // — the recipient never has a local send state for
             // someone else's message.
