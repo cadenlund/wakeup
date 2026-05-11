@@ -27,6 +27,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import { ModalHeader } from '@/components/ui/modal-header';
 import { ModalScreenShell } from '@/components/ui/modal-screen-shell';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
@@ -203,11 +204,15 @@ export default function NewConversationScreen() {
     <ModalScreenShell onClose={onCancel} testID="new-conversation-shell">
       <View className="flex-1 bg-background">
         <ModalHeader
-          canCreate={canCreate}
-          creating={creating}
-          onCancel={onCancel}
-          onCreate={onCreate}
-          ctaLabel={isGroup ? 'Create' : 'Start'}
+          title="New chat"
+          left={{ kind: 'close', onPress: onCancel, testID: 'conversation-new-cancel' }}
+          right={{
+            onPress: onCreate,
+            accessibilityLabel: isGroup ? 'Create group' : 'Start conversation',
+            disabled: !canCreate,
+            loading: creating,
+            testID: 'conversation-new-create',
+          }}
         />
 
         {/* Selected pills strip — only when 1+ selected, gives the
@@ -267,56 +272,6 @@ function filterFriends(friends: Friendship[], q: string): Friendship[] {
     const un = (u.username ?? '').toLowerCase();
     return dn.includes(term) || un.includes(term);
   });
-}
-
-function ModalHeader({
-  canCreate,
-  creating,
-  onCancel,
-  onCreate,
-  ctaLabel,
-}: {
-  canCreate: boolean;
-  creating: boolean;
-  onCancel: () => void;
-  onCreate: () => void;
-  ctaLabel: string;
-}) {
-  const primary = useThemeColor('primary');
-  const mutedFg = useThemeColor('muted-foreground');
-  return (
-    <View className="flex-row items-center justify-between border-b border-border bg-card px-5 py-3">
-      <Pressable
-        onPress={onCancel}
-        accessibilityRole="button"
-        accessibilityLabel="Cancel"
-        testID="conversation-new-cancel"
-        hitSlop={8}>
-        <Text style={{ color: mutedFg }} className="text-base">
-          Cancel
-        </Text>
-      </Pressable>
-      <Text variant="h4">New chat</Text>
-      <Pressable
-        onPress={onCreate}
-        disabled={!canCreate}
-        accessibilityRole="button"
-        accessibilityLabel={ctaLabel}
-        accessibilityState={{ disabled: !canCreate }}
-        testID="conversation-new-create"
-        hitSlop={8}>
-        {creating ? (
-          <ActivityIndicator color={primary} />
-        ) : (
-          <Text
-            style={{ color: canCreate ? primary : mutedFg }}
-            className="text-base font-semibold">
-            {ctaLabel}
-          </Text>
-        )}
-      </Pressable>
-    </View>
-  );
 }
 
 function SearchField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -467,11 +422,8 @@ function FetchError({ onRetry, onClose }: { onRetry: () => void; onClose: () => 
   return (
     <View className="flex-1 bg-background">
       <ModalHeader
-        canCreate={false}
-        creating={false}
-        onCancel={onClose}
-        onCreate={() => {}}
-        ctaLabel="Start"
+        title="New chat"
+        left={{ kind: 'close', onPress: onClose, testID: 'conversation-new-cancel' }}
       />
       <EmptyState
         icon={<WifiOff size={40} color={mutedFg} />}
@@ -492,11 +444,8 @@ function NoFriends({ onClose }: { onClose: () => void }) {
   return (
     <View className="flex-1 bg-background">
       <ModalHeader
-        canCreate={false}
-        creating={false}
-        onCancel={onClose}
-        onCreate={() => {}}
-        ctaLabel="Start"
+        title="New chat"
+        left={{ kind: 'close', onPress: onClose, testID: 'conversation-new-cancel' }}
       />
       <EmptyState
         icon={<MessageCircle size={40} color={mutedFg} />}

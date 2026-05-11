@@ -19,7 +19,7 @@
 // in <ModalScreenShell> for the centered card; native uses the
 // expo-router `presentation: 'modal'` half-sheet.
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Plus, Search, UserPlus, X } from 'lucide-react-native';
+import { Check, Search, UserPlus, X } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Platform, Pressable, View } from 'react-native';
 import { FullWindowOverlay } from 'react-native-screens';
@@ -30,9 +30,10 @@ import { FriendRow } from '@/components/friend-row';
 import { FriendStatusAction, type FriendStatus } from '@/components/friend-status-action';
 import { RelationshipBadge } from '@/components/relationship-badge';
 import { Toast, toastConfig } from '@/components/toast-config';
-import { Button } from '@/components/ui/button';
+import { Avatar } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { List } from '@/components/ui/list';
+import { ModalHeader } from '@/components/ui/modal-header';
 import { ModalScreenShell } from '@/components/ui/modal-screen-shell';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
@@ -302,10 +303,29 @@ export default function ManageMembersScreen() {
   return (
     <ModalScreenShell onClose={goCancel} testID="manage-members-shell">
       <View className="flex-1 bg-background">
-        <Header
+        <ModalHeader
           title={showAdd ? 'Add members' : 'Manage members'}
-          onBack={showAdd ? () => setShowAdd(false) : undefined}
-          onClose={goCancel}
+          left={
+            showAdd
+              ? {
+                  kind: 'back',
+                  onPress: () => setShowAdd(false),
+                  testID: 'manage-members-back',
+                }
+              : { kind: 'close', onPress: goCancel, testID: 'manage-members-close' }
+          }
+          right={
+            showAdd
+              ? {
+                  onPress: onCommitAdd,
+                  accessibilityLabel:
+                    selectedIds.size === 1 ? 'Add 1 member' : `Add ${selectedIds.size} members`,
+                  disabled: selectedIds.size === 0,
+                  loading: addMembers.isPending,
+                  testID: 'manage-members-commit',
+                }
+              : undefined
+          }
         />
 
         {showAdd ? (
@@ -316,8 +336,6 @@ export default function ManageMembersScreen() {
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
             loading={friendsQ.isLoading && !friendsQ.data}
-            onCommit={onCommitAdd}
-            committing={addMembers.isPending}
           />
         ) : (
           <MembersPane
@@ -345,59 +363,10 @@ export default function ManageMembersScreen() {
 
       {Platform.OS === 'ios' ? (
         <FullWindowOverlay>
-          <Toast config={toastConfig} topOffset={12} />
+          <Toast config={toastConfig} topOffset={60} />
         </FullWindowOverlay>
       ) : null}
     </ModalScreenShell>
-  );
-}
-
-function Header({
-  title,
-  onBack,
-  onClose,
-}: {
-  title: string;
-  // When provided, renders a left-side chevron that returns to
-  // the parent surface (e.g. the add-members pane backs out to
-  // the members list without dismissing the whole modal).
-  onBack?: () => void;
-  // Always present — closes the entire modal. Icon-only so the
-  // affordance can't wrap on narrow phones (the earlier "Cancel"
-  // text wrapped to two lines on small viewports).
-  onClose: () => void;
-}) {
-  const fg = useThemeColor('foreground');
-  return (
-    <View className="flex-row items-center border-b border-border bg-card px-3 py-3">
-      <View className="w-10 items-start">
-        {onBack ? (
-          <Pressable
-            onPress={onBack}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-            testID="manage-members-back"
-            hitSlop={8}
-            className="h-9 w-9 items-center justify-center rounded-md active:bg-muted">
-            <ChevronLeft size={22} color={fg} />
-          </Pressable>
-        ) : null}
-      </View>
-      <Text variant="h4" numberOfLines={1} className="flex-1 text-center">
-        {title}
-      </Text>
-      <View className="w-10 items-end">
-        <Pressable
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          testID="manage-members-close"
-          hitSlop={8}
-          className="h-9 w-9 items-center justify-center rounded-md active:bg-muted">
-          <X size={20} color={fg} />
-        </Pressable>
-      </View>
-    </View>
   );
 }
 
@@ -568,8 +537,6 @@ function AddPane({
   selectedIds,
   onToggleSelect,
   loading,
-  onCommit,
-  committing,
 }: {
   query: string;
   onQueryChange: (v: string) => void;
@@ -580,21 +547,29 @@ function AddPane({
   selectedIds: Set<string>;
   onToggleSelect: (uid: string) => void;
   loading: boolean;
-  onCommit: () => void;
-  committing: boolean;
 }) {
-  const fg = useThemeColor('muted-foreground');
+  const mutedFg = useThemeColor('muted-foreground');
+  // Mirror /conversations/new's selected-pills strip so a user
+  // multi-selecting members in the add view sees the same chip
+  // row they're already used to from the create-group flow.
+  const selectedFriends = React.useMemo(
+    () => results.filter((u) => u.id && selectedIds.has(u.id)),
+    [results, selectedIds]
+  );
   return (
     <View className="flex-1">
-      <View className="border-b border-border bg-card px-4 pb-3 pt-3">
+      {selectedFriends.length > 0 ? (
+        <SelectedStrip users={selectedFriends} onRemove={(uid) => onToggleSelect(uid)} />
+      ) : null}
+      <View className="border-b border-border bg-background px-4 py-3">
         <View className="relative">
           <View className="absolute bottom-0 left-3 top-0 z-10 justify-center">
-            <Search size={16} color={fg} />
+            <Search size={16} color={mutedFg} />
           </View>
           <Input
             value={query}
             onChangeText={onQueryChange}
-            placeholder="Filter your friends"
+            placeholder="Search friends"
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="off"
@@ -608,11 +583,11 @@ function AddPane({
             <Pressable
               onPress={() => onQueryChange('')}
               accessibilityRole="button"
-              accessibilityLabel="Clear filter"
+              accessibilityLabel="Clear search"
               testID="manage-members-search-clear"
               hitSlop={8}
               className="absolute bottom-0 right-3 top-0 z-10 justify-center">
-              <X size={16} color={fg} />
+              <X size={16} color={mutedFg} />
             </Pressable>
           ) : null}
         </View>
@@ -620,7 +595,7 @@ function AddPane({
 
       {loading ? (
         <View className="flex-1 items-center justify-center py-12">
-          <ActivityIndicator color={fg} />
+          <ActivityIndicator color={mutedFg} />
         </View>
       ) : results.length === 0 ? (
         <View className="flex-1 items-center justify-center px-6">
@@ -635,71 +610,91 @@ function AddPane({
           data={results}
           keyExtractor={(u, i) => u.id ?? `idx-${i}`}
           renderItem={({ item }) => (
-            <AddRow
+            <FriendCheckRow
               user={item}
-              isSelected={!!item.id && selectedIds.has(item.id)}
+              selected={!!item.id && selectedIds.has(item.id)}
               onToggle={() => item.id && onToggleSelect(item.id)}
             />
           )}
         />
       )}
-
-      <CommitFooter count={selectedIds.size} pending={committing} onCommit={onCommit} />
     </View>
   );
 }
 
-function AddRow({
+// Pills strip mirroring /conversations/new — gives multi-select a
+// visual confirmation of who's queued up. Tap a pill to remove.
+function SelectedStrip({
+  users,
+  onRemove,
+}: {
+  users: UserRow[];
+  onRemove: (userId: string) => void;
+}) {
+  const mutedFg = useThemeColor('muted-foreground');
+  return (
+    <View className="flex-row flex-wrap gap-2 border-b border-border bg-background px-4 py-3">
+      {users.map((u) => {
+        if (!u.id) return null;
+        const handle = u.display_name?.trim() || u.username?.trim() || 'Friend';
+        return (
+          <Pressable
+            key={u.id}
+            onPress={() => onRemove(u.id!)}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${handle}`}
+            testID={`manage-members-pill-${u.id}`}
+            className="flex-row items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-1.5 active:bg-muted">
+            <Avatar source={u.avatar_url} fallbackName={handle} size={20} />
+            <Text className="text-sm">{handle}</Text>
+            <X size={12} color={mutedFg} />
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+// Same check-row layout /conversations/new's FriendCheckRow uses —
+// avatar + identity column + a circle that fills in primary on
+// select. Keeps the multi-select vocabulary consistent across
+// every "pick friends" surface.
+function FriendCheckRow({
   user,
-  isSelected,
+  selected,
   onToggle,
 }: {
   user: UserRow;
-  isSelected: boolean;
+  selected: boolean;
   onToggle: () => void;
 }) {
-  // Every row in this list is an addable friend by construction
-  // (the parent filtered self + existing members out), so the
-  // trailing UI is just "Selected" vs "Tap to add."
-  const trailing = isSelected ? (
-    <RelationshipBadge label="Selected" />
-  ) : (
-    <Text variant="muted" className="text-xs">
-      Tap to add
-    </Text>
-  );
+  const handle = user.display_name?.trim() || user.username?.trim() || 'Friend';
+  const checkColor = useThemeColor('primary-foreground');
   return (
-    <FriendRow
-      displayName={user.display_name}
-      username={user.username}
-      avatarUrl={user.avatar_url}
-      hidePresence
+    <Pressable
       onPress={onToggle}
-      trailing={trailing}
-    />
-  );
-}
-
-function CommitFooter({
-  count,
-  pending,
-  onCommit,
-}: {
-  count: number;
-  pending: boolean;
-  onCommit: () => void;
-}) {
-  if (count === 0 && !pending) return null;
-  return (
-    <View className="border-t border-border bg-card px-4 py-3">
-      <Button onPress={onCommit} disabled={pending || count === 0} testID="manage-members-commit">
-        <View className="flex-row items-center gap-2">
-          <Plus size={16} color="#fff" />
-          <Text style={{ color: '#fff' }} className="text-base font-semibold">
-            {pending ? 'Adding…' : count === 1 ? 'Add 1 member' : `Add ${count} members`}
+      accessibilityRole="checkbox"
+      accessibilityLabel={handle}
+      accessibilityState={{ checked: selected }}
+      testID={user.id ? `manage-members-pick-${user.id}` : undefined}
+      className="flex-row items-center gap-3 px-4 py-3 active:bg-muted">
+      <Avatar source={user.avatar_url} fallbackName={handle} size={40} />
+      <View className="min-w-0 flex-1">
+        <Text numberOfLines={1} className="text-base font-medium">
+          {handle}
+        </Text>
+        {user.username ? (
+          <Text numberOfLines={1} variant="muted" className="text-sm">
+            @{user.username}
           </Text>
-        </View>
-      </Button>
-    </View>
+        ) : null}
+      </View>
+      <View
+        className={`h-6 w-6 items-center justify-center rounded-full border ${
+          selected ? 'border-primary bg-primary' : 'border-border'
+        }`}>
+        {selected ? <Check size={14} color={checkColor} /> : null}
+      </View>
+    </Pressable>
   );
 }
