@@ -112,6 +112,15 @@ function ProtectedStack() {
             headerShown: false,
           }}
         />
+        {/* Phase 5.7 — manage members modal. Same presentation
+            convention as /search + /conversations/new. */}
+        <Stack.Screen
+          name="conversations/[id]/members"
+          options={{
+            presentation: Platform.OS === 'web' ? 'transparentModal' : 'modal',
+            headerShown: false,
+          }}
+        />
       </Stack.Protected>
     </Stack>
   );

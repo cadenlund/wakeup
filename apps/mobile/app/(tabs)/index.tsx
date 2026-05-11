@@ -42,6 +42,7 @@ import type {
 } from '@/lib/api/model';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { useConversationPinMute } from '@/lib/use-conversation-pin-mute';
+import { useLeaveConversation } from '@/lib/use-conversation-leave';
 import { EmptyState } from '@/components/ui/empty-state';
 
 type Conversation = InternalHandlerHttpConversationResponse;
@@ -110,6 +111,7 @@ export default function ChatsScreen() {
     title: string;
     isPinned: boolean;
     isMuted: boolean;
+    isGroup: boolean;
     screen: 'menu' | 'mute';
   } | null>(null);
   const closeMenu = React.useCallback(() => setActiveAction(null), []);
@@ -119,6 +121,7 @@ export default function ChatsScreen() {
   );
 
   const { togglePin, setMute, unmute } = useConversationPinMute();
+  const { leave } = useLeaveConversation();
 
   const isInitialLoad = conversationsQ.isLoading && !conversationsQ.data;
 
@@ -185,6 +188,7 @@ export default function ChatsScreen() {
                   title: row.title,
                   isPinned: row.isPinned,
                   isMuted: row.isMuted,
+                  isGroup: row.isGroup,
                   screen: 'menu',
                 });
               }}
@@ -204,6 +208,7 @@ export default function ChatsScreen() {
         title={activeAction?.title ?? ''}
         isPinned={activeAction?.isPinned ?? false}
         isMuted={activeAction?.isMuted ?? false}
+        isGroup={activeAction?.isGroup ?? false}
         onTogglePin={() => {
           if (!activeAction) return;
           togglePin(activeAction.id, activeAction.isPinned);
@@ -214,6 +219,22 @@ export default function ChatsScreen() {
           if (!activeAction) return;
           unmute(activeAction.id);
           closeMenu();
+        }}
+        onManageMembers={() => {
+          if (!activeAction) return;
+          const id = activeAction.id;
+          closeMenu();
+          // Defer the navigation a tick so the sheet's dismiss
+          // animation finishes; otherwise the modal route stacks
+          // on top of a still-fading sheet and the close button
+          // fires the wrong dismiss handler on web.
+          setTimeout(() => router.push(`/conversations/${id}/members`), 0);
+        }}
+        onLeave={() => {
+          if (!activeAction) return;
+          const id = activeAction.id;
+          closeMenu();
+          void leave(id);
         }}
         onClose={closeMenu}
         testID="conversation-action-menu"
@@ -345,12 +366,19 @@ function RenderedConversationRow({
   conversation: Conversation;
   myUserId: string | undefined;
   presenceByUser: Map<string, string>;
-  onMorePress?: (row: { id: string; title: string; isPinned: boolean; isMuted: boolean }) => void;
+  onMorePress?: (row: {
+    id: string;
+    title: string;
+    isPinned: boolean;
+    isMuted: boolean;
+    isGroup: boolean;
+  }) => void;
 }) {
   const router = useRouter();
   const display = conversationDisplay(conversation, myUserId, presenceByUser);
   const isMuted = isCurrentlyMuted(conversation.muted_until);
   const isPinned = !!conversation.pinned_at;
+  const isGroup = conversation.type === 'group';
   return (
     <ConversationRow
       title={display.title}
@@ -375,6 +403,7 @@ function RenderedConversationRow({
                 title: display.title,
                 isPinned,
                 isMuted,
+                isGroup,
               })
           : undefined
       }

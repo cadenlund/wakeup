@@ -70,6 +70,7 @@ import {
 } from '@/lib/api/use-infinite';
 import { haptics } from '@/lib/haptics';
 import { useConversationPinMute } from '@/lib/use-conversation-pin-mute';
+import { useLeaveConversation } from '@/lib/use-conversation-leave';
 import type {
   InternalHandlerHttpConversationResponse,
   InternalHandlerHttpFriendRequestsResponse,
@@ -323,6 +324,7 @@ export default function SearchModalScreen() {
     title: string;
     isPinned: boolean;
     isMuted: boolean;
+    isGroup: boolean;
     screen: 'menu' | 'mute';
   } | null>(null);
   const closeConvMenu = React.useCallback(() => setActiveConvAction(null), []);
@@ -331,6 +333,7 @@ export default function SearchModalScreen() {
     []
   );
   const { togglePin, setMute, unmute } = useConversationPinMute();
+  const { leave: leaveConv } = useLeaveConversation();
 
   const goCancel = React.useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -728,6 +731,7 @@ export default function SearchModalScreen() {
                     title: c.title,
                     isPinned: c.isPinned,
                     isMuted: c.isMuted,
+                    isGroup: c.isGroup,
                     screen: 'menu',
                   })
                 }
@@ -756,6 +760,7 @@ export default function SearchModalScreen() {
         title={activeConvAction?.title ?? ''}
         isPinned={activeConvAction?.isPinned ?? false}
         isMuted={activeConvAction?.isMuted ?? false}
+        isGroup={activeConvAction?.isGroup ?? false}
         onTogglePin={() => {
           if (!activeConvAction) return;
           togglePin(activeConvAction.id, activeConvAction.isPinned);
@@ -766,6 +771,23 @@ export default function SearchModalScreen() {
           if (!activeConvAction) return;
           unmute(activeConvAction.id);
           closeConvMenu();
+        }}
+        onManageMembers={() => {
+          if (!activeConvAction) return;
+          const id = activeConvAction.id;
+          closeConvMenu();
+          // Dismiss the search modal first so the manage-members
+          // screen lands on the chats nav stack, not stacked on a
+          // closing modal. setTimeout lets the sheet finish its
+          // dismiss animation before the push fires.
+          if (router.canGoBack()) router.back();
+          setTimeout(() => router.push(`/conversations/${id}/members`), 0);
+        }}
+        onLeave={() => {
+          if (!activeConvAction) return;
+          const id = activeConvAction.id;
+          closeConvMenu();
+          void leaveConv(id);
         }}
         onClose={closeConvMenu}
         testID="search-conv-action-menu"
@@ -1024,7 +1046,13 @@ function RenderedRow({
   onExpandSection: (section: SectionId) => void;
   onToggleSection: (section: SectionId) => void;
   onOpenFriendMenu: (user: InternalHandlerHttpUserResponse) => void;
-  onOpenConvMenu: (c: { id: string; title: string; isPinned: boolean; isMuted: boolean }) => void;
+  onOpenConvMenu: (c: {
+    id: string;
+    title: string;
+    isPinned: boolean;
+    isMuted: boolean;
+    isGroup: boolean;
+  }) => void;
   pendingFriendAction: Set<string>;
 }) {
   // Headers don't get the keyboard-focus highlight — only tappable
@@ -1175,7 +1203,13 @@ function RenderedRow({
               onPress={() => onOpenConversation(fullId)}
               onMorePress={() => {
                 haptics.tap();
-                onOpenConvMenu({ id: fullId, title: display.title, isPinned, isMuted });
+                onOpenConvMenu({
+                  id: fullId,
+                  title: display.title,
+                  isPinned,
+                  isMuted,
+                  isGroup: full.type === 'group',
+                });
               }}
             />
           );
