@@ -33,7 +33,7 @@
 // Group conversations show the sender label + avatar slot.
 // DMs hide both — the screen header already names the peer.
 import * as React from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, LayoutAnimation, View } from 'react-native';
 
 import { MessageBubble } from '@/components/message-bubble';
 import {
@@ -108,6 +108,23 @@ export function MessageList({
     );
     return data.slice().reverse();
   }, [messagesQ.data]);
+
+  // When a new message lands at the *bottom* (incoming, or your own
+  // optimistic placeholder), ease the layout so the thread lifts up
+  // smoothly instead of teleporting. Older-page prepends (pagination)
+  // leave the last id unchanged, so they don't trigger this. Done
+  // during render — `configureNext` must run before React commits
+  // the new row.
+  const lastMessageId = messages.length > 0 ? messages[messages.length - 1]?.id : undefined;
+  const prevLastMessageId = React.useRef<string | undefined>(undefined);
+  if (lastMessageId && prevLastMessageId.current && lastMessageId !== prevLastMessageId.current) {
+    LayoutAnimation.configureNext({
+      duration: 220,
+      create: { type: 'easeInEaseOut', property: 'opacity' },
+      update: { type: 'easeInEaseOut' },
+    });
+  }
+  if (lastMessageId) prevLastMessageId.current = lastMessageId;
 
   // Sender lookup once per render. The members array is small
   // (cap-25 per group; 2 in DMs), so a plain Map is cheaper than

@@ -11,7 +11,7 @@
 // "Several people" label above, like a sender label. Renders nothing
 // when quiet.
 import * as React from 'react';
-import { AccessibilityInfo, Animated, View } from 'react-native';
+import { AccessibilityInfo, Animated, LayoutAnimation, View } from 'react-native';
 
 import { Avatar } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
@@ -24,6 +24,15 @@ type Member = InternalHandlerHttpConversationMemberRow;
 const DOT_MIN_OPACITY = 0.3;
 const DOT_DURATION_MS = 360;
 const DOT_STAGGER_MS = 180;
+
+// Eased layout change when the bubble appears / disappears so the
+// message list above smoothly makes room instead of snapping.
+const TYPING_LAYOUT_ANIM: Parameters<typeof LayoutAnimation.configureNext>[0] = {
+  duration: 220,
+  create: { type: 'easeInEaseOut', property: 'opacity' },
+  update: { type: 'easeInEaseOut' },
+  delete: { type: 'easeInEaseOut', property: 'opacity' },
+};
 
 function userFor(members: Member[] | undefined, userId: string) {
   return members?.find((m) => m.user?.id === userId)?.user;
@@ -117,7 +126,17 @@ export function TypingIndicator({
   isGroup: boolean;
 }): React.ReactElement | null {
   const ids = useTypingUserIds(conversationId);
-  if (ids.length === 0) return null;
+  const hasTyping = ids.length > 0;
+  // Animate the surrounding layout (the list above shrinking /
+  // growing) when typing starts or stops, so the thread doesn't jump.
+  // Done during render — `configureNext` must run before React
+  // commits the add/remove of the bubble below.
+  const prevHasTyping = React.useRef(hasTyping);
+  if (prevHasTyping.current !== hasTyping) {
+    LayoutAnimation.configureNext(TYPING_LAYOUT_ANIM);
+    prevHasTyping.current = hasTyping;
+  }
+  if (!hasTyping) return null;
 
   const label = isGroup ? groupLabel(members, ids) : undefined;
   // In a group, show the typing user's avatar in the gutter (the
