@@ -30,6 +30,8 @@ import { MessageList } from '@/components/message-list';
 import { MuteSheet } from '@/components/mute-sheet';
 import { Text } from '@/components/ui/text';
 import { ThemedBackButton } from '@/components/ui/themed-back-button';
+import { WSReconnectBanner } from '@/components/ws-reconnect-banner';
+import { useRefetchMessagesOnReconnect } from '@/lib/ws/use-refetch-on-reconnect';
 import { useSendMessage } from '@/lib/use-send-message';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import {
@@ -304,8 +306,10 @@ function ThreadBody({
   members: InternalHandlerHttpConversationResponse['members'];
 }) {
   const { send, retry, statusByTempId, isPending } = useSendMessage(conversationId, myUserId);
+  useRefetchMessagesOnReconnect(conversationId);
   return (
     <>
+      <WSReconnectBanner />
       <View className="flex-1">
         <MessageList
           conversationId={conversationId}
