@@ -206,15 +206,17 @@ export function MessageList({
   //   - DM: a single caption under your last delivered sent message
   //     — "Delivered" until the peer's read pointer reaches it,
   //     then "Seen".
-  //   - Group: "Seen by Ada" / "Seen by Ada and Ben" / "Seen by
-  //     Ada, Ben and 2 others" under every message someone's read
-  //     pointer has reached (listing all such members; "Seen by" is
-  //     public so you the viewer appear too — only the message's own
-  //     sender is filtered out, you don't "see" what you sent). The
-  //     newest message additionally falls back to "Delivered" when
-  //     no one has reached it yet (the "Delivered at the bottom"
-  //     state); older un-reached messages stay caption-less so the
-  //     thread doesn't fill with "Delivered" lines.
+  //   - Group: a "Seen by …" marker only at each member's read
+  //     *frontier* — the one message their `last_read_message_id`
+  //     points at. Older messages are implicitly read, so they stay
+  //     caption-less (the frontier marker aggregates them). Members
+  //     who happen to share a frontier are listed together ("Seen by
+  //     Ada and Ben"); members on different frontiers get their own
+  //     markers further down. "Seen by" is public so the viewer
+  //     appears too; only the message's own sender is filtered out
+  //     (you don't "see" what you sent — so a message you sent that
+  //     no one else has reached shows nothing, except the newest one,
+  //     which falls back to "Delivered").
   // Members with a NULL / out-of-window read pointer haven't reached
   // any loaded message and contribute nothing.
   const receiptByMessageId = React.useMemo(() => {
@@ -222,16 +224,21 @@ export function MessageList({
     if (messages.length === 0) return out;
 
     if (isGroup) {
+      // Group members by the message id their read pointer sits on.
+      const frontier = new Map<string, InternalHandlerHttpUserResponse[]>();
+      for (const row of members) {
+        const uid = row.user?.id;
+        const readId = row.last_read_message_id;
+        if (!uid || !readId || !row.user) continue;
+        const at = frontier.get(readId);
+        if (at) at.push(row.user);
+        else frontier.set(readId, [row.user]);
+      }
       const lastIdx = messages.length - 1;
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         if (!msg.id) continue;
-        const seers: InternalHandlerHttpUserResponse[] = [];
-        for (const row of members) {
-          const u = row.user;
-          if (!u?.id || u.id === msg.sender_id) continue;
-          if ((readPointerIdxByUser.get(u.id) ?? -1) >= i) seers.push(u);
-        }
+        const seers = (frontier.get(msg.id) ?? []).filter((u) => u.id !== msg.sender_id);
         if (seers.length > 0) out.set(msg.id, formatSeenBy(seers));
         else if (i === lastIdx) out.set(msg.id, 'Delivered');
       }
@@ -255,7 +262,7 @@ export function MessageList({
     const otherPtrIdx = otherReadId ? (msgIdxById.get(otherReadId) ?? -1) : -1;
     out.set(lastSentId, otherPtrIdx >= lastSentIdx ? 'Seen' : 'Delivered');
     return out;
-  }, [messages, members, isGroup, myUserId, sendStatusByTempId, msgIdxById, readPointerIdxByUser]);
+  }, [messages, members, isGroup, myUserId, sendStatusByTempId, msgIdxById]);
 
   // Mark-read on focus: post the latest *delivered* message id to
   // the backend so the per-member read pointer advances. The
@@ -429,9 +436,10 @@ export function MessageList({
             ? (rect: { x: number; y: number; width: number; height: number } | undefined) => {
                 // Who's read this message — every member whose read
                 // pointer is at or past it, minus the message's own
-                // sender. In a group the list is public so the
-                // viewer is included; in a DM only the peer counts
-                // (the popover renders it as "Seen"/"Delivered").
+                // sender (you don't "see" what you sent). Same shape
+                // for DMs and groups: in a DM that resolves to "just
+                // the peer" on your own messages, which is exactly
+                // the "seen by" the popover wants to show there too.
                 const msgIdx = msgIdxById.get(m.id as string) ?? -1;
                 const seenBy =
                   msgIdx < 0
@@ -439,7 +447,6 @@ export function MessageList({
                     : members.flatMap((row) => {
                         const u = row.user;
                         if (!u?.id || u.id === m.sender_id) return [];
-                        if (!isGroup && u.id === myUserId) return [];
                         const ptr = readPointerIdxByUser.get(u.id) ?? -1;
                         if (ptr < msgIdx) return [];
                         return [{ id: u.id, name: userDisplayName(u), avatarUrl: u.avatar_url }];

@@ -54,8 +54,9 @@ export type MessageActionTarget = {
 
 type Props = {
   target: MessageActionTarget | null;
-  // Group threads list readers by avatar + name; DMs show a single
-  // "Seen" / "Delivered" line on your own messages.
+  // The "Seen by" reader list shows on every group message; in a DM
+  // it shows only on your own messages (the peer reading them is the
+  // receipt — a message *they* sent has nothing to report).
   isGroup: boolean;
   onClose: () => void;
   // Caller owns the optimistic cache patch + the DELETE call.
@@ -218,21 +219,21 @@ function PopoverContent({
     return t ? `Sent · ${t}` : '';
   })();
 
-  // "Seen by …" section, INSIDE the pill, below the icons. Group →
-  // a row per reader (avatar + name), capped at MAX_SEEN_ROWS with
-  // an "and N more" tail; DM → a single "Seen" / "Delivered" note,
-  // and only on your own messages (a peer's message has no receipt).
+  // "Seen by …" section, INSIDE the pill, below the icons — same
+  // shape for DMs and groups: a "Seen by" header + one row per
+  // reader (avatar + name), capped at MAX_SEEN_ROWS with an "and N
+  // more" tail, or "No one yet" when the list is empty. Shown for
+  // every group message and for your own DM messages (a peer's DM
+  // message has no receipt to show — obviously you saw it).
   const readers = target.seenBy ?? [];
   const showSeenSection = isGroup || target.mine;
-  const seenRows = isGroup ? Math.min(readers.length, MAX_SEEN_ROWS) : 0;
-  const seenHasOverflow = isGroup && readers.length > MAX_SEEN_ROWS;
+  const seenRows = Math.min(readers.length, MAX_SEEN_ROWS);
+  const seenHasOverflow = readers.length > MAX_SEEN_ROWS;
   const seenSectionHeight = showSeenSection
     ? SEEN_PAD_V * 2 +
-      (isGroup
-        ? SEEN_HEADER_H +
-          (readers.length === 0 ? SEEN_ROW_H : seenRows * SEEN_ROW_H) +
-          (seenHasOverflow ? SEEN_ROW_H : 0)
-        : SEEN_ROW_H)
+      SEEN_HEADER_H +
+      (readers.length === 0 ? SEEN_ROW_H : seenRows * SEEN_ROW_H) +
+      (seenHasOverflow ? SEEN_ROW_H : 0)
     : 0;
 
   // Card width hugs its content: the widest of the icon row, the
@@ -242,7 +243,7 @@ function PopoverContent({
   const captionWidth = sentLabel
     ? Math.ceil(sentLabel.length * CAPTION_CHAR_PX) + CAPTION_PAD * 2
     : 0;
-  const seenWidth = showSeenSection && isGroup ? SEEN_MIN_WIDTH : 0;
+  const seenWidth = showSeenSection ? SEEN_MIN_WIDTH : 0;
   const pillWidth = Math.max(iconRowWidth, captionWidth, seenWidth);
   const pillHeight = ICON_ROW_H + (sentLabel ? CAPTION_ROW_H : 0) + seenSectionHeight;
 
@@ -386,37 +387,29 @@ function PopoverContent({
             </View>
             {showSeenSection ? (
               <View className="border-t border-border px-3" style={{ paddingVertical: SEEN_PAD_V }}>
-                {isGroup ? (
-                  <>
-                    <Text variant="muted" className="mb-1 text-[11px] font-medium">
-                      Seen by
-                    </Text>
-                    {readers.length === 0 ? (
-                      <Text variant="muted" className="text-xs">
-                        No one yet
-                      </Text>
-                    ) : (
-                      <>
-                        {readers.slice(0, MAX_SEEN_ROWS).map((p) => (
-                          <View key={p.id ?? p.name} className="flex-row items-center gap-2 py-0.5">
-                            <Avatar source={p.avatarUrl} fallbackName={p.name} size={18} />
-                            <Text numberOfLines={1} className="flex-1 text-xs">
-                              {p.name}
-                            </Text>
-                          </View>
-                        ))}
-                        {seenHasOverflow ? (
-                          <Text variant="muted" className="pt-0.5 text-xs">
-                            and {readers.length - MAX_SEEN_ROWS} more
-                          </Text>
-                        ) : null}
-                      </>
-                    )}
-                  </>
-                ) : (
+                <Text variant="muted" className="mb-1 text-[11px] font-medium">
+                  Seen by
+                </Text>
+                {readers.length === 0 ? (
                   <Text variant="muted" className="text-xs">
-                    {readers.length > 0 ? 'Seen' : 'Delivered'}
+                    No one yet
                   </Text>
+                ) : (
+                  <>
+                    {readers.slice(0, MAX_SEEN_ROWS).map((p) => (
+                      <View key={p.id ?? p.name} className="flex-row items-center gap-2 py-0.5">
+                        <Avatar source={p.avatarUrl} fallbackName={p.name} size={18} />
+                        <Text numberOfLines={1} className="flex-1 text-xs">
+                          {p.name}
+                        </Text>
+                      </View>
+                    ))}
+                    {seenHasOverflow ? (
+                      <Text variant="muted" className="pt-0.5 text-xs">
+                        and {readers.length - MAX_SEEN_ROWS} more
+                      </Text>
+                    ) : null}
+                  </>
                 )}
               </View>
             ) : null}
