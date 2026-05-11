@@ -377,8 +377,23 @@ export default function FriendsScreen() {
   const toggleSection = React.useCallback((id: SectionId) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+        // Collapsing also drops the show-all expansion for the
+        // request section, so re-opening the chevron resets to
+        // the cap-5 + "Show N more" affordance. Mirrors the
+        // search modal's behaviour.
+        if (id === 'incoming' || id === 'outgoing') {
+          setExpandedRequestSections((prevExp) => {
+            if (!prevExp.has(id)) return prevExp;
+            const nextExp = new Set(prevExp);
+            nextExp.delete(id);
+            return nextExp;
+          });
+        }
+      }
       return next;
     });
     justToggledRef.current = id;
@@ -748,6 +763,12 @@ function SectionsPane({
       // and the rows under them disappearing when the user toggled
       // the Friends section.
       getItemType={(item) => item.kind}
+      // Anchor visible content when rows are inserted above the
+      // viewport — tapping "Show N more" on the Incoming or
+      // Outgoing section used to push the Friends section down,
+      // making the user's current view appear to shift while
+      // they were trying to see what they expanded.
+      maintainVisibleContentPosition={{ disabled: false, startRenderingFromBottom: false }}
       // Sticky chevron headers — see stickyEnabled state above;
       // undefined turns sticky off entirely (used at scrollY < 50
       // to avoid the FlashList 2.0.2 duplicate-header bug).

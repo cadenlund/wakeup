@@ -661,6 +661,11 @@ export default function SearchModalScreen() {
             // users, conversations, messages, and show-all rows in
             // separate pools so each renders with the right shape.
             getItemType={(item) => item.kind}
+            // Anchor visible content when rows are inserted above
+            // the viewport, so tapping "Show all N people"
+            // doesn't shift the rest of the modal down out of
+            // sight.
+            maintainVisibleContentPosition={{ disabled: false, startRenderingFromBottom: false }}
             // Sticky chevron headers — gated behind a small scroll
             // so the inline header has left the viewport before
             // the overlay takes over (FlashList 2.0.2 duplicate
