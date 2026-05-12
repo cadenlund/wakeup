@@ -11,6 +11,7 @@ import type {
   InternalHandlerHttpConversationListResponse,
   InternalHandlerHttpPresenceListResponse,
 } from '@/lib/api/model';
+import { useBadgeStore } from '@/lib/badge/store';
 import { setActiveConversation } from '@/lib/banner/active-conversation';
 import { setPresenceIntent } from '@/lib/banner/presence-intent';
 import { useBannerStore } from '@/lib/banner/store';
@@ -32,6 +33,7 @@ const searchKey = ['/v1/search'];
 // trackers are module-level singletons; reset them before each test.
 beforeEach(() => {
   useBannerStore.setState({ queue: [] });
+  useBadgeStore.getState().reset();
   resetTypingStore();
   setActiveConversation(null);
   setPresenceIntent('online');
@@ -445,5 +447,23 @@ describe('applyWSEvent — event banners (§4.13)', () => {
       { myUserId: 'me' }
     );
     expect(bannerQueue()).toEqual([]);
+  });
+});
+
+describe('applyWSEvent — heartbeat', () => {
+  test('stashes unread_total in the badge store', () => {
+    applyWSEvent(newClient(), { type: 'heartbeat', data: { unread_total: 7 } });
+    expect(useBadgeStore.getState().unreadTotal).toBe(7);
+  });
+
+  test('absent unread_total (0 unread) clears to 0', () => {
+    useBadgeStore.getState().setUnreadTotal(3);
+    applyWSEvent(newClient(), { type: 'heartbeat', data: {} });
+    expect(useBadgeStore.getState().unreadTotal).toBe(0);
+  });
+
+  test('a non-numeric unread_total is treated as 0', () => {
+    applyWSEvent(newClient(), { type: 'heartbeat', data: { unread_total: 'nope' } });
+    expect(useBadgeStore.getState().unreadTotal).toBe(0);
   });
 });

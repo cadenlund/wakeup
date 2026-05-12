@@ -48,6 +48,7 @@ import type {
   InternalHandlerHttpPresenceListResponse,
   InternalHandlerHttpPresenceResponse,
 } from '@/lib/api/model';
+import { setBadgeUnreadTotal } from '@/lib/badge/store';
 import { getActiveConversation } from '@/lib/banner/active-conversation';
 import { getPresenceIntent } from '@/lib/banner/presence-intent';
 import { enqueueBanner, type BannerEvent } from '@/lib/banner/store';
@@ -349,6 +350,16 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       qc.setQueryData<Conversation>([conversationDetailKeyFor(convId)], (cur) =>
         patchMemberReadPointer(cur, userId, readId)
       );
+      return;
+    }
+    case 'heartbeat': {
+      // Server ack to the client's keepalive ping — `data` carries
+      // `{ unread_total }` (omitted when 0). Stashed in the badge
+      // store; the RN-side <PushNotifications/> bridge mirrors it onto
+      // the app-icon badge (§7.5). No cache mutation, no banner.
+      const d = asRecord(env.data);
+      const total = d && typeof d.unread_total === 'number' ? d.unread_total : 0;
+      setBadgeUnreadTotal(total);
       return;
     }
     // --- known events handled by later phases (deliberate no-ops) ---
