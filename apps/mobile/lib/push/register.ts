@@ -33,8 +33,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { deleteV1DevicesId, postV1Devices } from '@/lib/api/hooks/devices/devices';
 import type { InternalHandlerHttpDeviceTokenResponse } from '@/lib/api/model';
+import { STORAGE_KEYS } from '@/lib/storage-keys';
 
-const REGISTERED_KEY = 'device:registered';
+const REGISTERED_KEY = STORAGE_KEYS.deviceRegistered;
 const ANDROID_CHANNEL_ID = 'default';
 
 type RegisteredCache = { expoToken: string; deviceId: string };

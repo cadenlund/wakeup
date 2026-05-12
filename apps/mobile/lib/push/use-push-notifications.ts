@@ -34,12 +34,17 @@ import { routeForNotificationData } from '@/lib/push/route';
 
 // Set once at module load — independent of auth / mount timing.
 // handleNotification is only invoked for notifications that arrive
-// while the app is foregrounded; we suppress those because an in-app
-// surface (EventToast, RoomBanner, unread badge) already covers them.
+// while the app is foregrounded — which normally never happens (a
+// foregrounded app is WS-connected, so the backend sends the WS event
+// instead of a push). It can fire on an offline→online race: we
+// suppress the intrusive heads-up banner (an in-app EventToast /
+// RoomBanner / unread badge covers it) but still let it land in the
+// notification shade, so a message the in-app dispatcher didn't replay
+// on reconnect isn't silently dropped.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: false,
-    shouldShowList: false,
+    shouldShowList: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
   }),
