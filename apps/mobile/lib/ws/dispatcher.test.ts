@@ -366,47 +366,70 @@ describe('applyWSEvent — event banners (§4.13)', () => {
 
   test('conversation.member_added banners only when you are the added member', () => {
     const qc = newClient();
-    // Someone else added — no banner.
+    // Someone else added — no banner (just the cache nudge).
     applyWSEvent(
       qc,
       {
         type: 'conversation.member_added',
-        data: { conversation_id: CONV, member: { user: { id: 'other' } } },
+        data: { conversation_id: CONV, conversation_name: 'Roommates', member: { id: 'other' } },
       },
       { myUserId: 'me' }
     );
     expect(bannerQueue()).toEqual([]);
-    // You were added — banner.
+    // You were added — banner with the group name.
     applyWSEvent(
       qc,
       {
         type: 'conversation.member_added',
-        data: { conversation_id: CONV, member: { user: { id: 'me' } } },
+        data: { conversation_id: CONV, conversation_name: 'Roommates', member: { id: 'me' } },
       },
       { myUserId: 'me' }
     );
-    expect(bannerQueue()[0]).toMatchObject({ route: `/conversations/${CONV}` });
+    expect(bannerQueue()[0]).toMatchObject({
+      title: 'Roommates',
+      body: 'You were added to this group',
+      route: `/conversations/${CONV}`,
+      avatar: { fallbackInitial: 'Roommates' },
+    });
   });
 
-  test('friend.request_received / accepted enqueue banners routing to /friends', () => {
+  test('friend.request_received / accepted enqueue banners with the other person', () => {
     const qc = newClient();
-    applyWSEvent(qc, { type: 'friend.request_received', data: { id: 'fr1' } });
-    applyWSEvent(qc, { type: 'friend.request_accepted', data: { id: 'fr2' } });
-    expect(bannerQueue().map((b) => b.route)).toEqual(['/friends', '/friends']);
+    applyWSEvent(qc, {
+      type: 'friend.request_received',
+      data: { request_id: 'fr1', user: { id: 'u1', display_name: 'Ada' } },
+    });
+    applyWSEvent(qc, {
+      type: 'friend.request_accepted',
+      data: { request_id: 'fr2', user: { id: 'u2', display_name: 'Ben' } },
+    });
+    expect(bannerQueue()).toEqual([
+      {
+        id: 'friend-req:fr1',
+        title: 'Ada',
+        body: 'Sent you a friend request',
+        route: '/friends',
+        avatar: { fallbackInitial: 'Ada' },
+      },
+      {
+        id: 'friend-acc:fr2',
+        title: 'Ben',
+        body: 'Accepted your friend request',
+        route: '/friends',
+        avatar: { fallbackInitial: 'Ben' },
+      },
+    ]);
   });
 
   test('no banner is enqueued for any event while presence intent is dnd', () => {
     const qc = newClient();
     setPresenceIntent('dnd');
     applyWSEvent(qc, messageEvent('message.new'));
-    applyWSEvent(qc, { type: 'friend.request_received', data: { id: 'fr1' } });
-    applyWSEvent(qc, { type: 'friend.request_accepted', data: { id: 'fr2' } });
+    applyWSEvent(qc, { type: 'friend.request_received', data: { request_id: 'fr1', user: {} } });
+    applyWSEvent(qc, { type: 'friend.request_accepted', data: { request_id: 'fr2', user: {} } });
     applyWSEvent(
       qc,
-      {
-        type: 'conversation.member_added',
-        data: { conversation_id: CONV, member: { user: { id: 'me' } } },
-      },
+      { type: 'conversation.member_added', data: { conversation_id: CONV, member: { id: 'me' } } },
       { myUserId: 'me' }
     );
     expect(bannerQueue()).toEqual([]);
