@@ -28,7 +28,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -52,14 +53,23 @@
     "android": {
       "package": "app.wakeup.client",
       "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FAFAFA"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": ["android.permission.RECORD_AUDIO"]
     },
     "runtimeVersion": {
       "policy": "appVersion"
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e8c91cd7-9c49-4845-b5b2-022c9adbfd95"
+      }
+    },
+    "owner": "cadenjlund"
   }
 }

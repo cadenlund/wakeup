@@ -28,6 +28,12 @@ export const STORAGE_KEYS = {
   // UI state — see app/(tabs)/_layout.web.tsx (web sidebar collapsed
   // pref, persisted via window.localStorage on web only).
   uiSidebarCollapsed: 'ui:sidebar_collapsed',
+
+  // Push notifications — see lib/push/register.ts. Holds the JSON
+  // `{ expoToken, deviceId }` of the currently-registered device row
+  // so we can skip re-POSTing an unchanged token and DELETE the right
+  // row on logout.
+  deviceRegistered: 'device:registered',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];

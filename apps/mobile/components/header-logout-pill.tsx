@@ -19,6 +19,7 @@ import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { usePostV1AuthLogout } from '@/lib/api/hooks/auth/auth';
 import { signedOut } from '@/lib/auth/post-auth-nav';
+import { deregisterPushAsync } from '@/lib/push/register';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
 export function HeaderLogoutPill() {
@@ -27,6 +28,13 @@ export function HeaderLogoutPill() {
   const router = useRouter();
   const logout = usePostV1AuthLogout({
     mutation: {
+      // Drop this device's push token while the session cookie is
+      // still valid — once the logout response clears the cookie the
+      // DELETE would 401 and the stale row would keep pushing to a
+      // signed-out user on this device.
+      onMutate: () => {
+        void deregisterPushAsync();
+      },
       onSuccess: () => signedOut(qc, router),
       onError: (err) => {
         if (err instanceof APIError && err.status === 401) void signedOut(qc, router);
