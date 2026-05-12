@@ -329,7 +329,7 @@ func New(t *testing.T) *Harness {
 	if err != nil {
 		t.Fatalf("Harness: build friend handler: %v", err)
 	}
-	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, msgs, v, nil)
+	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, msgSvc, v, nil)
 	if err != nil {
 		t.Fatalf("Harness: build conversation handler: %v", err)
 	}

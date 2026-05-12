@@ -447,6 +447,20 @@ func (s *Service) ListReads(ctx context.Context, actor, messageID uuid.UUID) ([]
 	return reads, nil
 }
 
+// CountUnreadByConversation returns the per-conversation unread count
+// for userID across the given conversations, keyed by conversation ID.
+// "Unread" excludes messages userID authored, soft-deleted messages,
+// and anything at or before userID's read pointer. Conversations with
+// zero unread are omitted from the map — callers treat a missing key
+// as 0. Surfaces the `unread_count` field on each ConversationResponse.
+func (s *Service) CountUnreadByConversation(ctx context.Context, userID uuid.UUID, convIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	counts, err := s.msgs.CountUnreadByConversation(ctx, userID, convIDs)
+	if err != nil {
+		return nil, apierror.Internal("count unread by conversation").WithCause(err)
+	}
+	return counts, nil
+}
+
 // publishMessageEvent fires-and-forgets a pubsub event on the
 // `conv:<id>:messages` channel. The broker is optional — when nil
 // (e.g. tests that don't care about WS fan-out), this is a no-op.

@@ -99,14 +99,17 @@ LIMIT $3;
 -- name: CountUnreadForUser :one
 -- Sum of unread messages across every conversation the user is a
 -- member of. "Unread" = the message wasn't authored by the user AND
--- (the user has no read pointer yet OR the message was sent after
--- their last_read_message_id row's created_at). Soft-deleted messages
+-- (the user has no read pointer yet OR the message sorts strictly
+-- after their last_read_message_id row by (created_at, id) — the
+-- tuple, not just the timestamp, so messages that share a timestamp
+-- with the read pointer aren't undercounted). Soft-deleted messages
 -- are excluded. Used by GET /v1/auth/me's X-Unread-Total response
 -- header and by the WS heartbeat's unread_total payload.
 WITH last_read AS (
     SELECT cm.conversation_id,
            cm.user_id,
-           lr.created_at AS last_read_at
+           lr.created_at AS last_read_at,
+           lr.id         AS last_read_id
     FROM conversation_members cm
     LEFT JOIN messages lr ON lr.id = cm.last_read_message_id
     WHERE cm.user_id = $1
@@ -116,16 +119,21 @@ FROM messages m
 JOIN last_read r ON r.conversation_id = m.conversation_id
 WHERE m.sender_id <> $1
   AND m.deleted_at IS NULL
-  AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at);
+  AND (
+    r.last_read_at IS NULL
+    OR (m.created_at, m.id) > (r.last_read_at, r.last_read_id)
+  );
 
 -- name: CountUnreadByConversation :many
 -- Per-conversation unread count for the user, restricted to the given
--- conversation IDs. "Unread" matches CountUnreadForUser. Conversations
--- with zero unread messages are omitted from the result set. Powers the
--- `unread_count` field on each ConversationResponse (per-row badge).
+-- conversation IDs. "Unread" matches CountUnreadForUser (including the
+-- (created_at, id) tuple cutoff). Conversations with zero unread
+-- messages are omitted from the result set. Powers the `unread_count`
+-- field on each ConversationResponse (per-row badge).
 WITH last_read AS (
     SELECT cm.conversation_id,
-           lr.created_at AS last_read_at
+           lr.created_at AS last_read_at,
+           lr.id         AS last_read_id
     FROM conversation_members cm
     LEFT JOIN messages lr ON lr.id = cm.last_read_message_id
     WHERE cm.user_id = $1
@@ -136,5 +144,8 @@ FROM messages m
 JOIN last_read r ON r.conversation_id = m.conversation_id
 WHERE m.sender_id <> $1
   AND m.deleted_at IS NULL
-  AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)
+  AND (
+    r.last_read_at IS NULL
+    OR (m.created_at, m.id) > (r.last_read_at, r.last_read_id)
+  )
 GROUP BY m.conversation_id;

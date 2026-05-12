@@ -184,7 +184,8 @@ const countUnreadForUserSQL = `-- name: CountUnreadForUser :one
 WITH last_read AS (
     SELECT cm.conversation_id,
            cm.user_id,
-           lr.created_at AS last_read_at
+           lr.created_at AS last_read_at,
+           lr.id         AS last_read_id
     FROM conversation_members cm
     LEFT JOIN messages lr ON lr.id = cm.last_read_message_id
     WHERE cm.user_id = $1
@@ -194,12 +195,16 @@ FROM messages m
 JOIN last_read r ON r.conversation_id = m.conversation_id
 WHERE m.sender_id <> $1
   AND m.deleted_at IS NULL
-  AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)`
+  AND (
+    r.last_read_at IS NULL
+    OR (m.created_at, m.id) > (r.last_read_at, r.last_read_id)
+  )`
 
 const countUnreadByConversationSQL = `-- name: CountUnreadByConversation :many
 WITH last_read AS (
     SELECT cm.conversation_id,
-           lr.created_at AS last_read_at
+           lr.created_at AS last_read_at,
+           lr.id         AS last_read_id
     FROM conversation_members cm
     LEFT JOIN messages lr ON lr.id = cm.last_read_message_id
     WHERE cm.user_id = $1
@@ -210,7 +215,10 @@ FROM messages m
 JOIN last_read r ON r.conversation_id = m.conversation_id
 WHERE m.sender_id <> $1
   AND m.deleted_at IS NULL
-  AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)
+  AND (
+    r.last_read_at IS NULL
+    OR (m.created_at, m.id) > (r.last_read_at, r.last_read_id)
+  )
 GROUP BY m.conversation_id`
 
 // CreateParams is the input to Create.

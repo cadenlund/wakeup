@@ -18,10 +18,11 @@ import (
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 )
 
-// UnreadByConversationCounter is the slice of the message repo this
+// UnreadByConversationCounter is the slice of the message service this
 // handler needs to populate the `unread_count` field on each
-// ConversationResponse. Defined locally so tests can stub it without a
-// real pgxpool — the production wiring uses *messagerepo.Queries.
+// ConversationResponse. Defined locally so tests can stub it — the
+// production wiring uses *message.Service (handler → service →
+// repository).
 type UnreadByConversationCounter interface {
 	CountUnreadByConversation(ctx context.Context, userID uuid.UUID, convIDs []uuid.UUID) (map[uuid.UUID]int64, error)
 }

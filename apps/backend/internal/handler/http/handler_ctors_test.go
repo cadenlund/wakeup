@@ -93,6 +93,11 @@ func TestNewAttachmentHandler_RejectsNilDeps(t *testing.T) {
 func TestNewConversationHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	v := newValidator()
+	// The unread counter is optional — a nil one must be accepted
+	// (graceful degradation: unread_count just stays 0).
+	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, stubAuth, nil, v, nil); err != nil {
+		t.Fatalf("nil unread counter should be allowed: %v", err)
+	}
 	if _, err := httpapi.NewConversationHandler(nil, stubUsers, stubAuth, nil, v, nil); err == nil {
 		t.Error("nil convs: expected error")
 	}

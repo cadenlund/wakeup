@@ -53,7 +53,7 @@ func productionLikeServer(t *testing.T) (*httptest.Server, *http.Client, *testut
 	if err != nil {
 		t.Fatalf("friend handler: %v", err)
 	}
-	convHandler, err := httpapi.NewConversationHandler(h.ConvSvc, h.UserSvc, h.AuthSvc, h.MsgRepo, v, nil)
+	convHandler, err := httpapi.NewConversationHandler(h.ConvSvc, h.UserSvc, h.AuthSvc, h.MsgSvc, v, nil)
 	if err != nil {
 		t.Fatalf("conversation handler: %v", err)
 	}
