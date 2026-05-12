@@ -68,7 +68,7 @@ function AppearanceSection() {
         selected={selected}
         mode={mode}
         onPick={(s) => {
-          haptics.tap();
+          haptics.success();
           void setScheme(s);
         }}
       />
@@ -84,7 +84,7 @@ function AppearanceSection() {
               accessibilityLabel={`Mode ${p}`}
               accessibilityState={{ selected: p === modePref }}
               onPress={() => {
-                haptics.tap();
+                haptics.success();
                 void setModePref(p);
               }}
               className={`flex-1 items-center rounded-lg px-3 py-2 ${
