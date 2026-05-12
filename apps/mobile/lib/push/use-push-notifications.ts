@@ -16,6 +16,8 @@
 //     `routeForNotificationData` → `router.push`. Also handles the
 //     cold-start case (`getLastNotificationResponseAsync`) where the
 //     app was launched *from* a notification.
+//   - App-icon badge: mirrors the WS `heartbeat` ack's `unread_total`
+//     onto the launcher icon (§7.5); clears it on logout.
 //
 // Logout deregistration is NOT here — the DELETE needs a live session
 // cookie, so it runs from the logout mutation's onMutate
@@ -26,6 +28,8 @@ import * as React from 'react';
 import { AppState } from 'react-native';
 
 import { useAuthState } from '@/components/auth-gate';
+import { useBadgeStore } from '@/lib/badge/store';
+import { setAppBadgeCount } from '@/lib/push/badge';
 import {
   registerForPushNotificationsAsync,
   setupAndroidNotificationChannelAsync,
@@ -58,6 +62,10 @@ function openFromNotification(response: Notifications.NotificationResponse | nul
 
 export function usePushNotifications(): void {
   const { isAuthenticated } = useAuthState();
+  // Lets the AppState listener read the latest auth value without
+  // re-subscribing every time it changes.
+  const authedRef = React.useRef(isAuthenticated);
+  authedRef.current = isAuthenticated;
 
   // Android notification channel — once per process.
   React.useEffect(() => {
@@ -66,12 +74,27 @@ export function usePushNotifications(): void {
 
   // Register the token when authenticated. `registerForPush…` is
   // idempotent (skips the POST when the cached token is unchanged), so
-  // re-running on auth refetch / remount is harmless.
-  const authedRef = React.useRef(isAuthenticated);
-  authedRef.current = isAuthenticated;
+  // re-running on auth refetch / remount is harmless. On logout, clear
+  // the app-icon badge (no session → no unread count to show) and the
+  // badge store, so a re-login doesn't briefly paint the prior
+  // account's count before the first heartbeat lands.
   React.useEffect(() => {
-    if (isAuthenticated) void registerForPushNotificationsAsync();
+    if (isAuthenticated) {
+      void registerForPushNotificationsAsync();
+    } else {
+      useBadgeStore.getState().reset();
+      void setAppBadgeCount(0);
+    }
   }, [isAuthenticated]);
+
+  // Mirror the badge store onto the app-icon badge. The dispatcher
+  // writes the store from each WS `heartbeat` ack (the client pings on
+  // connect / every interval / after a MarkRead, so it stays fresh);
+  // `null` means "no heartbeat yet this session" → leave the badge be.
+  const unreadTotal = useBadgeStore((s) => s.unreadTotal);
+  React.useEffect(() => {
+    if (isAuthenticated && unreadTotal !== null) void setAppBadgeCount(unreadTotal);
+  }, [isAuthenticated, unreadTotal]);
 
   // Re-check on foreground (a user may grant permission in Settings
   // while the app is backgrounded, or the OS may rotate the token).

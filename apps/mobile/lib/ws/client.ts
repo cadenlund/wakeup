@@ -40,6 +40,12 @@ const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_CAP_MS = 30_000;
 // Normal-closure code — used when the client deliberately closes.
 const NORMAL_CLOSURE = 1000;
+// How often, while connected, we ping the server with a `heartbeat`.
+// The server's ack carries `unread_total` (drives the app-icon badge,
+// §7.5) and the round-trip doubles as a liveness check. Fired once on
+// connect and after a MarkRead too, so the badge isn't stale for a
+// full interval after a read.
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 let socket: WebSocket | null = null;
 let state: WSConnectionState = 'disconnected';
@@ -47,6 +53,7 @@ let state: WSConnectionState = 'disconnected';
 // reset to 0 on a successful open.
 let reconnectAttempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 // True between connect() and disconnect(). An unexpected socket
 // close only schedules a reconnect while this is true; a
 // deliberate disconnect() flips it false first so the close
@@ -97,9 +104,17 @@ function clearReconnectTimer(): void {
   }
 }
 
+function clearHeartbeatTimer(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
 // Detach every handler and close, so a stale socket can't deliver
 // events or fire a reconnect after we've moved on.
 function teardownSocket(ws: WebSocket | null): void {
+  clearHeartbeatTimer();
   if (!ws) return;
   ws.onopen = null;
   ws.onmessage = null;
@@ -138,6 +153,11 @@ function openSocket(): void {
     if (socket !== ws) return; // superseded by a newer socket
     reconnectAttempt = 0;
     setState('connected');
+    // Ping immediately so the badge picks up the current unread total
+    // within a beat of connecting, then keep it warm on an interval.
+    sendHeartbeat();
+    clearHeartbeatTimer();
+    heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
   };
 
   ws.onmessage = (event: WebSocketMessageEvent) => {
@@ -237,6 +257,21 @@ export function sendWS(envelope: WSEnvelope): boolean {
     readyState: socket?.readyState ?? null,
   });
   return false;
+}
+
+// Ping the server with a `heartbeat` so it acks `unread_total` (badge,
+// §7.5). No-op when the socket isn't OPEN. Exposed so callers that
+// just changed the unread count (e.g. MarkRead) can force a fresh
+// total without waiting for the next interval tick.
+export function pingHeartbeat(): void {
+  sendHeartbeat();
+}
+
+function sendHeartbeat(): void {
+  // `data` is required by the §7.1 envelope shape; the server ignores
+  // it on the inbound direction (HeartbeatPayload.UnreadTotal is
+  // outbound-only).
+  sendWS({ type: 'heartbeat', data: {} });
 }
 
 export function getWSState(): WSConnectionState {

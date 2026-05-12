@@ -31,6 +31,7 @@ import {
   postV1ConversationsIdRead,
 } from '@/lib/api/hooks/conversations/conversations';
 import { newIdempotencyKey } from '@/lib/api/idempotency';
+import { pingHeartbeat } from '@/lib/ws/client';
 
 type Vars = { messageId: string; idempotencyKey: string };
 
@@ -70,6 +71,9 @@ export function useMarkReadOnFocus(
       void qc.invalidateQueries({
         queryKey: [getGetV1ConversationsQueryKey()[0]],
       });
+      // Force a heartbeat so the app-icon badge picks up the lower
+      // unread total now, rather than at the next interval tick.
+      pingHeartbeat();
     },
     onError: (err) => {
       // Silent fail — MarkRead is best-effort. ackedRef stays
