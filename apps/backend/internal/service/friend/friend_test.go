@@ -225,6 +225,46 @@ func TestSendRequest_Success(t *testing.T) {
 	}
 }
 
+// friendEvent mirrors the `friend.request_*` wire shape for assertions.
+type friendEvent struct {
+	Type string `json:"type"`
+	Data struct {
+		RequestID string `json:"request_id"`
+		User      struct {
+			ID          string `json:"id"`
+			Username    string `json:"username"`
+			DisplayName string `json:"display_name"`
+		} `json:"user"`
+	} `json:"data"`
+}
+
+// assertFriendEvent decodes the envelope and checks the full payload
+// contract: type, request_id, and the carried user's id/username/
+// display_name (so a regression on any field fails the test, not just
+// `user.id`).
+func assertFriendEvent(t *testing.T, payload []byte, wantType string, wantReq uuid.UUID, wantUser domain.User) {
+	t.Helper()
+	var env friendEvent
+	if err := json.Unmarshal(payload, &env); err != nil {
+		t.Fatalf("unmarshal %q: %v", payload, err)
+	}
+	if env.Type != wantType {
+		t.Errorf("type = %q, want %q", env.Type, wantType)
+	}
+	if env.Data.RequestID != wantReq.String() {
+		t.Errorf("request_id = %q, want %q", env.Data.RequestID, wantReq)
+	}
+	if env.Data.User.ID != wantUser.ID.String() {
+		t.Errorf("user.id = %q, want %q", env.Data.User.ID, wantUser.ID)
+	}
+	if env.Data.User.Username != wantUser.Username {
+		t.Errorf("user.username = %q, want %q", env.Data.User.Username, wantUser.Username)
+	}
+	if env.Data.User.DisplayName != wantUser.DisplayName {
+		t.Errorf("user.display_name = %q, want %q", env.Data.User.DisplayName, wantUser.DisplayName)
+	}
+}
+
 // SendRequest fans out `friend.request_received` to the addressee's
 // per-user channel, carrying the requester's identity for the toast.
 func TestSendRequest_PublishesEvent(t *testing.T) {
@@ -238,29 +278,13 @@ func TestSendRequest_PublishesEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	if _, err := st.svc.SendRequest(ctx, a.ID, b.Username); err != nil {
+	req, err := st.svc.SendRequest(ctx, a.ID, b.Username)
+	if err != nil {
 		t.Fatalf("SendRequest: %v", err)
 	}
 	select {
 	case msg := <-ch:
-		var env struct {
-			Type string `json:"type"`
-			Data struct {
-				User struct {
-					ID       string `json:"id"`
-					Username string `json:"username"`
-				} `json:"user"`
-			} `json:"data"`
-		}
-		if e := json.Unmarshal(msg.Payload, &env); e != nil {
-			t.Fatalf("unmarshal %q: %v", msg.Payload, e)
-		}
-		if env.Type != "friend.request_received" {
-			t.Errorf("type = %q, want friend.request_received", env.Type)
-		}
-		if env.Data.User.ID != a.ID.String() {
-			t.Errorf("user.id = %q, want %q", env.Data.User.ID, a.ID)
-		}
+		assertFriendEvent(t, msg.Payload, "friend.request_received", req.ID, a) // a = requester
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for friend.request_received")
 	}
@@ -282,28 +306,13 @@ func TestAcceptRequest_PublishesEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	if _, err := st.svc.AcceptRequest(ctx, b.ID, f.ID); err != nil {
+	upd, err := st.svc.AcceptRequest(ctx, b.ID, f.ID)
+	if err != nil {
 		t.Fatalf("AcceptRequest: %v", err)
 	}
 	select {
 	case msg := <-ch:
-		var env struct {
-			Type string `json:"type"`
-			Data struct {
-				User struct {
-					ID string `json:"id"`
-				} `json:"user"`
-			} `json:"data"`
-		}
-		if e := json.Unmarshal(msg.Payload, &env); e != nil {
-			t.Fatalf("unmarshal %q: %v", msg.Payload, e)
-		}
-		if env.Type != "friend.request_accepted" {
-			t.Errorf("type = %q, want friend.request_accepted", env.Type)
-		}
-		if env.Data.User.ID != b.ID.String() {
-			t.Errorf("user.id = %q, want %q (the accepter)", env.Data.User.ID, b.ID)
-		}
+		assertFriendEvent(t, msg.Payload, "friend.request_accepted", upd.ID, b) // b = accepter
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for friend.request_accepted")
 	}
