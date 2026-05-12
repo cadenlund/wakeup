@@ -52,6 +52,7 @@ import { getActiveConversation } from '@/lib/banner/active-conversation';
 import { getPresenceIntent } from '@/lib/banner/presence-intent';
 import { enqueueBanner, type BannerEvent } from '@/lib/banner/store';
 import { conversationDisplay } from '@/lib/conversation-display';
+import { invalidateRelationships } from '@/lib/friend-cache';
 import { clearTyping, markTyping } from '@/lib/typing/store';
 import type { WSEnvelope } from '@/lib/ws/client';
 
@@ -67,9 +68,8 @@ type Presence = InternalHandlerHttpPresenceResponse;
 export type DispatchContext = { myUserId?: string };
 
 // URL-prefix query keys — mirror the orval `getGetV1*QueryKey()[0]`.
+// Friend-graph keys live in `lib/friend-cache.ts` (`invalidateRelationships`).
 const CONVERSATIONS_KEY = '/v1/conversations';
-const FRIENDS_KEY = '/v1/friends';
-const FRIEND_REQUESTS_KEY = '/v1/friends/requests';
 const PRESENCE_FRIENDS_KEY = '/v1/presence/friends';
 const messagesKeyFor = (conversationId: string) => `/v1/conversations/${conversationId}/messages`;
 const conversationDetailKeyFor = (conversationId: string) => `/v1/conversations/${conversationId}`;
@@ -167,6 +167,16 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
+// Best-effort display name from a `WSUser`-ish payload object
+// (`{ display_name, username }`). Falls back to "Someone".
+function wsUserName(v: unknown): string {
+  const u = asRecord(v);
+  return (str(u?.display_name) ?? '').trim() || (str(u?.username) ?? '').trim() || 'Someone';
+}
+// Best-effort trimmed string from an unknown payload field.
+function trimmedStr(v: unknown): string {
+  return (str(v) ?? '').trim();
+}
 
 // Build a patch object from `src`, keeping only keys whose value is a
 // string. A missing/non-string field is OMITTED, never set to
@@ -251,41 +261,58 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       return;
     }
     case 'friend.request_received': {
-      void qc.invalidateQueries({ queryKey: [FRIEND_REQUESTS_KEY] });
-      const id = str(asRecord(env.data)?.id);
+      // `{ request_id, user: { id, username, display_name } }` — `user`
+      // is the requester. No avatar URL on the wire (needs presigning),
+      // so the toast shows their initials avatar. Refresh the whole
+      // relationship surface so e.g. an open search row updates.
+      void invalidateRelationships(qc);
+      const d = asRecord(env.data);
+      const reqId = str(d?.request_id);
+      const name = wsUserName(d?.user);
       maybeBanner({
-        id: id ? `friend-req:${id}` : `friend-req:${Date.now()}`,
-        title: 'New friend request',
+        id: reqId ? `friend-req:${reqId}` : `friend-req:${Date.now()}`,
+        title: name,
+        body: 'Sent you a friend request',
         route: '/friends',
+        avatar: { fallbackInitial: name },
       });
       return;
     }
     case 'friend.request_accepted': {
-      void qc.invalidateQueries({ queryKey: [FRIENDS_KEY] });
-      void qc.invalidateQueries({ queryKey: [FRIEND_REQUESTS_KEY] });
-      const id = str(asRecord(env.data)?.id);
+      // `{ request_id, user }` — `user` is the person who accepted.
+      void invalidateRelationships(qc);
+      const d = asRecord(env.data);
+      const reqId = str(d?.request_id);
+      const name = wsUserName(d?.user);
       maybeBanner({
-        id: id ? `friend-acc:${id}` : `friend-acc:${Date.now()}`,
-        title: 'Friend request accepted',
+        id: reqId ? `friend-acc:${reqId}` : `friend-acc:${Date.now()}`,
+        title: name,
+        body: 'Accepted your friend request',
         route: '/friends',
+        avatar: { fallbackInitial: name },
       });
       return;
     }
     case 'conversation.member_added': {
       void qc.invalidateQueries({ queryKey: [CONVERSATIONS_KEY] });
-      // Banner only when *you* were the one added (payload is
-      // `{ conversation_id, member: { user: { id, … }, … } }`).
+      // Payload `{ conversation_id, conversation_name, member: { id, … } }`.
+      // Banner only when *you* were the one added; existing members
+      // just get the cache nudge above (+ the detail refresh below) so
+      // the new face shows up.
       const d = asRecord(env.data);
       const convId = d && str(d.conversation_id);
-      const member = d && asRecord(d.member);
-      const addedUser = member && asRecord(member.user);
-      const addedId = addedUser && str(addedUser.id);
+      if (convId) {
+        void qc.invalidateQueries({ queryKey: [conversationDetailKeyFor(convId)] });
+      }
+      const addedId = str(asRecord(d?.member)?.id);
       if (!convId || !ctx.myUserId || addedId !== ctx.myUserId) return;
-      const name = findConversation(qc, convId)?.name?.trim();
+      const groupName = trimmedStr(d?.conversation_name) || 'a group';
       maybeBanner({
         id: `member-added:${convId}`,
-        title: name ? `Added you to ${name}` : 'Added you to a group',
+        title: groupName,
+        body: 'You were added to this group',
         route: `/conversations/${convId}`,
+        avatar: { fallbackInitial: groupName },
       });
       return;
     }

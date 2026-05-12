@@ -94,7 +94,8 @@ func TestEncodeDecode_RoundTripEveryEvent(t *testing.T) {
 		{wsproto.EventConversationCreated, map[string]any{"id": convID, "type": "group"}},
 		{wsproto.EventConversationUpdated, map[string]any{"id": convID, "name": "renamed"}},
 		{wsproto.EventConversationMemberAdded, wsproto.ConversationMemberAddedPayload{
-			ConversationID: convID, Member: json.RawMessage(`{"id":"u-1","username":"a"}`),
+			ConversationID: convID, ConversationName: "Roommates",
+			Member: wsproto.WSUser{ID: userID, Username: "a", DisplayName: "Ada"},
 		}},
 		{wsproto.EventConversationMemberRemoved, wsproto.ConversationMemberRemovedPayload{
 			ConversationID: convID, UserID: userID,
@@ -104,8 +105,12 @@ func TestEncodeDecode_RoundTripEveryEvent(t *testing.T) {
 		}},
 		{wsproto.EventTypingStart, wsproto.TypingPayload{ConversationID: convID, UserID: &userID}},
 		{wsproto.EventTypingStop, wsproto.TypingPayload{ConversationID: convID, UserID: &userID}},
-		{wsproto.EventFriendRequestReceived, map[string]any{"id": uuid.New(), "requester_id": userID}},
-		{wsproto.EventFriendRequestAccepted, map[string]any{"id": uuid.New()}},
+		{wsproto.EventFriendRequestReceived, wsproto.FriendRequestEventPayload{
+			RequestID: uuid.New(), User: wsproto.WSUser{ID: userID, Username: "a", DisplayName: "Ada"},
+		}},
+		{wsproto.EventFriendRequestAccepted, wsproto.FriendRequestEventPayload{
+			RequestID: uuid.New(), User: wsproto.WSUser{ID: userID, Username: "b", DisplayName: "Ben"},
+		}},
 		{wsproto.EventRoomStarted, wsproto.RoomStartedPayload{
 			ConversationID: convID, InitiatorID: userID, Video: false,
 		}},

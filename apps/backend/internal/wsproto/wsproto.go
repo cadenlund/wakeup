@@ -213,18 +213,37 @@ type MessageReadPayload struct {
 	ReadAt         time.Time `json:"read_at"`
 }
 
-// ConversationMemberAddedPayload — `conversation.member_added`. Member is
-// json.RawMessage because the user DTO doesn't live here (it's defined
-// alongside the user handler in milestone 3.7).
+// WSUser is the minimal user identity carried inside per-user events
+// (friend / member-added) — just enough for an in-app notification.
+// Built from domain.User by the publishing service; no avatar URL,
+// since that needs presigning, which is a handler concern.
+type WSUser struct {
+	ID          uuid.UUID `json:"id"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+}
+
+// ConversationMemberAddedPayload — `conversation.member_added`, fanned
+// out on each member's `user:<id>:events`. `Member` is the user that
+// was added; `ConversationName` is empty for an unnamed group.
 type ConversationMemberAddedPayload struct {
-	ConversationID uuid.UUID       `json:"conversation_id"`
-	Member         json.RawMessage `json:"member"`
+	ConversationID   uuid.UUID `json:"conversation_id"`
+	ConversationName string    `json:"conversation_name"`
+	Member           WSUser    `json:"member"`
 }
 
 // ConversationMemberRemovedPayload — `conversation.member_removed`.
 type ConversationMemberRemovedPayload struct {
 	ConversationID uuid.UUID `json:"conversation_id"`
 	UserID         uuid.UUID `json:"user_id"`
+}
+
+// FriendRequestEventPayload — `friend.request_received` (to the
+// addressee; `User` = the requester) and `friend.request_accepted`
+// (to the requester; `User` = the accepter).
+type FriendRequestEventPayload struct {
+	RequestID uuid.UUID `json:"request_id"`
+	User      WSUser    `json:"user"`
 }
 
 // PresenceUpdatePayload — `presence.update`.

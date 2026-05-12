@@ -52,8 +52,6 @@ import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
 import {
-  getGetV1FriendsQueryKey,
-  getGetV1FriendsRequestsQueryKey,
   useDeleteV1FriendsUserId,
   useGetV1FriendsRequests,
   usePostV1FriendsRequestsIdAccept,
@@ -62,6 +60,7 @@ import {
 import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import { useGetV1Search } from '@/lib/api/hooks/search/search';
 import { useFriendActions } from '@/lib/api/use-friend-actions';
+import { invalidateRelationships } from '@/lib/friend-cache';
 import {
   flatten,
   useInfiniteConversations,
@@ -246,12 +245,6 @@ export default function SearchModalScreen() {
       return next;
     });
   }, []);
-  const invalidateRelationships = React.useCallback(async () => {
-    await Promise.all([
-      qc.invalidateQueries({ queryKey: getGetV1FriendsQueryKey() }),
-      qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() }),
-    ]);
-  }, [qc]);
   const onUnfriend = React.useCallback(
     async (user: InternalHandlerHttpUserResponse) => {
       const userId = user.id;
@@ -260,7 +253,7 @@ export default function SearchModalScreen() {
       setFriendMenuTarget(null);
       try {
         await unfriend.mutateAsync({ userId });
-        await invalidateRelationships();
+        await invalidateRelationships(qc);
         const handle = user.username ? `@${user.username}` : 'this user';
         toast.info('Unfriended', `${handle} is no longer in your friends.`);
       } catch (err) {
@@ -271,7 +264,7 @@ export default function SearchModalScreen() {
         unmarkFriendPending(userId);
       }
     },
-    [unfriend, invalidateRelationships, markFriendPending, unmarkFriendPending]
+    [unfriend, qc, markFriendPending, unmarkFriendPending]
   );
   const onBlock = React.useCallback(
     async (user: InternalHandlerHttpUserResponse) => {
@@ -281,7 +274,7 @@ export default function SearchModalScreen() {
       setFriendMenuTarget(null);
       try {
         await blockUser.mutateAsync({ userId });
-        await invalidateRelationships();
+        await invalidateRelationships(qc);
         const handle = user.username ? `@${user.username}` : 'this user';
         toast.info('Blocked', `${handle} can't message or add you.`);
       } catch (err) {
@@ -292,7 +285,7 @@ export default function SearchModalScreen() {
         unmarkFriendPending(userId);
       }
     },
-    [blockUser, invalidateRelationships, markFriendPending, unmarkFriendPending]
+    [blockUser, qc, markFriendPending, unmarkFriendPending]
   );
 
   // Accept/decline a pending incoming request. Wired into the
@@ -303,7 +296,7 @@ export default function SearchModalScreen() {
     async (requestId: string, handle: string | undefined) => {
       try {
         await acceptRequest.mutateAsync({ id: requestId });
-        await invalidateRelationships();
+        await invalidateRelationships(qc);
         toast.success("You're now friends", handle ? `Say hi to ${handle}.` : undefined);
       } catch (err) {
         const msg =
@@ -313,7 +306,7 @@ export default function SearchModalScreen() {
         toast.error(msg);
       }
     },
-    [acceptRequest, invalidateRelationships]
+    [acceptRequest, qc]
   );
 
   // Conversation "more actions" — Pin / Mute. Reuses the same

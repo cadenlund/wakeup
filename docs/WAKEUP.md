@@ -1447,13 +1447,13 @@ return ListMessagesResponse{Data: toMessageResponses(data), NextCursor: next, Ha
 | `message.read` | `{ conversation_id, message_id, user_id, read_at }` |
 | `conversation.created` | Conversation |
 | `conversation.updated` | Conversation |
-| `conversation.member_added` | `{ conversation_id, member }` |
+| `conversation.member_added` | `{ conversation_id, conversation_name, member: { id, username, display_name } }` — fanned out on each member's `user:<id>:events` |
 | `conversation.member_removed` | `{ conversation_id, user_id }` |
 | `presence.update` | `{ user_id, status, last_active_at }` |
 | `typing.start` | `{ conversation_id, user_id }` |
 | `typing.stop` | `{ conversation_id, user_id }` |
-| `friend.request_received` | FriendRequest |
-| `friend.request_accepted` | FriendRequest |
+| `friend.request_received` | `{ request_id, user: { id, username, display_name } }` — `user` = the requester; sent on the addressee's `user:<id>:events` |
+| `friend.request_accepted` | `{ request_id, user: { id, username, display_name } }` — `user` = the accepter; sent on the requester's `user:<id>:events` |
 | `room.started` | `{ conversation_id, initiator_id, video }` — fired when first participant joins an empty room (treat as "incoming call" UX) |
 | `room.participant_joined` | `{ conversation_id, user_id, video, joined_at }` |
 | `room.participant_left` | `{ conversation_id, user_id }` |

@@ -924,6 +924,48 @@ func TestAddMembers_AdminAdds(t *testing.T) {
 	}
 }
 
+// AddMembers fans out `conversation.member_added` to each current
+// member's per-user channel, carrying the added member + the group
+// name so the recipient can show an "Added you to …" notification.
+func TestAddMembers_PublishesMemberAdded(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	c := makeUser(ctx, t, st)
+	created := mustCreate(ctx, t, st, conversation.CreateParams{
+		Type: domain.ConversationGroup, Creator: a.ID,
+		MemberIDs: []uuid.UUID{b.ID}, Name: ptr("Roommates"),
+	})
+	ch, err := st.broker.Subscribe(ctx, "user:"+c.ID.String()+":events")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if _, err := st.svc.AddMembers(ctx, conversation.AddMembersParams{
+		Actor: a.ID, ConvID: created.Conversation.ID, UserIDs: []uuid.UUID{c.ID},
+	}); err != nil {
+		t.Fatalf("AddMembers: %v", err)
+	}
+	select {
+	case msg := <-ch:
+		p := string(msg.Payload)
+		for _, want := range []string{
+			"conversation.member_added",
+			created.Conversation.ID.String(),
+			c.ID.String(),
+			"conversation_name",
+			"Roommates",
+		} {
+			if !strings.Contains(p, want) {
+				t.Errorf("payload missing %q: %s", want, p)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for conversation.member_added")
+	}
+}
+
 // Anyone in the group can add — Wakeup groups are friend circles,
 // not admin-gated workspaces. Non-admin caller successfully adds
 // a third user here; previously this surface returned Forbidden.
