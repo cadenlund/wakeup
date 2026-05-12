@@ -9,44 +9,45 @@
 // that screen's Toast wins while it's mounted; when it unmounts
 // the root one in `<ToastRoot>` takes back over.
 //
-// Variants: `error` / `success` / `info` are passive notices;
-// `event` is a heads-up about something elsewhere — the whole pill
-// is tappable (the lib passes the `onPress` from `Toast.show`) and
-// shows a chevron so it reads as actionable. All four share the
-// same card chrome so a passive toast and an event toast occupy the
-// same slot identically.
+// Variants:
+//   - `error` / `success` / `info` — passive notices: a card with a
+//     coloured left accent bar, no avatar, not tappable.
+//   - `event` — a heads-up about something elsewhere (a new message,
+//     a friend request): the whole pill is tappable (the lib passes
+//     the `onPress` from `Toast.show`), shows the sender's avatar on
+//     the left + a chevron on the right so it reads like a
+//     notification. No accent bar — the avatar carries the identity.
+// All variants share the same card width / position so the slot is
+// consistent.
 import { ChevronRight } from 'lucide-react-native';
-import Toast, { type BaseToastProps } from 'react-native-toast-message';
+import Toast, { type BaseToastProps, type ToastConfigParams } from 'react-native-toast-message';
 import { Pressable, View } from 'react-native';
 
+import { Avatar, StackedAvatars } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
+import type { ConversationAvatar } from '@/lib/conversation-display';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
-type Variant = 'error' | 'success' | 'info' | 'event';
-
-const VARIANT_BORDER: Record<Variant, string> = {
+const ACCENT: Record<'error' | 'success' | 'info', string> = {
   error: 'border-l-destructive',
   success: 'border-l-primary',
   info: 'border-l-border',
-  event: 'border-l-primary',
 };
 
-function ThemedToast({
+const CARD =
+  'mx-4 w-[92%] max-w-md flex-row items-center gap-3 rounded-xl bg-card px-4 py-3 shadow-lg shadow-black/20';
+
+function PassiveToast({
   variant,
   text1,
   text2,
-  onPress,
 }: {
-  variant: Variant;
+  variant: 'error' | 'success' | 'info';
   text1?: string;
   text2?: string;
-  onPress?: () => void;
 }) {
-  const mutedFg = useThemeColor('muted-foreground');
-  const actionable = variant === 'event' && !!onPress;
-  const card = (
-    <View
-      className={`mx-4 w-[92%] max-w-md flex-row items-center gap-3 rounded-xl border border-l-4 border-border bg-card px-4 py-3 shadow-lg shadow-black/20 ${VARIANT_BORDER[variant]}`}>
+  return (
+    <View className={`${CARD} border border-l-4 border-border ${ACCENT[variant]}`}>
       <View className="flex-1 gap-1">
         {text1 ? (
           <Text numberOfLines={1} className="text-sm font-semibold text-foreground">
@@ -59,10 +60,50 @@ function ThemedToast({
           </Text>
         ) : null}
       </View>
-      {actionable ? <ChevronRight size={18} color={mutedFg} /> : null}
     </View>
   );
-  if (!actionable) return card;
+}
+
+// A DM peer / named group → a single avatar; a group with no photo →
+// the overlapping-member cluster (same as the chats list).
+function ConvAvatar({ a }: { a?: ConversationAvatar }) {
+  if (!a?.avatarUrl && (a?.stackedMembers?.length ?? 0) > 0) {
+    return <StackedAvatars members={a!.stackedMembers!} size={36} />;
+  }
+  return <Avatar source={a?.avatarUrl} fallbackName={a?.fallbackInitial} size={36} />;
+}
+
+function EventToast({
+  text1,
+  text2,
+  onPress,
+  extra,
+}: {
+  text1?: string;
+  text2?: string;
+  onPress?: () => void;
+  extra?: ConversationAvatar;
+}) {
+  const mutedFg = useThemeColor('muted-foreground');
+  const card = (
+    <View className={`${CARD} border border-border`}>
+      <ConvAvatar a={extra} />
+      <View className="flex-1 gap-0.5">
+        {text1 ? (
+          <Text numberOfLines={1} className="text-sm font-semibold text-foreground">
+            {text1}
+          </Text>
+        ) : null}
+        {text2 ? (
+          <Text numberOfLines={1} className="text-sm text-muted-foreground">
+            {text2}
+          </Text>
+        ) : null}
+      </View>
+      <ChevronRight size={18} color={mutedFg} />
+    </View>
+  );
+  if (!onPress) return card;
   return (
     <Pressable
       onPress={onPress}
@@ -77,16 +118,21 @@ function ThemedToast({
 
 export const toastConfig = {
   error: (props: BaseToastProps) => (
-    <ThemedToast variant="error" text1={props.text1} text2={props.text2} />
+    <PassiveToast variant="error" text1={props.text1} text2={props.text2} />
   ),
   success: (props: BaseToastProps) => (
-    <ThemedToast variant="success" text1={props.text1} text2={props.text2} />
+    <PassiveToast variant="success" text1={props.text1} text2={props.text2} />
   ),
   info: (props: BaseToastProps) => (
-    <ThemedToast variant="info" text1={props.text1} text2={props.text2} />
+    <PassiveToast variant="info" text1={props.text1} text2={props.text2} />
   ),
-  event: (props: BaseToastProps) => (
-    <ThemedToast variant="event" text1={props.text1} text2={props.text2} onPress={props.onPress} />
+  event: (props: ToastConfigParams<ConversationAvatar>) => (
+    <EventToast
+      text1={props.text1}
+      text2={props.text2}
+      onPress={props.onPress}
+      extra={props.props}
+    />
   ),
 };
 

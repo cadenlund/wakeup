@@ -1441,8 +1441,8 @@ return ListMessagesResponse{Data: toMessageResponses(data), NextCursor: next, Ha
 
 | Event | Payload |
 |---|---|
-| `message.new` | full Message |
-| `message.edited` | Message |
+| `message.new` | `{ message_id, conversation_id, sender_id, created_at, body }` (ids + body for the in-app banner; the open thread refetches the page for the full DTO) |
+| `message.edited` | `{ message_id, conversation_id, sender_id, created_at, body }` |
 | `message.deleted` | `{ message_id, conversation_id }` |
 | `message.read` | `{ conversation_id, message_id, user_id, read_at }` |
 | `conversation.created` | Conversation |

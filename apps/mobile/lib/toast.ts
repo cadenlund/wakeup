@@ -22,10 +22,14 @@
 // on the explicit allowlist, and ambient WS events toast info /
 // event (the dispatcher in `lib/ws/dispatcher.ts` owns that
 // decision; `<EventToastBridge>` drains its queue into `toast.event`).
+import * as React from 'react';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import RNToast from 'react-native-toast-message';
 import { toast as sonnerToast } from 'sonner';
+
+import { Avatar } from '@/components/ui/avatar';
+import type { ConversationAvatar } from '@/lib/conversation-display';
 
 type Variant = 'error' | 'success' | 'info' | 'event';
 
@@ -44,12 +48,23 @@ function showWeb(
   title: string,
   message: string | undefined,
   duration: number,
-  route?: string
+  route?: string,
+  avatar?: ConversationAvatar
 ) {
   const opts = {
     description: message,
     duration,
     action: route ? { label: 'View', onClick: () => navigate(route) } : undefined,
+    // sonner's icon slot is tiny — show a single avatar (the group
+    // photo if it has one, else the initial); the overlapping-member
+    // cluster is native-only.
+    icon: avatar
+      ? React.createElement(Avatar, {
+          source: avatar.avatarUrl ?? null,
+          fallbackName: avatar.fallbackInitial,
+          size: 22,
+        })
+      : undefined,
   };
   if (variant === 'error') sonnerToast.error(title, opts);
   else if (variant === 'success') sonnerToast.success(title, opts);
@@ -61,13 +76,17 @@ function showNative(
   title: string,
   message: string | undefined,
   duration: number,
-  route?: string
+  route?: string,
+  avatar?: ConversationAvatar
 ) {
   RNToast.show({
     type: variant,
     text1: title,
     text2: message,
     visibilityTime: duration,
+    // Forwarded to the `event` renderer in toast-config.tsx as
+    // `props.props`; ignored by the passive renderers.
+    props: avatar,
     onPress: route
       ? () => {
           RNToast.hide();
@@ -82,10 +101,11 @@ function fire(
   title: string,
   message: string | undefined,
   duration: number,
-  route?: string
+  route?: string,
+  avatar?: ConversationAvatar
 ) {
-  if (Platform.OS === 'web') showWeb(variant, title, message, duration, route);
-  else showNative(variant, title, message, duration, route);
+  if (Platform.OS === 'web') showWeb(variant, title, message, duration, route, avatar);
+  else showNative(variant, title, message, duration, route, avatar);
 }
 
 function error(title: string, message?: string) {
@@ -102,9 +122,11 @@ function info(title: string, message?: string) {
 
 // Heads-up about something elsewhere. `route` (an expo-router path)
 // makes the toast tappable / adds a "View" action that navigates
-// there; omit it for a non-actionable notice.
-function event(title: string, message?: string, route?: string) {
-  fire('event', title, message, EVENT_VISIBILITY_MS, route);
+// there; `avatar` is the conversation's picture (single or the
+// stacked-member cluster) shown on the left so it reads like a
+// notification. Both optional.
+function event(title: string, message?: string, route?: string, avatar?: ConversationAvatar) {
+  fire('event', title, message, EVENT_VISIBILITY_MS, route, avatar);
 }
 
 // Cross-navigation toast: stash a single toast in sessionStorage so it

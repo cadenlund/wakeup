@@ -2,6 +2,7 @@ package message_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -451,8 +452,24 @@ func TestSend_PublishesEvent(t *testing.T) {
 
 	select {
 	case msg := <-ch:
-		if !strings.Contains(string(msg.Payload), "message.new") {
-			t.Errorf("payload missing event type: %s", msg.Payload)
+		var env struct {
+			Type string `json:"type"`
+			Data struct {
+				ConversationID string `json:"conversation_id"`
+				Body           string `json:"body"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(msg.Payload, &env); err != nil {
+			t.Fatalf("unmarshal payload %q: %v", msg.Payload, err)
+		}
+		if env.Type != "message.new" {
+			t.Errorf("type = %q, want %q", env.Type, "message.new")
+		}
+		if env.Data.ConversationID != cid.String() {
+			t.Errorf("conversation_id = %q, want %q", env.Data.ConversationID, cid.String())
+		}
+		if env.Data.Body != "watched" {
+			t.Errorf("body = %q, want %q", env.Data.Body, "watched")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for pubsub event")

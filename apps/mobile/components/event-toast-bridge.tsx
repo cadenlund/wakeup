@@ -26,7 +26,7 @@ export function EventToastBridge(): null {
   React.useEffect(() => {
     if (!head) return;
     haptics.tap();
-    toast.event(head.title, head.body, head.route);
+    toast.event(head.title, head.body, head.route, head.avatar);
     // Hand-off complete — the toast lib owns the lifecycle now.
     // Dropping the head re-runs this effect for the next queued event.
     dismissHead();

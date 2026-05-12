@@ -16,6 +16,8 @@
 // duplicate WS delivery doesn't double-notify).
 import { create } from 'zustand';
 
+import type { ConversationAvatar } from '@/lib/conversation-display';
+
 export type BannerEvent = {
   // Stable id — used for dedup and as the React key. For message
   // banners this is the message id; for friend events the request
@@ -25,6 +27,11 @@ export type BannerEvent = {
   body?: string;
   // expo-router path to push when the banner is tapped.
   route: string;
+  // The conversation's picture for the toast's avatar slot — a single
+  // avatar (DM peer / named group) or the overlapping-member cluster
+  // (group with no avatar). Set for `message.new`; absent for friend /
+  // member-added events.
+  avatar?: ConversationAvatar;
 };
 
 type BannerState = {

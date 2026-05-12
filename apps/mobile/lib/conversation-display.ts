@@ -32,6 +32,15 @@ export type ConversationDisplay = {
   presence?: string | null;
 };
 
+// Just the avatar-shaped slice of ConversationDisplay — for surfaces
+// that show "this conversation's picture" without the title/subtitle
+// (e.g. the in-app event toast). `avatarUrl` set → a single avatar;
+// otherwise `stackedMembers` → the overlapping-member cluster.
+export type ConversationAvatar = Pick<
+  ConversationDisplay,
+  'avatarUrl' | 'fallbackInitial' | 'stackedMembers'
+>;
+
 export function conversationDisplay(
   c: InternalHandlerHttpConversationResponse,
   myUserId: string | undefined,
