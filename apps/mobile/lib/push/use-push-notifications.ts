@@ -1,0 +1,98 @@
+// Phase 8.1 / 8.2 — push notification lifecycle + handlers.
+//
+// Mounted once app-wide via <PushNotifications/> in the root layout
+// (below the QueryClient provider so it can read `useAuthState()`).
+// Responsibilities:
+//
+//   - Foreground suppression: while the app is active the OS banner is
+//     redundant — the in-app EventToast / unread badge already surface
+//     the event — so `setNotificationHandler` returns "show nothing"
+//     when AppState is 'active'. When the app is backgrounded the
+//     handler isn't consulted at all; the OS renders the banner itself.
+//   - Token registration: on auth (and on mount, if already authed)
+//     fire `registerForPushNotificationsAsync()` — fire-and-forget, it
+//     handles permissions / simulators / failures internally.
+//   - Tap routing: `addNotificationResponseReceivedListener` →
+//     `routeForNotificationData` → `router.push`. Also handles the
+//     cold-start case (`getLastNotificationResponseAsync`) where the
+//     app was launched *from* a notification.
+//
+// Logout deregistration is NOT here — the DELETE needs a live session
+// cookie, so it runs from the logout mutation's onMutate
+// (header-logout-pill). This hook only handles the local side.
+import { router } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import * as React from 'react';
+import { AppState } from 'react-native';
+
+import { useAuthState } from '@/components/auth-gate';
+import {
+  registerForPushNotificationsAsync,
+  setupAndroidNotificationChannelAsync,
+} from '@/lib/push/register';
+import { routeForNotificationData } from '@/lib/push/route';
+
+// Set once at module load — independent of auth / mount timing.
+// handleNotification is only invoked for notifications that arrive
+// while the app is foregrounded; we suppress those because an in-app
+// surface (EventToast, RoomBanner, unread badge) already covers them.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: false,
+    shouldShowList: false,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
+function openFromNotification(response: Notifications.NotificationResponse | null): void {
+  if (!response) return;
+  const route = routeForNotificationData(response.notification.request.content.data);
+  if (route) router.push(route as Parameters<typeof router.push>[0]);
+}
+
+export function usePushNotifications(): void {
+  const { isAuthenticated } = useAuthState();
+
+  // Android notification channel — once per process.
+  React.useEffect(() => {
+    void setupAndroidNotificationChannelAsync();
+  }, []);
+
+  // Register the token when authenticated. `registerForPush…` is
+  // idempotent (skips the POST when the cached token is unchanged), so
+  // re-running on auth refetch / remount is harmless.
+  const authedRef = React.useRef(isAuthenticated);
+  authedRef.current = isAuthenticated;
+  React.useEffect(() => {
+    if (isAuthenticated) void registerForPushNotificationsAsync();
+  }, [isAuthenticated]);
+
+  // Re-check on foreground (a user may grant permission in Settings
+  // while the app is backgrounded, or the OS may rotate the token).
+  React.useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active' && authedRef.current) {
+        void registerForPushNotificationsAsync();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Tap handling: while running, plus the cold-start launch case.
+  React.useEffect(() => {
+    let cancelled = false;
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (!cancelled) openFromNotification(response);
+      })
+      .catch(() => {
+        // no last response (normal launch) — nothing to do.
+      });
+    const sub = Notifications.addNotificationResponseReceivedListener(openFromNotification);
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, []);
+}
