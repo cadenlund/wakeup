@@ -210,7 +210,20 @@ func (h *Handler) Upgrade(w http.ResponseWriter, r *http.Request) {
 	h.hub.Register(conn)
 	defer h.bridge.UnsubscribeAll(context.Background(), uid)
 
+	// WS lifecycle log (§ diagnosability) — connect-time channel set,
+	// then close. The full channel list is at debug so the info line
+	// stays grep-friendly without flooding.
+	h.logger.Info("ws: connection opened",
+		slog.String("user_id", uid.String()),
+		slog.Int("channels", len(channels)),
+	)
+	h.logger.Debug("ws: connection channels",
+		slog.String("user_id", uid.String()),
+		slog.Any("channels", channels),
+	)
+
 	_ = conn.Run(r.Context())
+	h.logger.Info("ws: connection closed", slog.String("user_id", uid.String()))
 }
 
 // channelsForUser builds the pubsub channel list this connection
@@ -253,6 +266,10 @@ func (h *Handler) makeOnMessage(uid uuid.UUID) func(ctx context.Context, raw []b
 		if err != nil {
 			return fmt.Errorf("ws: decode inbound: %w", err)
 		}
+		h.logger.Info("ws: inbound event",
+			slog.String("user_id", uid.String()),
+			slog.String("type", string(env.Type)),
+		)
 		switch env.Type {
 		case wsproto.EventHeartbeat:
 			h.replyHeartbeat(ctx, uid)
@@ -330,6 +347,11 @@ func (h *Handler) handleTyping(ctx context.Context, uid uuid.UUID, env wsproto.E
 	if err := h.broker.Publish(ctx, ConvChannel(p.ConversationID), encoded); err != nil {
 		return fmt.Errorf("ws: publish typing: %w", err)
 	}
+	h.logger.Info("ws: typing republished",
+		slog.String("user_id", uid.String()),
+		slog.String("conv_id", p.ConversationID.String()),
+		slog.String("type", string(env.Type)),
+	)
 	return nil
 }
 

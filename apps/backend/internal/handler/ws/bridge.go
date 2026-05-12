@@ -240,6 +240,18 @@ func (b *Bridge) dispatch() {
 				users = append(users, uid)
 			}
 			b.mu.Unlock()
+			// Diagnosability: who's about to receive this event. A
+			// zero-recipient publish is the smoking gun for "the event
+			// went out but nobody was subscribed" — so that's at info;
+			// the normal case is debug.
+			if len(users) == 0 {
+				b.logger.Info("ws bridge: event with no subscribers", slog.String("channel", msg.Channel))
+			} else {
+				b.logger.Debug("ws bridge: dispatch",
+					slog.String("channel", msg.Channel),
+					slog.Int("recipients", len(users)),
+				)
+			}
 			for _, uid := range users {
 				b.hub.BroadcastToUser(uid, msg.Payload)
 			}
@@ -251,6 +263,10 @@ func (b *Bridge) dispatch() {
 			if convID, ok := newConvForUserEvent(msg.Channel, msg.Payload); ok {
 				ch := ConvChannel(convID)
 				for _, uid := range users {
+					b.logger.Info("ws bridge: late conv subscribe",
+						slog.String("user_id", uid.String()),
+						slog.String("channel", ch),
+					)
 					go func(u uuid.UUID) {
 						ctx, cancel := context.WithTimeout(context.Background(), lateSubscribeTimeout)
 						defer cancel()
