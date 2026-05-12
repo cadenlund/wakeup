@@ -82,8 +82,14 @@ type Result struct {
 	UsersTotal         int
 	Conversations      []domain.Conversation
 	ConversationsTotal int
-	Messages           []domain.Message
-	MessagesTotal      int
+	// LatestByConversation maps each conversation hit's ID to its most
+	// recent message (soft-deleted included), so the handler can embed
+	// the same `last_message` preview the chats list shows. Empty when
+	// the conversations section wasn't requested or no hits had any
+	// messages.
+	LatestByConversation map[uuid.UUID]domain.Message
+	Messages             []domain.Message
+	MessagesTotal        int
 }
 
 // Params is the input to Search.
@@ -137,6 +143,17 @@ func (s *Service) Search(ctx context.Context, p Params) (Result, error) {
 				return Result{}, apierror.Internal("count search conversations").WithCause(err)
 			}
 			res.ConversationsTotal = total
+			if len(convs) > 0 {
+				ids := make([]uuid.UUID, 0, len(convs))
+				for _, c := range convs {
+					ids = append(ids, c.ID)
+				}
+				latest, err := s.msgs.LatestMessageByConversation(ctx, ids)
+				if err != nil {
+					return Result{}, apierror.Internal("search conversations latest message").WithCause(err)
+				}
+				res.LatestByConversation = latest
+			}
 		case TypeMessages:
 			msgs, err := s.msgs.SearchInUserConversations(ctx, p.UserID, q, PerTypeLimit)
 			if err != nil {

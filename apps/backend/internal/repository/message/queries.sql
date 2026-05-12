@@ -149,3 +149,17 @@ WHERE m.sender_id <> $1
     OR (m.created_at, m.id) > (r.last_read_at, r.last_read_id)
   )
 GROUP BY m.conversation_id;
+
+-- name: LatestMessageByConversation :many
+-- Most recent message per conversation (from the given set). Soft-
+-- deleted messages are included — the latest message overall might be a
+-- deleted one, and the chats-list / search preview wants "Message
+-- deleted" over the message before it. Conversations with no messages
+-- are absent from the result. Powers the `last_message` preview on
+-- ConversationResponse / SearchConversationRow.
+SELECT DISTINCT ON (m.conversation_id)
+       m.id, m.conversation_id, m.sender_id, m.body, m.reply_to_message_id,
+       m.created_at, m.edited_at, m.deleted_at
+FROM messages m
+WHERE m.conversation_id = ANY($1::uuid[])
+ORDER BY m.conversation_id, m.created_at DESC, m.id DESC;

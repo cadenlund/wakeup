@@ -18,13 +18,14 @@ import (
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 )
 
-// UnreadByConversationCounter is the slice of the message service this
-// handler needs to populate the `unread_count` field on each
-// ConversationResponse. Defined locally so tests can stub it — the
-// production wiring uses *message.Service (handler → service →
-// repository).
-type UnreadByConversationCounter interface {
+// ConvMessageData is the slice of the message service this handler
+// needs to enrich each ConversationResponse with per-row message
+// state — the unread count and the last-message preview. Defined
+// locally so tests can stub it; the production wiring uses
+// *message.Service (handler → service → repository).
+type ConvMessageData interface {
 	CountUnreadByConversation(ctx context.Context, userID uuid.UUID, convIDs []uuid.UUID) (map[uuid.UUID]int64, error)
+	LatestMessageByConversation(ctx context.Context, convIDs []uuid.UUID) (map[uuid.UUID]domain.Message, error)
 }
 
 // ConversationHandler hosts every /v1/conversations/* endpoint
@@ -35,21 +36,21 @@ type ConversationHandler struct {
 	convs   *convsvc.Service
 	users   *usersvc.Service
 	auth    *auth.Service
-	unread  UnreadByConversationCounter // optional; nil → unread_count is always 0
+	msgs    ConvMessageData // optional; nil → unread_count is 0 and last_message is null
 	v       *validator.Validate
 	presign Presigner // optional; nil → raw avatar keys
 }
 
 // NewConversationHandler wires up the handler.
 //
-// `unread` is optional; when nil, every ConversationResponse reports
-// unread_count = 0 (graceful degradation — the mobile badge just won't
-// show until a real counter is wired in).
+// `msgs` is optional; when nil, every ConversationResponse reports
+// unread_count = 0 and last_message = null (graceful degradation — the
+// per-row badge / preview just won't show until it's wired in).
 func NewConversationHandler(
 	convs *convsvc.Service,
 	users *usersvc.Service,
 	a *auth.Service,
-	unread UnreadByConversationCounter,
+	msgs ConvMessageData,
 	v *validator.Validate,
 	presign Presigner,
 ) (*ConversationHandler, error) {
@@ -65,7 +66,7 @@ func NewConversationHandler(
 	if v == nil {
 		return nil, errors.New("httpapi: ConversationHandler requires non-nil validator")
 	}
-	return &ConversationHandler{convs: convs, users: users, auth: a, unread: unread, v: v, presign: presign}, nil
+	return &ConversationHandler{convs: convs, users: users, auth: a, msgs: msgs, v: v, presign: presign}, nil
 }
 
 // Mount attaches every /v1/conversations/* route onto r.
@@ -551,8 +552,14 @@ func (h *ConversationHandler) renderOne(ctx context.Context, callerID uuid.UUID,
 	if err != nil {
 		return ConversationResponse{}, err
 	}
-	counts := h.unreadCounts(ctx, callerID, []uuid.UUID{conv.ID})
-	return toConversationResponse(conv, callerID, members, usersByID, h.presign, counts[conv.ID]), nil
+	ids := []uuid.UUID{conv.ID}
+	counts := h.unreadCounts(ctx, callerID, ids)
+	latest := h.latestMessages(ctx, ids)
+	var lm *domain.Message
+	if m, ok := latest[conv.ID]; ok {
+		lm = &m
+	}
+	return toConversationResponse(conv, callerID, members, usersByID, h.presign, counts[conv.ID], lm), nil
 }
 
 // unreadCounts returns the per-conversation unread count for callerID,
@@ -560,10 +567,10 @@ func (h *ConversationHandler) renderOne(ctx context.Context, callerID uuid.UUID,
 // no counter is wired in or the query fails — never propagates the
 // error so a failed count can't break the conversations list.
 func (h *ConversationHandler) unreadCounts(ctx context.Context, callerID uuid.UUID, convIDs []uuid.UUID) map[uuid.UUID]int64 {
-	if h.unread == nil || len(convIDs) == 0 {
+	if h.msgs == nil || len(convIDs) == 0 {
 		return nil
 	}
-	counts, err := h.unread.CountUnreadByConversation(ctx, callerID, convIDs)
+	counts, err := h.msgs.CountUnreadByConversation(ctx, callerID, convIDs)
 	if err != nil {
 		slog.WarnContext(ctx, "conversation: unread count failed",
 			slog.String("user_id", callerID.String()),
@@ -572,6 +579,23 @@ func (h *ConversationHandler) unreadCounts(ctx context.Context, callerID uuid.UU
 		return nil
 	}
 	return counts
+}
+
+// latestMessages returns the most recent message per conversation, keyed
+// by conversation ID. Best-effort like unreadCounts — a failure just
+// means `last_message` is null on those rows, never a failed request.
+func (h *ConversationHandler) latestMessages(ctx context.Context, convIDs []uuid.UUID) map[uuid.UUID]domain.Message {
+	if h.msgs == nil || len(convIDs) == 0 {
+		return nil
+	}
+	latest, err := h.msgs.LatestMessageByConversation(ctx, convIDs)
+	if err != nil {
+		slog.WarnContext(ctx, "conversation: latest message lookup failed",
+			slog.Any("err", err),
+		)
+		return nil
+	}
+	return latest
 }
 
 // renderConversationList batch-loads members + their user records for
@@ -615,9 +639,14 @@ func (h *ConversationHandler) renderConversationList(ctx context.Context, caller
 	}
 
 	counts := h.unreadCounts(ctx, callerID, convIDs)
+	latest := h.latestMessages(ctx, convIDs)
 	out := make([]ConversationResponse, 0, len(convs))
 	for _, c := range convs {
-		out = append(out, toConversationResponse(c, callerID, membersByConv[c.ID], usersByID, h.presign, counts[c.ID]))
+		var lm *domain.Message
+		if m, ok := latest[c.ID]; ok {
+			lm = &m
+		}
+		out = append(out, toConversationResponse(c, callerID, membersByConv[c.ID], usersByID, h.presign, counts[c.ID], lm))
 	}
 	return out, nil
 }

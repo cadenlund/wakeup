@@ -90,6 +90,14 @@ def convert_schema(s):
         out["properties"] = {k: convert_schema(v) for k, v in out["properties"].items()}
     if "additionalProperties" in out and isinstance(out["additionalProperties"], dict):
         out["additionalProperties"] = convert_schema(out["additionalProperties"])
+    # swag wraps a struct-pointer field that also carries a doc comment
+    # as `{description, allOf: [{$ref}]}` (Swagger 2.0 can't put $ref
+    # next to other keywords). Recurse into the combiners so those
+    # nested $refs get the #/definitions → #/components/schemas rewrite
+    # too — otherwise openapi-typescript can't resolve them.
+    for combiner in ("allOf", "oneOf", "anyOf"):
+        if combiner in out and isinstance(out[combiner], list):
+            out[combiner] = [convert_schema(x) for x in out[combiner]]
     return out
 
 

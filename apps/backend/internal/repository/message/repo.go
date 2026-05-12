@@ -221,6 +221,14 @@ WHERE m.sender_id <> $1
   )
 GROUP BY m.conversation_id`
 
+const latestMessageByConversationSQL = `-- name: LatestMessageByConversation :many
+SELECT DISTINCT ON (m.conversation_id)
+       m.id, m.conversation_id, m.sender_id, m.body, m.reply_to_message_id,
+       m.created_at, m.edited_at, m.deleted_at
+FROM messages m
+WHERE m.conversation_id = ANY($1::uuid[])
+ORDER BY m.conversation_id, m.created_at DESC, m.id DESC`
+
 // CreateParams is the input to Create.
 type CreateParams struct {
 	ID               uuid.UUID
@@ -513,6 +521,40 @@ func (q *Queries) CountUnreadByConversation(ctx context.Context, userID uuid.UUI
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("message: count unread by conversation: %w", err)
+	}
+	return out, nil
+}
+
+// LatestMessageByConversation returns the most recent message in each of
+// the given conversations, keyed by conversation ID. Soft-deleted
+// messages ARE included — the latest message overall might be a deleted
+// one, and the chats-list preview wants to render "Message deleted"
+// rather than the message before it (matching how
+// conversations.last_message_at tracks the latest *sent* message
+// regardless of later deletion). Conversations with no messages are
+// omitted from the map.
+//
+// Surfaces the `last_message` preview on each ConversationResponse /
+// SearchConversationRow.
+func (q *Queries) LatestMessageByConversation(ctx context.Context, convIDs []uuid.UUID) (map[uuid.UUID]domain.Message, error) {
+	out := make(map[uuid.UUID]domain.Message, len(convIDs))
+	if len(convIDs) == 0 {
+		return out, nil
+	}
+	rows, err := q.db.Query(ctx, latestMessageByConversationSQL, convIDs)
+	if err != nil {
+		return nil, fmt.Errorf("message: latest message by conversation: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		m, scanErr := scanMessage(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("message: latest message by conversation: scan: %w", scanErr)
+		}
+		out[m.ConversationID] = m
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("message: latest message by conversation: %w", err)
 	}
 	return out, nil
 }

@@ -73,6 +73,11 @@ type SearchConversationRow struct {
 	Name          string `json:"name"           example:"Wakeup Crew"`
 	AvatarURL     string `json:"avatar_url"     example:"https://wakeup.app/avatars/group.png"`
 	LastMessageAt string `json:"last_message_at" example:"2026-05-02T10:42:55.412Z"`
+	// LastMessage is the same preview shape ConversationResponse
+	// carries — the search modal renders the row subtitle from it so a
+	// hit looks identical to its chats-list row. JSON-null when the
+	// conversation has no messages.
+	LastMessage *MessagePreview `json:"last_message"`
 }
 
 // SearchMessageRow is the slim message-search hit. Only the fields the
@@ -152,6 +157,10 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 			}
 			if c.AvatarURL != nil {
 				row.AvatarURL = *c.AvatarURL
+			}
+			if m, ok := res.LatestByConversation[c.ID]; ok {
+				mp := toMessagePreview(m)
+				row.LastMessage = &mp
 			}
 			convs = append(convs, row)
 		}
