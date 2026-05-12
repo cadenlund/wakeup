@@ -6253,6 +6253,17 @@ export interface components {
             pinned_at?: string;
             /** @example group */
             type?: string;
+            /**
+             * @description UnreadCount is the number of messages in this conversation the
+             *     caller hasn't read yet — same definition as the X-Unread-Total
+             *     header (excludes the caller's own messages + soft-deleted ones,
+             *     counts everything after the caller's last_read pointer). Mobile
+             *     renders the per-row unread badge from this. Best-effort: 0 when
+             *     the count can't be computed (graceful degradation), so clients
+             *     should treat it as a hint, not a guarantee.
+             * @example 3
+             */
+            unread_count?: number;
             /** @example 2026-05-02T09:35:11.221Z */
             updated_at?: string;
         };

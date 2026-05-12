@@ -379,6 +379,81 @@ func TestListConversations_GroupWithBlockedMemberStaysVisible(t *testing.T) {
 	}
 }
 
+// listConversationUnread GETs /v1/conversations and returns the
+// unread_count for the row matching convID. Fails if the row is absent.
+func listConversationUnread(t *testing.T, c *http.Client, baseURL, convID string) int {
+	t.Helper()
+	resp, err := c.Get(baseURL + "/v1/conversations")
+	if err != nil {
+		t.Fatalf("GET /v1/conversations: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("list status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	data, _ := got["data"].([]any)
+	for _, raw := range data {
+		row, _ := raw.(map[string]any)
+		if row["id"] == convID {
+			n, ok := row["unread_count"].(float64)
+			if !ok {
+				t.Fatalf("row %s missing unread_count: %v", convID, row)
+			}
+			return int(n)
+		}
+	}
+	t.Fatalf("conversation %s not in list", convID)
+	return 0
+}
+
+// TestListConversations_UnreadCount locks in the per-row unread_count
+// field: it counts the caller's unread messages (excludes the caller's
+// own + soft-deleted), and drops as the caller's read pointer advances.
+func TestListConversations_UnreadCount(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	a, ua := h.AuthClient(t)
+	b, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
+	cid := requireCreateConversation(t, h, a, map[string]any{
+		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
+	})
+
+	if got := listConversationUnread(t, a, h.Server.URL, cid); got != 0 {
+		t.Fatalf("fresh conversation unread_count = %d, want 0", got)
+	}
+
+	firstMsgID := requireSendMessage(t, h, b, cid, "yo")
+	_ = requireSendMessage(t, h, b, cid, "you up?")
+	if got := listConversationUnread(t, a, h.Server.URL, cid); got != 2 {
+		t.Fatalf("after B's two messages unread_count = %d, want 2", got)
+	}
+
+	// A's own message must not count toward A's unread.
+	_ = requireSendMessage(t, h, a, cid, "yeah")
+	if got := listConversationUnread(t, a, h.Server.URL, cid); got != 2 {
+		t.Fatalf("A's own message changed unread_count to %d, want 2", got)
+	}
+
+	// B sees its own two messages as read, A's one as unread.
+	if got := listConversationUnread(t, b, h.Server.URL, cid); got != 1 {
+		t.Fatalf("B's unread_count = %d, want 1", got)
+	}
+
+	// A marks read up to B's first message → one unread remains.
+	mr := post(t, a, h.Server.URL+"/v1/conversations/"+cid+"/read",
+		map[string]any{"up_to_message_id": firstMsgID})
+	_ = mr.Body.Close()
+	if mr.StatusCode != http.StatusNoContent {
+		t.Fatalf("mark read status = %d", mr.StatusCode)
+	}
+	if got := listConversationUnread(t, a, h.Server.URL, cid); got != 1 {
+		t.Fatalf("after partial read unread_count = %d, want 1", got)
+	}
+}
+
 // --- PATCH /v1/conversations/{id} -------------------------------------
 
 func TestUpdateConversation_AdminRenames(t *testing.T) {

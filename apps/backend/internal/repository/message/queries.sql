@@ -117,3 +117,24 @@ JOIN last_read r ON r.conversation_id = m.conversation_id
 WHERE m.sender_id <> $1
   AND m.deleted_at IS NULL
   AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at);
+
+-- name: CountUnreadByConversation :many
+-- Per-conversation unread count for the user, restricted to the given
+-- conversation IDs. "Unread" matches CountUnreadForUser. Conversations
+-- with zero unread messages are omitted from the result set. Powers the
+-- `unread_count` field on each ConversationResponse (per-row badge).
+WITH last_read AS (
+    SELECT cm.conversation_id,
+           lr.created_at AS last_read_at
+    FROM conversation_members cm
+    LEFT JOIN messages lr ON lr.id = cm.last_read_message_id
+    WHERE cm.user_id = $1
+      AND cm.conversation_id = ANY($2::uuid[])
+)
+SELECT m.conversation_id, COUNT(*)::bigint
+FROM messages m
+JOIN last_read r ON r.conversation_id = m.conversation_id
+WHERE m.sender_id <> $1
+  AND m.deleted_at IS NULL
+  AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)
+GROUP BY m.conversation_id;

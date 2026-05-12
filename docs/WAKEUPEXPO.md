@@ -562,7 +562,9 @@ Three small client patterns sit on top of the backend's mute / pin / DND additio
 
 **Mute conversation.** The conversation list reads `muted_until` from each row and renders a small bell-with-slash icon next to the timestamp. Push gating happens server-side; the client only renders the badge. Optimistic update: writing the mute patches `muted_until` in the cached conversation row immediately, then reconciles on success. Forever = `'2099-01-01'`; the UI just renders "Muted" without showing the timestamp when `muted_until > 1 year from now`.
 
-**Pin conversation.** The list's TanStack Query selector sorts pinned-first locally before render. Pinned rows get a thin pin icon at the top-right corner. Optimistic update on toggle: bump or clear `pinned_at` in the cached row and re-sort.
+**Pin conversation.** The list's TanStack Query selector sorts pinned-first locally before render. Pinned rows carry a thin pin icon next to the title — that's the *only* visual difference, since pinning is a sort hint, not a "look at me" signal. Optimistic update on toggle: bump or clear `pinned_at` in the cached row and re-sort.
+
+**Unread badge.** Each conversation row reads `unread_count` (server-computed, same definition as the `X-Unread-Total` header — excludes the caller's own messages + soft-deleted ones, counts everything past the caller's `last_read_message_id` pointer). When `> 0` the row gets a subtle primary-tinted band + a leading accent stripe, plus a numeric count pill in the trailing column (capped at `99+`). The count clears automatically: `<MarkReadOnFocus>` invalidates the `['conversations']` list query after a successful `POST /{id}/read`, and `message.new` already invalidates it. Best-effort — the server falls back to `0` if it can't compute the count.
 
 All three of the above are per-member (not per-conversation) — muting a group only mutes it for *me*; the other members keep getting pushes. Same for pin.
 

@@ -93,16 +93,16 @@ func TestNewAttachmentHandler_RejectsNilDeps(t *testing.T) {
 func TestNewConversationHandler_RejectsNilDeps(t *testing.T) {
 	t.Parallel()
 	v := newValidator()
-	if _, err := httpapi.NewConversationHandler(nil, stubUsers, stubAuth, v, nil); err == nil {
+	if _, err := httpapi.NewConversationHandler(nil, stubUsers, stubAuth, nil, v, nil); err == nil {
 		t.Error("nil convs: expected error")
 	}
-	if _, err := httpapi.NewConversationHandler(stubConvs, nil, stubAuth, v, nil); err == nil {
+	if _, err := httpapi.NewConversationHandler(stubConvs, nil, stubAuth, nil, v, nil); err == nil {
 		t.Error("nil users: expected error")
 	}
-	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, nil, v, nil); err == nil {
+	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, nil, nil, v, nil); err == nil {
 		t.Error("nil auth: expected error")
 	}
-	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, stubAuth, nil, nil); err == nil {
+	if _, err := httpapi.NewConversationHandler(stubConvs, stubUsers, stubAuth, nil, nil, nil); err == nil {
 		t.Error("nil validator: expected error")
 	}
 }

@@ -24,9 +24,17 @@ type ConversationResponse struct {
 	// the same conversation. Surfaced here so the list and detail
 	// responses give the client everything it needs to render mute
 	// icons and sort pinned-first without follow-up calls.
-	MutedUntil *time.Time              `json:"muted_until"     example:"2026-05-02T18:00:00Z"`
-	PinnedAt   *time.Time              `json:"pinned_at"       example:"2026-05-02T09:31:21.810Z"`
-	Members    []ConversationMemberRow `json:"members"`
+	MutedUntil *time.Time `json:"muted_until"     example:"2026-05-02T18:00:00Z"`
+	PinnedAt   *time.Time `json:"pinned_at"       example:"2026-05-02T09:31:21.810Z"`
+	// UnreadCount is the number of messages in this conversation the
+	// caller hasn't read yet — same definition as the X-Unread-Total
+	// header (excludes the caller's own messages + soft-deleted ones,
+	// counts everything after the caller's last_read pointer). Mobile
+	// renders the per-row unread badge from this. Best-effort: 0 when
+	// the count can't be computed (graceful degradation), so clients
+	// should treat it as a hint, not a guarantee.
+	UnreadCount int64                   `json:"unread_count"    example:"3"`
+	Members     []ConversationMemberRow `json:"members"`
 }
 
 // ConversationMemberRow is one member of a ConversationResponse.
@@ -152,7 +160,7 @@ func toConversationMemberRow(m domain.ConversationMember, u domain.User, p Presi
 // pin state — those fields are surfaced at the top level so the
 // client can render a mute icon / sort pinned-first without scanning
 // the embedded members slice.
-func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members []domain.ConversationMember, usersByID map[uuid.UUID]domain.User, p Presigner) ConversationResponse {
+func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members []domain.ConversationMember, usersByID map[uuid.UUID]domain.User, p Presigner, unreadCount int64) ConversationResponse {
 	rows := make([]ConversationMemberRow, 0, len(members))
 	var mutedUntil, pinnedAt *time.Time
 	for _, m := range members {
@@ -178,6 +186,7 @@ func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members [
 		LastMessageAt: c.LastMessageAt,
 		MutedUntil:    mutedUntil,
 		PinnedAt:      pinnedAt,
+		UnreadCount:   unreadCount,
 		Members:       rows,
 	}
 }

@@ -47,6 +47,10 @@ type ConversationRowProps = {
   lastMessageAt?: string | null;
   isMuted?: boolean;
   isPinned?: boolean;
+  // Number of messages the caller hasn't read yet (server-computed
+  // `unread_count`). When > 0 the row gets the primary-tinted band +
+  // leading stripe and a numeric badge in the trailing column.
+  unreadCount?: number;
   // Raw `muted_until` ISO string. When present and `isMuted` is
   // true, the row renders a "muted until <X>" / "muted indefinitely"
   // hint underneath the subtitle so users can see at a glance how
@@ -70,6 +74,7 @@ function ConversationRow({
   lastMessageAt,
   isMuted,
   isPinned,
+  unreadCount = 0,
   mutedUntil,
   onPress,
   onMorePress,
@@ -77,6 +82,8 @@ function ConversationRow({
 }: ConversationRowProps) {
   const mutedFg = useThemeColor('muted-foreground');
   const primary = useThemeColor('primary');
+  const hasUnread = unreadCount > 0;
+  const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount);
   const Container = onPress ? Pressable : View;
   const containerProps = onPress
     ? {
@@ -99,11 +106,11 @@ function ConversationRow({
       testID={testID}
       className={cn(
         'flex-row items-center gap-3 px-4 py-3',
-        // Pinned rows get a subtle primary-tinted band + a thin
-        // accent stripe on the leading edge so they read as "this
-        // is sticky" rather than just "this row happens to have a
-        // tiny pin icon next to the title."
-        isPinned && 'border-l-2 border-l-primary bg-primary/5',
+        // Unread rows get a subtle primary-tinted band + a thin accent
+        // stripe on the leading edge so they pop out of the list.
+        // Pinned rows only carry the tiny pin icon next to the title —
+        // pinning is a sort hint, not a "look at me" signal.
+        hasUnread && 'border-l-2 border-l-primary bg-primary/5',
         onPress && 'active:bg-muted'
       )}>
       {showStacked ? (
@@ -144,6 +151,13 @@ function ConversationRow({
           <Text variant="muted" className="text-xs">
             {stamp}
           </Text>
+        ) : null}
+        {hasUnread ? (
+          <View
+            className="h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1.5"
+            accessibilityLabel={`${unreadCount} unread`}>
+            <Text className="text-xs font-semibold text-primary-foreground">{unreadLabel}</Text>
+          </View>
         ) : null}
         {onMorePress ? (
           <Pressable

@@ -196,6 +196,23 @@ WHERE m.sender_id <> $1
   AND m.deleted_at IS NULL
   AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)`
 
+const countUnreadByConversationSQL = `-- name: CountUnreadByConversation :many
+WITH last_read AS (
+    SELECT cm.conversation_id,
+           lr.created_at AS last_read_at
+    FROM conversation_members cm
+    LEFT JOIN messages lr ON lr.id = cm.last_read_message_id
+    WHERE cm.user_id = $1
+      AND cm.conversation_id = ANY($2::uuid[])
+)
+SELECT m.conversation_id, COUNT(*)::bigint
+FROM messages m
+JOIN last_read r ON r.conversation_id = m.conversation_id
+WHERE m.sender_id <> $1
+  AND m.deleted_at IS NULL
+  AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)
+GROUP BY m.conversation_id`
+
 // CreateParams is the input to Create.
 type CreateParams struct {
 	ID               uuid.UUID
@@ -456,4 +473,38 @@ func (q *Queries) CountUnreadForUser(ctx context.Context, userID uuid.UUID) (int
 		return 0, fmt.Errorf("message: count unread: %w", err)
 	}
 	return n, nil
+}
+
+// CountUnreadByConversation returns the per-conversation unread count for
+// userID, keyed by conversation ID. The "unread" definition matches
+// CountUnreadForUser. Conversations with zero unread messages are omitted
+// from the map (the JOIN/WHERE drops them), so callers should treat a
+// missing key as 0.
+//
+// Surfaces the `unread_count` field on each ConversationResponse so the
+// chats list can render per-row unread badges.
+func (q *Queries) CountUnreadByConversation(ctx context.Context, userID uuid.UUID, convIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	out := make(map[uuid.UUID]int64, len(convIDs))
+	if len(convIDs) == 0 {
+		return out, nil
+	}
+	rows, err := q.db.Query(ctx, countUnreadByConversationSQL, userID, convIDs)
+	if err != nil {
+		return nil, fmt.Errorf("message: count unread by conversation: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id uuid.UUID
+			n  int64
+		)
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("message: count unread by conversation: scan: %w", err)
+		}
+		out[id] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("message: count unread by conversation: %w", err)
+	}
+	return out, nil
 }

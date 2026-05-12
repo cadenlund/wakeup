@@ -323,7 +323,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("friend handler: %w", err)
 	}
-	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, v, avatarPresigner)
+	convHandler, err := httpapi.NewConversationHandler(convSvc, userSvc, authSvc, msgsRepo, v, avatarPresigner)
 	if err != nil {
 		return fmt.Errorf("conversation handler: %w", err)
 	}
