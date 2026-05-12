@@ -633,6 +633,42 @@ func (s *Service) AddMembers(ctx context.Context, p AddMembersParams) (AddMember
 		}
 		added = append(added, m)
 	}
+
+	// Fan out `conversation.member_added` to every current member —
+	// the newly-added ones get an "Added you to …" toast; existing
+	// members get the cache nudge so the new face shows up. Best
+	// effort: a broker hiccup doesn't undo the committed adds.
+	if len(added) > 0 && s.broker != nil {
+		usersByID := make(map[uuid.UUID]domain.User, len(users))
+		for _, u := range users {
+			usersByID[u.ID] = u
+		}
+		recipients := make([]uuid.UUID, 0, len(existingMembers)+len(added))
+		for _, m := range existingMembers {
+			recipients = append(recipients, m.UserID)
+		}
+		for _, m := range added {
+			recipients = append(recipients, m.UserID)
+		}
+		convName := ""
+		if conv.Name != nil {
+			convName = *conv.Name
+		}
+		for _, m := range added {
+			u, ok := usersByID[m.UserID]
+			if !ok {
+				continue
+			}
+			payload := wsproto.ConversationMemberAddedPayload{
+				ConversationID:   conv.ID,
+				ConversationName: convName,
+				Member:           wsproto.WSUser{ID: u.ID, Username: u.Username, DisplayName: u.DisplayName},
+			}
+			for _, rid := range recipients {
+				s.publishMemberAdded(ctx, rid, payload)
+			}
+		}
+	}
 	return AddMembersResult{Added: added}, nil
 }
 
@@ -726,6 +762,29 @@ func (s *Service) publishReadEvent(ctx context.Context, convID, userID, messageI
 	channel := fmt.Sprintf("conv:%s:messages", convID)
 	if err := s.broker.Publish(ctx, channel, payload); err != nil {
 		s.logger.Warn("conversation: publish read event",
+			slog.String("channel", channel),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
+// publishMemberAdded fires-and-forgets a `conversation.member_added`
+// envelope (§7.2) on `user:<recipientID>:events` — sent to every
+// current member so the newly-added one gets an "Added you to …"
+// notification and existing members can refresh their member list.
+// No-op when the broker isn't wired.
+func (s *Service) publishMemberAdded(ctx context.Context, recipientID uuid.UUID, payload wsproto.ConversationMemberAddedPayload) {
+	if s.broker == nil {
+		return
+	}
+	encoded, err := wsproto.Encode(wsproto.EventConversationMemberAdded, payload)
+	if err != nil {
+		s.logger.Warn("conversation: encode member_added", slog.String("error", err.Error()))
+		return
+	}
+	channel := fmt.Sprintf("user:%s:events", recipientID)
+	if err := s.broker.Publish(ctx, channel, encoded); err != nil {
+		s.logger.Warn("conversation: publish member_added",
 			slog.String("channel", channel),
 			slog.String("error", err.Error()),
 		)

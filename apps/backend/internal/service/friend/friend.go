@@ -18,6 +18,7 @@ package friend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -26,11 +27,13 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
 	userrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/user"
 	"github.com/cadenlund/wakeup/apps/backend/internal/service/notificationpref"
+	"github.com/cadenlund/wakeup/apps/backend/internal/wsproto"
 )
 
 // PresenceLister is the slice of presence.Service this package needs to
@@ -54,20 +57,22 @@ type Service struct {
 	convs         *convrepo.Queries
 	presence      PresenceLister
 	notifications OfflinePusher
+	broker        pubsub.Broker // optional — nil ⇒ in-app friend events aren't published
 	logger        *slog.Logger
 }
 
-// Config builds the service. Presence + Notifications are optional —
-// when either is nil, the §11.5 offline-push fan-out becomes a no-op.
-// Convs is required: Unfriend / Block both clear DMs between the
-// pair, so the friend service needs the conversation repo to do the
-// cascading delete.
+// Config builds the service. Presence + Notifications + Broker are
+// optional — when nil they no-op (offline-push fan-out / in-app WS
+// events respectively). Convs is required: Unfriend / Block both
+// clear DMs between the pair, so the friend service needs the
+// conversation repo to do the cascading delete.
 type Config struct {
 	Friends       *friendrepo.Queries
 	Users         *userrepo.Queries
 	Convs         *convrepo.Queries
 	Presence      PresenceLister
 	Notifications OfflinePusher
+	Broker        pubsub.Broker
 	Logger        *slog.Logger
 }
 
@@ -92,8 +97,35 @@ func New(cfg Config) (*Service, error) {
 		convs:         cfg.Convs,
 		presence:      cfg.Presence,
 		notifications: cfg.Notifications,
+		broker:        cfg.Broker,
 		logger:        logger,
 	}, nil
+}
+
+// publishFriendEvent fires-and-forgets a `friend.request_*` envelope on
+// `user:<recipientID>:events` so the recipient's open app surfaces an
+// in-app notification. No-op when the broker isn't wired. `other` is
+// the person the event is *about* — the requester for `request_received`,
+// the accepter for `request_accepted`.
+func (s *Service) publishFriendEvent(ctx context.Context, eventType wsproto.EventType, recipientID, requestID uuid.UUID, other domain.User) {
+	if s.broker == nil {
+		return
+	}
+	payload, err := wsproto.Encode(eventType, wsproto.FriendRequestEventPayload{
+		RequestID: requestID,
+		User:      wsproto.WSUser{ID: other.ID, Username: other.Username, DisplayName: other.DisplayName},
+	})
+	if err != nil {
+		s.logger.Warn("friend: encode event", slog.String("error", err.Error()))
+		return
+	}
+	channel := fmt.Sprintf("user:%s:events", recipientID)
+	if err := s.broker.Publish(ctx, channel, payload); err != nil {
+		s.logger.Warn("friend: publish event",
+			slog.String("channel", channel),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // SendRequest creates a pending friendship from `from` to the user with
@@ -137,6 +169,11 @@ func (s *Service) SendRequest(ctx context.Context, from uuid.UUID, toUsername st
 		return domain.Friendship{}, apierror.Internal("create friend request").WithCause(err)
 	}
 	s.maybePushFriendRequest(ctx, created)
+	if requester, err := s.users.GetByID(ctx, from); err == nil {
+		s.publishFriendEvent(ctx, wsproto.EventFriendRequestReceived, target.ID, created.ID, requester)
+	} else {
+		s.logger.Warn("friend: lookup requester for event", slog.String("error", err.Error()))
+	}
 	return created, nil
 }
 
@@ -206,6 +243,12 @@ func (s *Service) AcceptRequest(ctx context.Context, actor uuid.UUID, friendship
 			return domain.Friendship{}, apierror.Conflict("friend request is not pending")
 		}
 		return domain.Friendship{}, apierror.Internal("accept friend request").WithCause(err)
+	}
+	// Tell the requester (the original sender) that you accepted.
+	if accepter, err := s.users.GetByID(ctx, actor); err == nil {
+		s.publishFriendEvent(ctx, wsproto.EventFriendRequestAccepted, f.RequesterID, updated.ID, accepter)
+	} else {
+		s.logger.Warn("friend: lookup accepter for event", slog.String("error", err.Error()))
 	}
 	return updated, nil
 }

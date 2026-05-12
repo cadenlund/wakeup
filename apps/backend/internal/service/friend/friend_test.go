@@ -2,10 +2,12 @@ package friend_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,6 +15,7 @@ import (
 	"github.com/cadenlund/wakeup/apps/backend/internal/apierror"
 	"github.com/cadenlund/wakeup/apps/backend/internal/domain"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pagination"
+	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	"github.com/cadenlund/wakeup/apps/backend/internal/pushnotif"
 	convrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/conversation"
 	friendrepo "github.com/cadenlund/wakeup/apps/backend/internal/repository/friendship"
@@ -28,6 +31,7 @@ type stack struct {
 	friends *friendrepo.Queries
 	convs   *convrepo.Queries
 	pool    *pgxpool.Pool
+	broker  pubsub.Broker
 }
 
 func newStack(t *testing.T) *stack {
@@ -36,11 +40,13 @@ func newStack(t *testing.T) *stack {
 	users := userrepo.New(pool)
 	friends := friendrepo.New(pool)
 	convs := convrepo.New(pool)
-	svc, err := friend.New(friend.Config{Friends: friends, Users: users, Convs: convs})
+	broker := pubsub.NewInProc(pubsub.NewRegistry())
+	t.Cleanup(func() { _ = broker.Close() })
+	svc, err := friend.New(friend.Config{Friends: friends, Users: users, Convs: convs, Broker: broker})
 	if err != nil {
 		t.Fatalf("friend.New: %v", err)
 	}
-	return &stack{svc: svc, users: users, friends: friends, convs: convs, pool: pool}
+	return &stack{svc: svc, users: users, friends: friends, convs: convs, pool: pool, broker: broker}
 }
 
 type fakePresence struct {
@@ -216,6 +222,90 @@ func TestSendRequest_Success(t *testing.T) {
 	}
 	if got.Status != domain.FriendshipPending {
 		t.Errorf("Status = %q, want pending", got.Status)
+	}
+}
+
+// SendRequest fans out `friend.request_received` to the addressee's
+// per-user channel, carrying the requester's identity for the toast.
+func TestSendRequest_PublishesEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+
+	ch, err := st.broker.Subscribe(ctx, "user:"+b.ID.String()+":events")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if _, err := st.svc.SendRequest(ctx, a.ID, b.Username); err != nil {
+		t.Fatalf("SendRequest: %v", err)
+	}
+	select {
+	case msg := <-ch:
+		var env struct {
+			Type string `json:"type"`
+			Data struct {
+				User struct {
+					ID       string `json:"id"`
+					Username string `json:"username"`
+				} `json:"user"`
+			} `json:"data"`
+		}
+		if e := json.Unmarshal(msg.Payload, &env); e != nil {
+			t.Fatalf("unmarshal %q: %v", msg.Payload, e)
+		}
+		if env.Type != "friend.request_received" {
+			t.Errorf("type = %q, want friend.request_received", env.Type)
+		}
+		if env.Data.User.ID != a.ID.String() {
+			t.Errorf("user.id = %q, want %q", env.Data.User.ID, a.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for friend.request_received")
+	}
+}
+
+// AcceptRequest fans out `friend.request_accepted` to the original
+// requester's channel, carrying the accepter's identity.
+func TestAcceptRequest_PublishesEvent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStack(t)
+	a := makeUser(ctx, t, st)
+	b := makeUser(ctx, t, st)
+	f, err := st.svc.SendRequest(ctx, a.ID, b.Username)
+	if err != nil {
+		t.Fatalf("SendRequest: %v", err)
+	}
+	ch, err := st.broker.Subscribe(ctx, "user:"+a.ID.String()+":events")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if _, err := st.svc.AcceptRequest(ctx, b.ID, f.ID); err != nil {
+		t.Fatalf("AcceptRequest: %v", err)
+	}
+	select {
+	case msg := <-ch:
+		var env struct {
+			Type string `json:"type"`
+			Data struct {
+				User struct {
+					ID string `json:"id"`
+				} `json:"user"`
+			} `json:"data"`
+		}
+		if e := json.Unmarshal(msg.Payload, &env); e != nil {
+			t.Fatalf("unmarshal %q: %v", msg.Payload, e)
+		}
+		if env.Type != "friend.request_accepted" {
+			t.Errorf("type = %q, want friend.request_accepted", env.Type)
+		}
+		if env.Data.User.ID != b.ID.String() {
+			t.Errorf("user.id = %q, want %q (the accepter)", env.Data.User.ID, b.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for friend.request_accepted")
 	}
 }
 
