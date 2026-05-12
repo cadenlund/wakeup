@@ -7,12 +7,18 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
 	"github.com/cadenlund/wakeup/apps/backend/internal/wsproto"
 )
+
+// lateSubscribeTimeout bounds the broker-subscribe call the dispatcher
+// fires off when a connection joins a conversation after connect — so
+// a stalled broker can't leak goroutines under load.
+const lateSubscribeTimeout = 2 * time.Second
 
 // Bridge wires a pubsub.Broker into a Hub: it owns one subscription
 // loop per Hub instance and fans incoming messages out to every user
@@ -246,7 +252,9 @@ func (b *Bridge) dispatch() {
 				ch := ConvChannel(convID)
 				for _, uid := range users {
 					go func(u uuid.UUID) {
-						if err := b.Subscribe(context.Background(), u, ch); err != nil {
+						ctx, cancel := context.WithTimeout(context.Background(), lateSubscribeTimeout)
+						defer cancel()
+						if err := b.Subscribe(ctx, u, ch); err != nil {
 							b.logger.Warn("ws bridge: late conv subscribe failed",
 								slog.String("user_id", u.String()),
 								slog.String("channel", ch),
@@ -265,7 +273,7 @@ func (b *Bridge) dispatch() {
 // delivered on a `user:<id>:events` channel. Returns (_, false) for
 // anything else — only those two events imply a new channel interest.
 func newConvForUserEvent(channel string, payload []byte) (uuid.UUID, bool) {
-	if !strings.HasPrefix(channel, "user:") {
+	if !strings.HasPrefix(channel, "user:") || !strings.HasSuffix(channel, ":events") {
 		return uuid.Nil, false
 	}
 	env, err := wsproto.Decode(payload)
