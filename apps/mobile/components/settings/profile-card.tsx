@@ -20,6 +20,7 @@ import { getGetV1AuthMeQueryKey, useGetV1AuthMe } from '@/lib/api/hooks/auth/aut
 import { usePatchV1UsersMe } from '@/lib/api/hooks/users/users';
 import { useFieldErrors, useTopLevelError } from '@/lib/api/use-field-errors';
 import { haptics } from '@/lib/haptics';
+import { toast } from '@/lib/toast';
 
 type MeShape = {
   display_name?: string;
@@ -58,6 +59,7 @@ export function ProfileCard() {
     mutation: {
       onSuccess: async () => {
         haptics.success();
+        toast.success('Profile updated');
         nameTouched.current = false;
         bioTouched.current = false;
         emojiTouched.current = false;

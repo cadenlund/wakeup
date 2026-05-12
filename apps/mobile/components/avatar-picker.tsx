@@ -69,9 +69,11 @@ export function AvatarPicker({
   // Both the upload and the remove paths land on the same shape
   // ({user: MeResponse}); funnel them through one cache-update
   // helper so the picker can flip the avatar without a refetch.
+  // `kind` only changes the success toast copy.
   const applyMeUpdate = React.useCallback(
-    async (response: unknown) => {
+    async (response: unknown, kind: 'uploaded' | 'removed') => {
       haptics.success();
+      toast.success(kind === 'removed' ? 'Photo removed' : 'Photo updated');
       const body = response as { user?: { id?: string } } | undefined;
       if (body?.user?.id) {
         qc.setQueryData(getGetV1AuthMeQueryKey(), body.user);
@@ -83,7 +85,7 @@ export function AvatarPicker({
 
   const upload = usePostV1UsersMeAvatar({
     mutation: {
-      onSuccess: applyMeUpdate,
+      onSuccess: (response) => applyMeUpdate(response, 'uploaded'),
       onError: () => {
         toast.error('Upload failed', "We couldn't save that photo. Try again?");
       },
@@ -92,7 +94,7 @@ export function AvatarPicker({
 
   const removeAvatar = useDeleteV1UsersMeAvatar({
     mutation: {
-      onSuccess: applyMeUpdate,
+      onSuccess: (response) => applyMeUpdate(response, 'removed'),
       onError: () => {
         toast.error('Could not remove photo', 'Try again in a moment.');
       },
