@@ -47,22 +47,16 @@ import { WebRefreshButton } from '@/components/ui/web-refresh-button';
 import { Text } from '@/components/ui/text';
 import { APIError } from '@/lib/api/client';
 import { useGetV1AuthMe } from '@/lib/api/hooks/auth/auth';
-import { getGetV1ConversationsQueryKey } from '@/lib/api/hooks/conversations/conversations';
 import {
-  getGetV1FriendsQueryKey,
-  getGetV1FriendsRequestsQueryKey,
   useDeleteV1FriendsUserId,
   useGetV1FriendsRequests,
   usePostV1FriendsRequestsIdAccept,
   usePostV1FriendsRequestsIdDecline,
   usePostV1FriendsUserIdBlock,
 } from '@/lib/api/hooks/friends/friends';
-import { getGetV1SearchQueryKey } from '@/lib/api/hooks/search/search';
+import { invalidateRelationships } from '@/lib/friend-cache';
 import { flatten, useInfiniteFriends, useInfiniteUsers } from '@/lib/api/use-infinite';
-import {
-  getGetV1PresenceFriendsQueryKey,
-  useGetV1PresenceFriends,
-} from '@/lib/api/hooks/presence/presence';
+import { useGetV1PresenceFriends } from '@/lib/api/hooks/presence/presence';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
 import { useFriendActions } from '@/lib/api/use-friend-actions';
 import type {
@@ -234,20 +228,6 @@ export default function FriendsScreen() {
   // Bottom-sheet state for the per-friend action menu.
   const [menuTarget, setMenuTarget] = React.useState<UserRow | null>(null);
 
-  const invalidateRelationships = React.useCallback(async () => {
-    await Promise.all([
-      qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() }),
-      qc.invalidateQueries({ queryKey: getGetV1FriendsQueryKey() }),
-      qc.invalidateQueries({ queryKey: getGetV1PresenceFriendsQueryKey() }),
-      // A friendship change can add or remove a DM (the backend
-      // deletes the direct thread on unfriend / block), so the
-      // chats list + search caches go stale too — refresh them so
-      // a dead DM doesn't linger and get re-opened to a 404.
-      qc.invalidateQueries({ queryKey: getGetV1ConversationsQueryKey() }),
-      qc.invalidateQueries({ queryKey: getGetV1SearchQueryKey() }),
-    ]);
-  }, [qc]);
-
   const surfaceError = React.useCallback((err: unknown, fallback: string) => {
     const msg = err instanceof APIError && err.message ? err.message : fallback;
     toast.error(msg);
@@ -283,7 +263,7 @@ export default function FriendsScreen() {
       markPending(id);
       try {
         await acceptRequest.mutateAsync({ id });
-        await invalidateRelationships();
+        await invalidateRelationships(qc);
         const handle = friendship.user?.username ? `@${friendship.user.username}` : 'them';
         toast.success("You're now friends", `Say hi to ${handle}.`);
       } catch (err) {
@@ -292,7 +272,7 @@ export default function FriendsScreen() {
         unmarkPending(id);
       }
     },
-    [acceptRequest, invalidateRelationships, markPending, unmarkPending, surfaceError]
+    [acceptRequest, qc, markPending, unmarkPending, surfaceError]
   );
 
   const onDeclineRequest = React.useCallback(
@@ -302,7 +282,7 @@ export default function FriendsScreen() {
       markPending(id);
       try {
         await declineRequest.mutateAsync({ id });
-        await invalidateRelationships();
+        await invalidateRelationships(qc);
         toast.info('Request declined');
       } catch (err) {
         surfaceError(err, "Couldn't decline this request right now.");
@@ -310,7 +290,7 @@ export default function FriendsScreen() {
         unmarkPending(id);
       }
     },
-    [declineRequest, invalidateRelationships, markPending, unmarkPending, surfaceError]
+    [declineRequest, qc, markPending, unmarkPending, surfaceError]
   );
 
   const onUnfriend = React.useCallback(
@@ -321,7 +301,7 @@ export default function FriendsScreen() {
       setMenuTarget(null);
       try {
         await unfriend.mutateAsync({ userId });
-        await invalidateRelationships();
+        await invalidateRelationships(qc);
         const handle = user.username ? `@${user.username}` : 'this user';
         toast.info('Unfriended', `${handle} is no longer in your friends.`);
       } catch (err) {
@@ -330,7 +310,7 @@ export default function FriendsScreen() {
         unmarkPending(userId);
       }
     },
-    [unfriend, invalidateRelationships, markPending, unmarkPending, surfaceError]
+    [unfriend, qc, markPending, unmarkPending, surfaceError]
   );
 
   const onBlock = React.useCallback(
@@ -341,7 +321,7 @@ export default function FriendsScreen() {
       setMenuTarget(null);
       try {
         await blockUser.mutateAsync({ userId });
-        await invalidateRelationships();
+        await invalidateRelationships(qc);
         const handle = user.username ? `@${user.username}` : 'this user';
         toast.info('Blocked', `${handle} can't message or add you.`);
       } catch (err) {
@@ -350,7 +330,7 @@ export default function FriendsScreen() {
         unmarkPending(userId);
       }
     },
-    [blockUser, invalidateRelationships, markPending, unmarkPending, surfaceError]
+    [blockUser, qc, markPending, unmarkPending, surfaceError]
   );
 
   // Per-section collapsed state. Tap a header chevron to fold its

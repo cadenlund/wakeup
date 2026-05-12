@@ -13,11 +13,10 @@ import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import {
-  getGetV1FriendsQueryKey,
-  getGetV1FriendsRequestsQueryKey,
   useDeleteV1FriendsRequestsId,
   usePostV1FriendsRequests,
 } from '@/lib/api/hooks/friends/friends';
+import { invalidateRelationships } from '@/lib/friend-cache';
 import { toast } from '@/lib/toast';
 
 type Options = {
@@ -39,14 +38,10 @@ export function useFriendActions(opts: Options = {}) {
         const username = vars?.data?.username;
         toast.success(username ? `Friend request sent to @${username}` : 'Friend request sent');
       },
-      onSettled: () => {
-        // Invalidate both lists — outgoing requests appear in
-        // /v1/friends/requests; the user's friend status flip
-        // also surfaces in the global friends list cache as a
-        // pending row gets created.
-        void qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() });
-        void qc.invalidateQueries({ queryKey: getGetV1FriendsQueryKey() });
-      },
+      // Refresh the whole relationship surface — incl. /v1/search,
+      // so a row tapped there flips off "Add friend" without a
+      // manual refresh.
+      onSettled: () => void invalidateRelationships(qc),
     },
   });
 
@@ -56,9 +51,7 @@ export function useFriendActions(opts: Options = {}) {
         if (silent) return;
         toast.success('Friend request unsent');
       },
-      onSettled: () => {
-        void qc.invalidateQueries({ queryKey: getGetV1FriendsRequestsQueryKey() });
-      },
+      onSettled: () => void invalidateRelationships(qc),
     },
   });
 

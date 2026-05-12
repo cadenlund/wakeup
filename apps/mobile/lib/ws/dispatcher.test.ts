@@ -26,6 +26,7 @@ const conversationsKey = ['/v1/conversations'];
 const presenceKey = ['/v1/presence/friends'];
 const friendsKey = ['/v1/friends'];
 const friendRequestsKey = ['/v1/friends/requests'];
+const searchKey = ['/v1/search'];
 
 // The banner / typing stores + active-conversation / presence-intent
 // trackers are module-level singletons; reset them before each test.
@@ -135,29 +136,40 @@ describe('applyWSEvent — presence.update', () => {
 });
 
 describe('applyWSEvent — friend.*', () => {
-  test('friend.request_received invalidates the requests query', async () => {
+  // Both friend events refresh the whole relationship surface — incl.
+  // /v1/search, so an open search row updates without a manual refresh.
+  test('friend.request_received refreshes the relationship surface', async () => {
     const qc = newClient();
     await seedQuery(qc, friendRequestsKey, { data: [] });
+    await seedQuery(qc, friendsKey, { data: [] });
+    await seedQuery(qc, searchKey, { data: [] });
     applyWSEvent(qc, { type: 'friend.request_received' });
     expect(isInvalidated(qc, friendRequestsKey)).toBe(true);
+    expect(isInvalidated(qc, friendsKey)).toBe(true);
+    expect(isInvalidated(qc, searchKey)).toBe(true);
   });
 
-  test('friend.request_accepted invalidates the friends + requests queries', async () => {
+  test('friend.request_accepted refreshes the relationship surface', async () => {
     const qc = newClient();
     await seedQuery(qc, friendsKey, { data: [] });
     await seedQuery(qc, friendRequestsKey, { data: [] });
+    await seedQuery(qc, searchKey, { data: [] });
     applyWSEvent(qc, { type: 'friend.request_accepted' });
     expect(isInvalidated(qc, friendsKey)).toBe(true);
     expect(isInvalidated(qc, friendRequestsKey)).toBe(true);
+    expect(isInvalidated(qc, searchKey)).toBe(true);
   });
 });
 
 describe('applyWSEvent — conversation.*', () => {
-  test('member_added invalidates the conversations list', async () => {
+  test('member_added invalidates the conversations list + the conversation detail', async () => {
     const qc = newClient();
+    const detailKey = [`/v1/conversations/${CONV}`];
     await seedQuery(qc, conversationsKey, { data: [] });
+    await seedQuery(qc, detailKey, { id: CONV, members: [] });
     applyWSEvent(qc, { type: 'conversation.member_added', data: { conversation_id: CONV } });
     expect(isInvalidated(qc, conversationsKey)).toBe(true);
+    expect(isInvalidated(qc, detailKey)).toBe(true);
   });
 });
 
