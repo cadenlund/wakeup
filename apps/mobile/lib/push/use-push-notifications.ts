@@ -21,7 +21,7 @@
 //
 // Logout deregistration is NOT here — the DELETE needs a live session
 // cookie, so it runs from the logout mutation's onMutate
-// (header-logout-pill). This hook only handles the local side.
+// (profile settings → Account). This hook only handles the local side.
 import { router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import * as React from 'react';

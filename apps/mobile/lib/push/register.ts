@@ -18,7 +18,7 @@
 //      logout.
 //
 // `deregisterPushAsync` is the logout counterpart — it must run while
-// the session cookie is still valid (see header-logout-pill's onMutate),
+// the session cookie is still valid (see the settings Account section's logout onMutate),
 // otherwise the DELETE 401s and the stale row would keep receiving
 // pushes for the signed-out user on this device.
 //
@@ -143,7 +143,7 @@ export async function registerForPushNotificationsAsync(): Promise<void> {
 
 // deregisterPushAsync removes this device's token server-side and clears
 // the local cache. MUST be called while still authenticated (the DELETE
-// needs the session cookie) — header-logout-pill fires it from the
+// needs the session cookie) — the settings Account section fires it from the
 // logout mutation's onMutate, before the logout response clears the
 // cookie.
 export async function deregisterPushAsync(): Promise<void> {
