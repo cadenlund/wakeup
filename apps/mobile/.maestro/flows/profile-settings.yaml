@@ -1,0 +1,77 @@
+# Profile / settings screen.
+#
+# Asserts: a freshly-registered user can open the Profile tab, edit
+# the bio in the "me" card and Save (→ "Profile updated" toast),
+# expand each collapsible section (Appearance shows the theme picker +
+# light/dark row; Notifications shows the per-category toggles;
+# Account shows Log out), switch the light/dark mode, and log out from
+# the Account section (lands back on /login).
+#
+# Avatar upload isn't covered — the system photo-library picker is OS
+# UI, not part of the app, and Maestro can't drive it reliably across
+# iOS/Android (same exclusion as onboarding.yaml). Avatar render
+# coverage lives in components/avatar-picker tests.
+appId: app.wakeup.client
+---
+- stopApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow: ./_shared/register-fresh.yaml
+
+# Skip onboarding to land on (tabs) → Chats tab.
+- extendedWaitUntil:
+    visible: 'Just your friends'
+    timeout: 10000
+- tapOn: 'Skip'
+- extendedWaitUntil:
+    visible: 'No conversations yet'
+    timeout: 10000
+
+# --- Profile tab ----------------------------------------------------
+- tapOn: 'Profile'
+- extendedWaitUntil:
+    visible:
+      id: settings-avatar
+    timeout: 10000
+- assertVisible: 'Display name'
+- takeScreenshot: settings-profile-card
+
+# Edit the bio and save → success toast.
+- tapOn:
+    id: settings-bio
+- inputText: 'wired up by maestro'
+- hideKeyboard
+- tapOn:
+    id: settings-profile-save
+- assertVisible: 'Profile updated'
+
+# --- Appearance section --------------------------------------------
+- tapOn:
+    id: settings-appearance
+- assertVisible: 'Light / dark'
+- takeScreenshot: settings-appearance-open
+# The mode buttons display their label via CSS `capitalize`; match
+# the accessibilityLabel ("Mode <pref>") rather than the rendered
+# text node, which is the lowercase value.
+- tapOn: 'Mode dark'
+- tapOn: 'Mode light'
+
+# --- Notifications section -----------------------------------------
+- tapOn:
+    id: settings-notifications
+- assertVisible: 'Direct messages'
+- assertVisible: 'Friend requests'
+- takeScreenshot: settings-notifications-open
+
+# --- Account section → log out -------------------------------------
+- tapOn:
+    id: settings-account
+- assertVisible:
+    id: settings-logout
+- takeScreenshot: settings-account-open
+- tapOn:
+    id: settings-logout
+- extendedWaitUntil:
+    visible: 'Welcome back. We saved your spot.'
+    timeout: 10000
