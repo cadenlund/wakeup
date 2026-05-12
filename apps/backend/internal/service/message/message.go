@@ -461,6 +461,18 @@ func (s *Service) CountUnreadByConversation(ctx context.Context, userID uuid.UUI
 	return counts, nil
 }
 
+// LatestMessageByConversation returns the most recent message in each of
+// the given conversations, keyed by conversation ID (soft-deleted
+// messages included — see the repo method). Surfaces the `last_message`
+// preview on each ConversationResponse.
+func (s *Service) LatestMessageByConversation(ctx context.Context, convIDs []uuid.UUID) (map[uuid.UUID]domain.Message, error) {
+	latest, err := s.msgs.LatestMessageByConversation(ctx, convIDs)
+	if err != nil {
+		return nil, apierror.Internal("latest message by conversation").WithCause(err)
+	}
+	return latest, nil
+}
+
 // publishMessageEvent fires-and-forgets a pubsub event on the
 // `conv:<id>:messages` channel. The broker is optional — when nil
 // (e.g. tests that don't care about WS fan-out), this is a no-op.

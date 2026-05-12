@@ -408,6 +408,98 @@ func listConversationUnread(t *testing.T, c *http.Client, baseURL, convID string
 	return 0
 }
 
+// findConversationRow GETs /v1/conversations and returns the raw row
+// map matching convID. Fails if the row is absent.
+func findConversationRow(t *testing.T, c *http.Client, baseURL, convID string) map[string]any {
+	t.Helper()
+	resp, err := c.Get(baseURL + "/v1/conversations")
+	if err != nil {
+		t.Fatalf("GET /v1/conversations: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("list status=%d body=%s", resp.StatusCode, body)
+	}
+	got := mustDecode(t, resp.Body)
+	data, _ := got["data"].([]any)
+	for _, raw := range data {
+		row, _ := raw.(map[string]any)
+		if row["id"] == convID {
+			return row
+		}
+	}
+	t.Fatalf("conversation %s not in list", convID)
+	return nil
+}
+
+// TestListConversations_LastMessagePreview locks in the per-row
+// last_message preview: null when there are no messages, then the most
+// recent message's sender / body / deleted flag — including when the
+// latest message has been soft-deleted (body blanked, deleted=true).
+func TestListConversations_LastMessagePreview(t *testing.T) {
+	t.Parallel()
+	h := testutil.New(t)
+	a, ua := h.AuthClient(t)
+	b, ub := h.AuthClient(t)
+	h.MakeFriendship(t, ua, ub)
+	cid := requireCreateConversation(t, h, a, map[string]any{
+		"type": "direct", "member_ids": []uuid.UUID{ub.ID},
+	})
+
+	if row := findConversationRow(t, a, h.Server.URL, cid); row["last_message"] != nil {
+		t.Fatalf("fresh conversation last_message = %v, want null", row["last_message"])
+	}
+
+	requireSendMessage(t, h, b, cid, "hey what time?")
+	{
+		lm, _ := findConversationRow(t, a, h.Server.URL, cid)["last_message"].(map[string]any)
+		if lm == nil {
+			t.Fatalf("last_message missing after B's send")
+		}
+		if lm["sender_id"] != ub.ID.String() {
+			t.Errorf("last_message.sender_id = %v, want %s", lm["sender_id"], ub.ID)
+		}
+		if lm["body"] != "hey what time?" {
+			t.Errorf("last_message.body = %v, want %q", lm["body"], "hey what time?")
+		}
+		if lm["deleted"] != false {
+			t.Errorf("last_message.deleted = %v, want false", lm["deleted"])
+		}
+	}
+
+	aMid := requireSendMessage(t, h, a, cid, "noon works")
+	{
+		lm, _ := findConversationRow(t, a, h.Server.URL, cid)["last_message"].(map[string]any)
+		if lm["sender_id"] != ua.ID.String() || lm["body"] != "noon works" {
+			t.Fatalf("after A's reply last_message = %v, want A / 'noon works'", lm)
+		}
+	}
+
+	// Delete A's latest message — it's still the most recent by time,
+	// so the preview now reports it deleted with an empty body.
+	dr := deleteReqHTTP(t, a, h.Server.URL+"/v1/messages/"+aMid)
+	_ = dr.Body.Close()
+	if dr.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete message status = %d", dr.StatusCode)
+	}
+	{
+		lm, _ := findConversationRow(t, a, h.Server.URL, cid)["last_message"].(map[string]any)
+		if lm == nil {
+			t.Fatalf("last_message went away after a delete")
+		}
+		if lm["deleted"] != true {
+			t.Errorf("last_message.deleted = %v, want true", lm["deleted"])
+		}
+		if lm["body"] != "" {
+			t.Errorf("last_message.body = %v, want empty for a deleted message", lm["body"])
+		}
+		if lm["sender_id"] != ua.ID.String() {
+			t.Errorf("last_message.sender_id = %v, want %s", lm["sender_id"], ua.ID)
+		}
+	}
+}
+
 // TestListConversations_UnreadCount locks in the per-row unread_count
 // field: it counts the caller's unread messages (excludes the caller's
 // own + soft-deleted), and drops as the caller's read pointer advances.

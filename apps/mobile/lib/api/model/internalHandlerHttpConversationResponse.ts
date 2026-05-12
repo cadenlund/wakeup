@@ -6,11 +6,19 @@
  * OpenAPI spec version: 1.0
  */
 import type { InternalHandlerHttpConversationMemberRow } from './internalHandlerHttpConversationMemberRow';
+import type { InternalHandlerHttpMessagePreview } from './internalHandlerHttpMessagePreview';
 
 export interface InternalHandlerHttpConversationResponse {
   avatar_url?: string;
   created_at?: string;
   id?: string;
+  /** LastMessage is a preview of the most recent message in the
+  conversation — the chats list (and global search) renders the
+  row's subtitle from it ("You: hey" / "Ada: hey" / "Message
+  deleted"). JSON-null (not omitted) when the conversation has no
+  messages yet — stable nullability so clients can tell "empty
+  conversation" from "older response without the field". */
+  last_message?: InternalHandlerHttpMessagePreview;
   last_message_at?: string;
   members?: InternalHandlerHttpConversationMemberRow[];
   /** MutedUntil + PinnedAt are the CALLER's membership state, not

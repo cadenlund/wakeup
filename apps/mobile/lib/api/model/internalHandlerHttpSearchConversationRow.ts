@@ -5,10 +5,16 @@
  * Friend-graph chat backend. See docs/WAKEUP.md for the full spec.
  * OpenAPI spec version: 1.0
  */
+import type { InternalHandlerHttpMessagePreview } from './internalHandlerHttpMessagePreview';
 
 export interface InternalHandlerHttpSearchConversationRow {
   avatar_url?: string;
   id?: string;
+  /** LastMessage is the same preview shape ConversationResponse
+  carries — the search modal renders the row subtitle from it so a
+  hit looks identical to its chats-list row. JSON-null when the
+  conversation has no messages. */
+  last_message?: InternalHandlerHttpMessagePreview;
   last_message_at?: string;
   name?: string;
   type?: string;

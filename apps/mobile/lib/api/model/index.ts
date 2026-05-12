@@ -55,6 +55,7 @@ export * from './internalHandlerHttpLoginResponse';
 export * from './internalHandlerHttpMarkReadRequest';
 export * from './internalHandlerHttpMeResponse';
 export * from './internalHandlerHttpMessageListResponse';
+export * from './internalHandlerHttpMessagePreview';
 export * from './internalHandlerHttpMessageReadRow';
 export * from './internalHandlerHttpMessageReadsResponse';
 export * from './internalHandlerHttpMessageResponse';

@@ -6235,6 +6235,13 @@ export interface components {
             created_at?: string;
             /** @example 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c */
             id?: string;
+            /** @description LastMessage is a preview of the most recent message in the
+             *     conversation — the chats list (and global search) renders the
+             *     row's subtitle from it ("You: hey" / "Ada: hey" / "Message
+             *     deleted"). JSON-null (not omitted) when the conversation has no
+             *     messages yet — stable nullability so clients can tell "empty
+             *     conversation" from "older response without the field". */
+            last_message?: components["schemas"]["internal_handler_http.MessagePreview"];
             /** @example 2026-05-02T10:42:55.412Z */
             last_message_at?: string;
             members?: components["schemas"]["internal_handler_http.ConversationMemberRow"][];
@@ -6422,6 +6429,16 @@ export interface components {
             /** @example 42 */
             total?: number;
         };
+        "internal_handler_http.MessagePreview": {
+            /** @example hey what time are we meeting? */
+            body?: string;
+            /** @example 2026-05-02T10:42:55.412Z */
+            created_at?: string;
+            /** @example false */
+            deleted?: boolean;
+            /** @example 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c */
+            sender_id?: string;
+        };
         "internal_handler_http.MessageReadRow": {
             /** @example 2026-05-02T10:43:11.221Z */
             read_at?: string;
@@ -6540,6 +6557,11 @@ export interface components {
             avatar_url?: string;
             /** @example 0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c */
             id?: string;
+            /** @description LastMessage is the same preview shape ConversationResponse
+             *     carries — the search modal renders the row subtitle from it so a
+             *     hit looks identical to its chats-list row. JSON-null when the
+             *     conversation has no messages. */
+            last_message?: components["schemas"]["internal_handler_http.MessagePreview"];
             /** @example 2026-05-02T10:42:55.412Z */
             last_message_at?: string;
             /** @example Wakeup Crew */

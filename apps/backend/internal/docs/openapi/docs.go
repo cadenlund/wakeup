@@ -5131,6 +5131,14 @@ const docTemplate = `{
                     "type": "string",
                     "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
                 },
+                "last_message": {
+                    "description": "LastMessage is a preview of the most recent message in the\nconversation — the chats list (and global search) renders the\nrow's subtitle from it (\"You: hey\" / \"Ada: hey\" / \"Message\ndeleted\"). JSON-null (not omitted) when the conversation has no\nmessages yet — stable nullability so clients can tell \"empty\nconversation\" from \"older response without the field\".",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handler_http.MessagePreview"
+                        }
+                    ]
+                },
                 "last_message_at": {
                     "type": "string",
                     "example": "2026-05-02T10:42:55.412Z"
@@ -5538,6 +5546,27 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler_http.MessagePreview": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "example": "hey what time are we meeting?"
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2026-05-02T10:42:55.412Z"
+                },
+                "deleted": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "sender_id": {
+                    "type": "string",
+                    "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                }
+            }
+        },
         "internal_handler_http.MessageReadRow": {
             "type": "object",
             "properties": {
@@ -5843,6 +5872,14 @@ const docTemplate = `{
                 "id": {
                     "type": "string",
                     "example": "0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"
+                },
+                "last_message": {
+                    "description": "LastMessage is the same preview shape ConversationResponse\ncarries — the search modal renders the row subtitle from it so a\nhit looks identical to its chats-list row. JSON-null when the\nconversation has no messages.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handler_http.MessagePreview"
+                        }
+                    ]
                 },
                 "last_message_at": {
                     "type": "string",

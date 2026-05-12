@@ -33,8 +33,39 @@ type ConversationResponse struct {
 	// renders the per-row unread badge from this. Best-effort: 0 when
 	// the count can't be computed (graceful degradation), so clients
 	// should treat it as a hint, not a guarantee.
-	UnreadCount int64                   `json:"unread_count"    example:"3"`
+	UnreadCount int64 `json:"unread_count"    example:"3"`
+	// LastMessage is a preview of the most recent message in the
+	// conversation — the chats list (and global search) renders the
+	// row's subtitle from it ("You: hey" / "Ada: hey" / "Message
+	// deleted"). JSON-null (not omitted) when the conversation has no
+	// messages yet — stable nullability so clients can tell "empty
+	// conversation" from "older response without the field".
+	LastMessage *MessagePreview         `json:"last_message"`
 	Members     []ConversationMemberRow `json:"members"`
+}
+
+// MessagePreview is the slim last-message shape embedded in
+// ConversationResponse / SearchConversationRow. Just enough to render
+// the chats-row subtitle without a follow-up fetch: who sent it, the
+// body, when, and whether it's been deleted (→ render "Message
+// deleted"). An empty Body on a non-deleted message means an
+// attachment-only message (clients render "Sent an attachment").
+type MessagePreview struct {
+	SenderID  uuid.UUID `json:"sender_id"  example:"0192f5a3-7c1b-7a3f-9b1c-2d3e4f5a6b7c"`
+	Body      string    `json:"body"       example:"hey what time are we meeting?"`
+	CreatedAt time.Time `json:"created_at" example:"2026-05-02T10:42:55.412Z"`
+	Deleted   bool      `json:"deleted"    example:"false"`
+}
+
+// toMessagePreview maps a domain.Message to the wire preview. A deleted
+// message keeps its sender + timestamp but reports an empty body — the
+// row caption is just "Message deleted".
+func toMessagePreview(m domain.Message) MessagePreview {
+	p := MessagePreview{SenderID: m.SenderID, CreatedAt: m.CreatedAt, Deleted: m.DeletedAt != nil}
+	if !p.Deleted {
+		p.Body = m.Body
+	}
+	return p
 }
 
 // ConversationMemberRow is one member of a ConversationResponse.
@@ -160,7 +191,7 @@ func toConversationMemberRow(m domain.ConversationMember, u domain.User, p Presi
 // pin state — those fields are surfaced at the top level so the
 // client can render a mute icon / sort pinned-first without scanning
 // the embedded members slice.
-func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members []domain.ConversationMember, usersByID map[uuid.UUID]domain.User, p Presigner, unreadCount int64) ConversationResponse {
+func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members []domain.ConversationMember, usersByID map[uuid.UUID]domain.User, p Presigner, unreadCount int64, lastMsg *domain.Message) ConversationResponse {
 	rows := make([]ConversationMemberRow, 0, len(members))
 	var mutedUntil, pinnedAt *time.Time
 	for _, m := range members {
@@ -176,6 +207,11 @@ func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members [
 			pinnedAt = m.PinnedAt
 		}
 	}
+	var preview *MessagePreview
+	if lastMsg != nil {
+		mp := toMessagePreview(*lastMsg)
+		preview = &mp
+	}
 	return ConversationResponse{
 		ID:            c.ID,
 		Type:          string(c.Type),
@@ -187,6 +223,7 @@ func toConversationResponse(c domain.Conversation, callerID uuid.UUID, members [
 		MutedUntil:    mutedUntil,
 		PinnedAt:      pinnedAt,
 		UnreadCount:   unreadCount,
+		LastMessage:   preview,
 		Members:       rows,
 	}
 }

@@ -81,7 +81,11 @@ import type {
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 import { useEnsureDirectConversation } from '@/lib/api/use-ensure-direct-conversation';
-import { conversationDisplay, isCurrentlyMuted } from '@/lib/conversation-display';
+import {
+  conversationDisplay,
+  isCurrentlyMuted,
+  messagePreviewText,
+} from '@/lib/conversation-display';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 import { toast } from '@/lib/toast';
 
@@ -1215,6 +1219,7 @@ function RenderedRow({
         return (
           <ConversationRow
             title={c.name?.trim() || 'Conversation'}
+            subtitle={messagePreviewText(c.last_message)}
             avatarUrl={c.avatar_url}
             fallbackInitial={c.name ?? 'C'}
             lastMessageAt={c.last_message_at}

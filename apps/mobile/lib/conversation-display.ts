@@ -10,6 +10,7 @@
 // chats-tab cache.
 import type {
   InternalHandlerHttpConversationResponse,
+  InternalHandlerHttpMessagePreview,
   InternalHandlerHttpUserResponse,
 } from '@/lib/api/model';
 
@@ -60,6 +61,7 @@ export function conversationDisplay(
     const title = other?.display_name?.trim() || other?.username?.trim() || 'Direct message';
     return {
       title,
+      subtitle: lastMessagePreview(c, myUserId, false),
       avatarUrl: other?.avatar_url,
       fallbackInitial: title,
       presence: other?.id ? (presenceByUser.get(other.id) ?? null) : null,
@@ -69,18 +71,15 @@ export function conversationDisplay(
   const others = myUserId
     ? (c.members ?? []).filter((m) => m.user?.id && m.user.id !== myUserId)
     : (c.members ?? []);
-  const memberCount = (c.members ?? []).length;
   const stackedMembers = others.slice(0, 2).map((m) => ({
     avatarUrl: m.user?.avatar_url,
     fallbackName: m.user?.display_name ?? m.user?.username ?? null,
     presence: m.user?.id ? (presenceByUser.get(m.user.id) ?? null) : null,
   }));
+  const subtitle = lastMessagePreview(c, myUserId, true);
 
   const named = c.name?.trim();
   if (named) {
-    // Named group → subtitle is "N members" so the avatar / name +
-    // count read as a complete identity even before any messages.
-    const subtitle = memberCount > 0 ? membersLabel(memberCount) : undefined;
     return {
       title: named,
       subtitle,
@@ -91,9 +90,7 @@ export function conversationDisplay(
   }
   // Unnamed group — fall back to a comma-joined preview of up to
   // three member names with an "and N more" overflow indicator so
-  // the row reads as "you + these people" at a glance. Subtitle
-  // becomes the same "N members" line a named group uses, so the
-  // two shapes feel consistent.
+  // the row reads as "you + these people" at a glance.
   const previewNames = others
     .map((m) => m.user?.display_name?.trim() || m.user?.username?.trim())
     .filter((s): s is string => !!s);
@@ -105,7 +102,6 @@ export function conversationDisplay(
       ? `${previewShown} and ${remaining} more`
       : previewShown
     : 'Group';
-  const subtitle = memberCount > 0 ? membersLabel(memberCount) : undefined;
   return {
     title,
     subtitle,
@@ -115,15 +111,45 @@ export function conversationDisplay(
   };
 }
 
+// Bare last-message preview text — the body, or "Message deleted" /
+// "Sent an attachment" (attachment-only) / "No messages yet" (none).
+// No sender prefix; callers with the member roster (lastMessagePreview)
+// add "You: " / "Caden: " themselves. Exported so the search modal's
+// slim conversation rows (which have no roster) can use it directly.
+export function messagePreviewText(lm: InternalHandlerHttpMessagePreview | undefined): string {
+  if (!lm) return 'No messages yet';
+  if (lm.deleted) return 'Message deleted';
+  return lm.body?.trim() || 'Sent an attachment';
+}
+
+// Builds the chats-row subtitle from the conversation's last message.
+// DM: just the body ("hey"), or "You: hey" when you sent it. Group:
+// always prefixed with the sender's first name ("Caden: hey" /
+// "You: hey"). A soft-deleted latest message or an empty conversation
+// gets the bare text from messagePreviewText (no prefix).
+function lastMessagePreview(
+  c: InternalHandlerHttpConversationResponse,
+  myUserId: string | undefined,
+  isGroup: boolean
+): string {
+  const lm = c.last_message;
+  const text = messagePreviewText(lm);
+  if (!lm || lm.deleted) return text;
+  const isMine = !!myUserId && lm.sender_id === myUserId;
+  if (isMine) return `You: ${text}`;
+  if (!isGroup) return text;
+  const sender = (c.members ?? []).find((m) => m.user?.id === lm.sender_id)?.user;
+  const name = (sender?.display_name?.trim() || sender?.username?.trim() || 'Someone').split(
+    /\s+/
+  )[0];
+  return `${name}: ${text}`;
+}
+
 export function isCurrentlyMuted(mutedUntil: string | null | undefined): boolean {
   if (!mutedUntil) return false;
   const t = Date.parse(mutedUntil);
   if (Number.isNaN(t)) return false;
   return t > Date.now();
-}
-
-export function membersLabel(n: number): string {
-  return n === 1 ? '1 member' : `${n} members`;
 }
 
 // Search filter for the chats-tab inline filter bar. Returns
