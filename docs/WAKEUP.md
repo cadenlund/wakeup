@@ -1445,7 +1445,7 @@ return ListMessagesResponse{Data: toMessageResponses(data), NextCursor: next, Ha
 | `message.edited` | `{ message_id, conversation_id, sender_id, created_at, body }` |
 | `message.deleted` | `{ message_id, conversation_id }` |
 | `message.read` | `{ conversation_id, message_id, user_id, read_at }` |
-| `conversation.created` | Conversation |
+| `conversation.created` | `{ conversation_id }` — fanned out on each initial member's `user:<id>:events`; the WS bridge late-subscribes the connection to `conv:<id>:messages` off it (so a conversation created after the socket connected still gets live message / typing events) |
 | `conversation.updated` | Conversation |
 | `conversation.member_added` | `{ conversation_id, conversation_name, member: { id, username, display_name } }` — fanned out on each member's `user:<id>:events` |
 | `conversation.member_removed` | `{ conversation_id, user_id }` |

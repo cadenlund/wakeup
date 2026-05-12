@@ -216,6 +216,7 @@ func (s *Service) createDirect(ctx context.Context, p CreateParams) (CreateResul
 	if err := tx.Commit(ctx); err != nil {
 		return CreateResult{}, apierror.Internal("commit").WithCause(err)
 	}
+	s.publishConversationCreated(ctx, conv.ID, p.Creator, other)
 	return CreateResult{
 		Conversation: conv,
 		Members:      []domain.ConversationMember{creatorMember, otherMember},
@@ -318,6 +319,7 @@ func (s *Service) createGroup(ctx context.Context, p CreateParams) (CreateResult
 	if err := tx.Commit(ctx); err != nil {
 		return CreateResult{}, apierror.Internal("commit").WithCause(err)
 	}
+	s.publishConversationCreated(ctx, conv.ID, append([]uuid.UUID{p.Creator}, others...)...)
 	return CreateResult{Conversation: conv, Members: members}, nil
 }
 
@@ -665,7 +667,7 @@ func (s *Service) AddMembers(ctx context.Context, p AddMembersParams) (AddMember
 				Member:           wsproto.WSUser{ID: u.ID, Username: u.Username, DisplayName: u.DisplayName},
 			}
 			for _, rid := range recipients {
-				s.publishMemberAdded(ctx, rid, payload)
+				s.publishUserEvent(ctx, rid, wsproto.EventConversationMemberAdded, payload)
 			}
 		}
 	}
@@ -768,26 +770,44 @@ func (s *Service) publishReadEvent(ctx context.Context, convID, userID, messageI
 	}
 }
 
-// publishMemberAdded fires-and-forgets a `conversation.member_added`
-// envelope (§7.2) on `user:<recipientID>:events` — sent to every
-// current member so the newly-added one gets an "Added you to …"
-// notification and existing members can refresh their member list.
-// No-op when the broker isn't wired.
-func (s *Service) publishMemberAdded(ctx context.Context, recipientID uuid.UUID, payload wsproto.ConversationMemberAddedPayload) {
+// publishUserEvent fires-and-forgets an envelope on
+// `user:<recipientID>:events`. No-op when the broker isn't wired.
+// Used for `conversation.created` / `conversation.member_added` — the
+// WS bridge subscribes the recipient's connection to the conv channel
+// off these (otherwise a conversation created/joined after connect
+// gets no live events). Errors are logged at warn level: a broker
+// hiccup can't undo the already-committed conversation change.
+//
+// Runs on a context detached from the request's cancellation (with a
+// short timeout) — these publishes happen *after* the DB commit, so a
+// client that hangs up immediately mustn't cause the event (and the
+// downstream late-subscribe) to be dropped.
+func (s *Service) publishUserEvent(ctx context.Context, recipientID uuid.UUID, eventType wsproto.EventType, payload any) {
 	if s.broker == nil {
 		return
 	}
-	encoded, err := wsproto.Encode(wsproto.EventConversationMemberAdded, payload)
+	encoded, err := wsproto.Encode(eventType, payload)
 	if err != nil {
-		s.logger.Warn("conversation: encode member_added", slog.String("error", err.Error()))
+		s.logger.Warn("conversation: encode "+string(eventType), slog.String("error", err.Error()))
 		return
 	}
+	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	channel := fmt.Sprintf("user:%s:events", recipientID)
-	if err := s.broker.Publish(ctx, channel, encoded); err != nil {
-		s.logger.Warn("conversation: publish member_added",
+	if err := s.broker.Publish(pubCtx, channel, encoded); err != nil {
+		s.logger.Warn("conversation: publish "+string(eventType),
 			slog.String("channel", channel),
 			slog.String("error", err.Error()),
 		)
+	}
+}
+
+// publishConversationCreated tells every initial member's connection
+// about a brand-new conversation (chats-list refresh + dynamic WS
+// channel subscribe).
+func (s *Service) publishConversationCreated(ctx context.Context, convID uuid.UUID, memberIDs ...uuid.UUID) {
+	for _, uid := range memberIDs {
+		s.publishUserEvent(ctx, uid, wsproto.EventConversationCreated, wsproto.ConversationCreatedPayload{ConversationID: convID})
 	}
 }
 

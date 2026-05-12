@@ -17,7 +17,14 @@
 //
 // Backoff: 1s, 2s, 4s, 8s, 16s, 30s (cap), reset to 1s on every
 // successful open. Matches WAKEUPEXPO §4.4.
+//
+// Diagnosability: state transitions, the inbound stream's last-event
+// timestamp, and dropped sends are recorded as Sentry breadcrumbs +
+// a rolling `ws` context (so any error report carries "what was the
+// socket doing"), and `console`-logged in dev so Metro shows the
+// live trace. See `wsLog`.
 import { WS_BASE_URL } from '@/lib/env';
+import { Sentry } from '@/lib/sentry';
 
 export type WSConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 
@@ -49,9 +56,37 @@ let wantConnection = false;
 const stateListeners = new Set<StateListener>();
 const messageListeners = new Set<MessageListener>();
 
+// Epoch ms of the last inbound envelope — surfaced in the `ws`
+// Sentry context so a "state says connected but no traffic for N
+// minutes" zombie is obvious in error reports.
+let lastEventAt: number | null = null;
+
+function wsContext(): Record<string, unknown> {
+  return {
+    state,
+    reconnectAttempt,
+    readyState: socket?.readyState ?? null,
+    lastEventAt: lastEventAt ? new Date(lastEventAt).toISOString() : null,
+  };
+}
+
+function wsLog(
+  message: string,
+  level: 'info' | 'warning' = 'info',
+  data?: Record<string, unknown>
+): void {
+  if (__DEV__) {
+    (level === 'warning' ? console.warn : console.log)('[ws]', message, data ?? '');
+  }
+  Sentry.addBreadcrumb({ category: 'ws', level, message, data });
+  Sentry.setContext('ws', wsContext());
+}
+
 function setState(next: WSConnectionState): void {
   if (state === next) return;
+  const prev = state;
   state = next;
+  wsLog(`state ${prev} → ${next}`);
   for (const listener of stateListeners) listener(next);
 }
 
@@ -123,6 +158,10 @@ function openSocket(): void {
       // envelopes; anything else is noise.
     }
     if (envelope) {
+      lastEventAt = Date.now();
+      if (__DEV__) {
+        console.log('[ws] ←', envelope.type);
+      }
       for (const listener of messageListeners) listener(envelope);
     }
   };
@@ -133,9 +172,10 @@ function openSocket(): void {
     // would just be noise during normal reconnect churn.
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event: WebSocketCloseEvent) => {
     if (socket !== ws) return;
     socket = null;
+    wsLog(`socket closed`, 'warning', { code: event?.code ?? null, reason: event?.reason ?? '' });
     if (wantConnection) {
       scheduleReconnect();
     } else {
@@ -185,8 +225,17 @@ export function disconnectWS(): void {
 export function sendWS(envelope: WSEnvelope): boolean {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(envelope));
+    if (__DEV__) {
+      console.log('[ws] →', envelope.type);
+    }
     return true;
   }
+  // The socket isn't OPEN — the send is dropped. This is exactly the
+  // "Android isn't pushing events out" symptom; surface it loudly.
+  wsLog(`send dropped (not OPEN): ${envelope.type}`, 'warning', {
+    type: envelope.type,
+    readyState: socket?.readyState ?? null,
+  });
   return false;
 }
 

@@ -2,14 +2,23 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/cadenlund/wakeup/apps/backend/internal/pubsub"
+	"github.com/cadenlund/wakeup/apps/backend/internal/wsproto"
 )
+
+// lateSubscribeTimeout bounds the broker-subscribe call the dispatcher
+// fires off when a connection joins a conversation after connect — so
+// a stalled broker can't leak goroutines under load.
+const lateSubscribeTimeout = 2 * time.Second
 
 // Bridge wires a pubsub.Broker into a Hub: it owns one subscription
 // loop per Hub instance and fans incoming messages out to every user
@@ -231,9 +240,70 @@ func (b *Bridge) dispatch() {
 				users = append(users, uid)
 			}
 			b.mu.Unlock()
+			// Diagnosability: who's about to receive this event. A
+			// zero-recipient publish is the smoking gun for "the event
+			// went out but nobody was subscribed" — so that's at info;
+			// the normal case is debug.
+			if len(users) == 0 {
+				b.logger.Info("ws bridge: event with no subscribers", slog.String("channel", msg.Channel))
+			} else {
+				b.logger.Debug("ws bridge: dispatch",
+					slog.String("channel", msg.Channel),
+					slog.Int("recipients", len(users)),
+				)
+			}
 			for _, uid := range users {
 				b.hub.BroadcastToUser(uid, msg.Payload)
 			}
+			// A `conversation.created` / `conversation.member_added`
+			// event on a user channel means that user now belongs to
+			// a conversation they weren't subscribed to at connect
+			// time — subscribe their connection to the conv channel
+			// so live message / typing events flow without a reconnect.
+			if convID, ok := newConvForUserEvent(msg.Channel, msg.Payload); ok {
+				ch := ConvChannel(convID)
+				for _, uid := range users {
+					b.logger.Info("ws bridge: late conv subscribe",
+						slog.String("user_id", uid.String()),
+						slog.String("channel", ch),
+					)
+					go func(u uuid.UUID) {
+						ctx, cancel := context.WithTimeout(context.Background(), lateSubscribeTimeout)
+						defer cancel()
+						if err := b.Subscribe(ctx, u, ch); err != nil {
+							b.logger.Warn("ws bridge: late conv subscribe failed",
+								slog.String("user_id", u.String()),
+								slog.String("channel", ch),
+								slog.String("error", err.Error()),
+							)
+						}
+					}(uid)
+				}
+			}
 		}
 	}
+}
+
+// newConvForUserEvent extracts the conversation id from a
+// `conversation.created` / `conversation.member_added` envelope
+// delivered on a `user:<id>:events` channel. Returns (_, false) for
+// anything else — only those two events imply a new channel interest.
+func newConvForUserEvent(channel string, payload []byte) (uuid.UUID, bool) {
+	if !strings.HasPrefix(channel, "user:") || !strings.HasSuffix(channel, ":events") {
+		return uuid.Nil, false
+	}
+	env, err := wsproto.Decode(payload)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	if env.Type != wsproto.EventConversationCreated && env.Type != wsproto.EventConversationMemberAdded {
+		return uuid.Nil, false
+	}
+	var data struct {
+		ConversationID uuid.UUID `json:"conversation_id"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil || data.ConversationID == uuid.Nil {
+		return uuid.Nil, false
+	}
+	return data.ConversationID, true
 }

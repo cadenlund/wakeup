@@ -91,7 +91,7 @@ func TestEncodeDecode_RoundTripEveryEvent(t *testing.T) {
 		{wsproto.EventMessageEdited, map[string]any{"id": msgID, "body": "hi (edited)"}},
 		{wsproto.EventMessageDeleted, wsproto.MessageDeletedPayload{MessageID: msgID, ConversationID: convID}},
 		{wsproto.EventMessageRead, wsproto.MessageReadPayload{ConversationID: convID, MessageID: msgID, UserID: userID, ReadAt: now}},
-		{wsproto.EventConversationCreated, map[string]any{"id": convID, "type": "group"}},
+		{wsproto.EventConversationCreated, wsproto.ConversationCreatedPayload{ConversationID: convID}},
 		{wsproto.EventConversationUpdated, map[string]any{"id": convID, "name": "renamed"}},
 		{wsproto.EventConversationMemberAdded, wsproto.ConversationMemberAddedPayload{
 			ConversationID: convID, ConversationName: "Roommates",
