@@ -2,6 +2,7 @@ package ws_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -84,6 +85,38 @@ func TestBridge_PublishedEventReachesSubscribedUser(t *testing.T) {
 	if string(got) == "" {
 		t.Errorf("got empty payload")
 	}
+}
+
+// A `conversation.created` event on a user channel makes the bridge
+// late-subscribe that user's connection to the new conv channel — so a
+// conversation created after connect still gets live events.
+func TestBridge_ConversationCreatedSubscribesToConvChannel(t *testing.T) {
+	t.Parallel()
+	uid := uuid.Must(uuid.NewV7())
+	bh := newBridgeHarness(t, uid)
+	userCh := "user:" + uid.String() + ":events"
+	if err := bh.bridge.Subscribe(context.Background(), uid, userCh); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if got := bh.bridge.SubscriptionCount(uid); got != 1 {
+		t.Fatalf("SubscriptionCount before = %d, want 1", got)
+	}
+
+	convID := uuid.Must(uuid.NewV7())
+	payload := []byte(fmt.Sprintf(`{"type":"conversation.created","data":{"conversation_id":%q}}`, convID))
+	if err := bh.broker.Publish(context.Background(), userCh, payload); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// The conv-channel subscribe is dispatched asynchronously.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if bh.bridge.SubscriptionCount(uid) == 2 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("not subscribed to the conv channel after conversation.created (count = %d)", bh.bridge.SubscriptionCount(uid))
 }
 
 // Cross-channel isolation: a publish on a channel only reaches users

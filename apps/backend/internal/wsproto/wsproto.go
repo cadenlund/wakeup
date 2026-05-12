@@ -223,9 +223,21 @@ type WSUser struct {
 	DisplayName string    `json:"display_name"`
 }
 
+// ConversationCreatedPayload — `conversation.created`, fanned out on
+// each initial member's `user:<id>:events`. Carries just the id: the
+// client refetches the chats list off it, and the WS bridge uses it
+// to subscribe the connection to the new `conv:<id>:messages` channel
+// (otherwise a conversation created after connect wouldn't receive
+// live message / typing events until the socket reconnected).
+type ConversationCreatedPayload struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+}
+
 // ConversationMemberAddedPayload — `conversation.member_added`, fanned
 // out on each member's `user:<id>:events`. `Member` is the user that
-// was added; `ConversationName` is empty for an unnamed group.
+// was added; `ConversationName` is empty for an unnamed group. The WS
+// bridge also subscribes the recipient's connection to the conv
+// channel off this (so a freshly-added member gets live events).
 type ConversationMemberAddedPayload struct {
 	ConversationID   uuid.UUID `json:"conversation_id"`
 	ConversationName string    `json:"conversation_name"`
