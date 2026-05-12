@@ -777,6 +777,11 @@ func (s *Service) publishReadEvent(ctx context.Context, convID, userID, messageI
 // off these (otherwise a conversation created/joined after connect
 // gets no live events). Errors are logged at warn level: a broker
 // hiccup can't undo the already-committed conversation change.
+//
+// Runs on a context detached from the request's cancellation (with a
+// short timeout) — these publishes happen *after* the DB commit, so a
+// client that hangs up immediately mustn't cause the event (and the
+// downstream late-subscribe) to be dropped.
 func (s *Service) publishUserEvent(ctx context.Context, recipientID uuid.UUID, eventType wsproto.EventType, payload any) {
 	if s.broker == nil {
 		return
@@ -786,8 +791,10 @@ func (s *Service) publishUserEvent(ctx context.Context, recipientID uuid.UUID, e
 		s.logger.Warn("conversation: encode "+string(eventType), slog.String("error", err.Error()))
 		return
 	}
+	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	channel := fmt.Sprintf("user:%s:events", recipientID)
-	if err := s.broker.Publish(ctx, channel, encoded); err != nil {
+	if err := s.broker.Publish(pubCtx, channel, encoded); err != nil {
 		s.logger.Warn("conversation: publish "+string(eventType),
 			slog.String("channel", channel),
 			slog.String("error", err.Error()),
