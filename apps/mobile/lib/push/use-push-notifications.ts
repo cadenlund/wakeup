@@ -82,10 +82,12 @@ export function usePushNotifications(): void {
   // Mirror the WS heartbeat's `unread_total` onto the app-icon badge.
   // The client pings on connect / every interval / after a MarkRead,
   // so this stays reasonably fresh; a 0/absent total clears the badge.
+  // Ignore a heartbeat that races logout — the auth effect already set
+  // the badge to 0, and a late ack would otherwise re-show stale state.
   React.useEffect(
     () =>
       onWSMessage((env) => {
-        if (env.type !== 'heartbeat') return;
+        if (env.type !== 'heartbeat' || !authedRef.current) return;
         const data = env.data as { unread_total?: unknown } | null | undefined;
         const total = typeof data?.unread_total === 'number' ? data.unread_total : 0;
         void setAppBadgeCount(total);
