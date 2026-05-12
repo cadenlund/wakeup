@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,15 @@ import (
 	usersvc "github.com/cadenlund/wakeup/apps/backend/internal/service/user"
 )
 
+// UnreadByConversationCounter is the slice of the message service this
+// handler needs to populate the `unread_count` field on each
+// ConversationResponse. Defined locally so tests can stub it — the
+// production wiring uses *message.Service (handler → service →
+// repository).
+type UnreadByConversationCounter interface {
+	CountUnreadByConversation(ctx context.Context, userID uuid.UUID, convIDs []uuid.UUID) (map[uuid.UUID]int64, error)
+}
+
 // ConversationHandler hosts every /v1/conversations/* endpoint
 // (excluding /messages, which lands in milestone 6.x). Composes the
 // conversation service + user service so member rows can be rendered
@@ -25,15 +35,21 @@ type ConversationHandler struct {
 	convs   *convsvc.Service
 	users   *usersvc.Service
 	auth    *auth.Service
+	unread  UnreadByConversationCounter // optional; nil → unread_count is always 0
 	v       *validator.Validate
 	presign Presigner // optional; nil → raw avatar keys
 }
 
 // NewConversationHandler wires up the handler.
+//
+// `unread` is optional; when nil, every ConversationResponse reports
+// unread_count = 0 (graceful degradation — the mobile badge just won't
+// show until a real counter is wired in).
 func NewConversationHandler(
 	convs *convsvc.Service,
 	users *usersvc.Service,
 	a *auth.Service,
+	unread UnreadByConversationCounter,
 	v *validator.Validate,
 	presign Presigner,
 ) (*ConversationHandler, error) {
@@ -49,7 +65,7 @@ func NewConversationHandler(
 	if v == nil {
 		return nil, errors.New("httpapi: ConversationHandler requires non-nil validator")
 	}
-	return &ConversationHandler{convs: convs, users: users, auth: a, v: v, presign: presign}, nil
+	return &ConversationHandler{convs: convs, users: users, auth: a, unread: unread, v: v, presign: presign}, nil
 }
 
 // Mount attaches every /v1/conversations/* route onto r.
@@ -535,7 +551,27 @@ func (h *ConversationHandler) renderOne(ctx context.Context, callerID uuid.UUID,
 	if err != nil {
 		return ConversationResponse{}, err
 	}
-	return toConversationResponse(conv, callerID, members, usersByID, h.presign), nil
+	counts := h.unreadCounts(ctx, callerID, []uuid.UUID{conv.ID})
+	return toConversationResponse(conv, callerID, members, usersByID, h.presign, counts[conv.ID]), nil
+}
+
+// unreadCounts returns the per-conversation unread count for callerID,
+// keyed by conversation ID. Best-effort: returns nil (→ all zeros) when
+// no counter is wired in or the query fails — never propagates the
+// error so a failed count can't break the conversations list.
+func (h *ConversationHandler) unreadCounts(ctx context.Context, callerID uuid.UUID, convIDs []uuid.UUID) map[uuid.UUID]int64 {
+	if h.unread == nil || len(convIDs) == 0 {
+		return nil
+	}
+	counts, err := h.unread.CountUnreadByConversation(ctx, callerID, convIDs)
+	if err != nil {
+		slog.WarnContext(ctx, "conversation: unread count failed",
+			slog.String("user_id", callerID.String()),
+			slog.Any("err", err),
+		)
+		return nil
+	}
+	return counts
 }
 
 // renderConversationList batch-loads members + their user records for
@@ -578,9 +614,10 @@ func (h *ConversationHandler) renderConversationList(ctx context.Context, caller
 		usersByID[u.ID] = u
 	}
 
+	counts := h.unreadCounts(ctx, callerID, convIDs)
 	out := make([]ConversationResponse, 0, len(convs))
 	for _, c := range convs {
-		out = append(out, toConversationResponse(c, callerID, membersByConv[c.ID], usersByID, h.presign))
+		out = append(out, toConversationResponse(c, callerID, membersByConv[c.ID], usersByID, h.presign, counts[c.ID]))
 	}
 	return out, nil
 }

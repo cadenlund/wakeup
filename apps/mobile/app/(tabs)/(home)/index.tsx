@@ -402,6 +402,7 @@ function RenderedConversationRow({
       lastMessageAt={conversation.last_message_at}
       isMuted={isMuted}
       isPinned={isPinned}
+      unreadCount={conversation.unread_count ?? 0}
       mutedUntil={conversation.muted_until}
       testID={`conversation-${conversation.id}`}
       onPress={() => {

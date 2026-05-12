@@ -22,5 +22,13 @@ export interface InternalHandlerHttpConversationResponse {
   name?: string;
   pinned_at?: string;
   type?: string;
+  /** UnreadCount is the number of messages in this conversation the
+  caller hasn't read yet — same definition as the X-Unread-Total
+  header (excludes the caller's own messages + soft-deleted ones,
+  counts everything after the caller's last_read pointer). Mobile
+  renders the per-row unread badge from this. Best-effort: 0 when
+  the count can't be computed (graceful degradation), so clients
+  should treat it as a hint, not a guarantee. */
+  unread_count?: number;
   updated_at?: string;
 }

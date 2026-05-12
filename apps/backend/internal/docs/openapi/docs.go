@@ -5158,6 +5158,11 @@ const docTemplate = `{
                     "type": "string",
                     "example": "group"
                 },
+                "unread_count": {
+                    "description": "UnreadCount is the number of messages in this conversation the\ncaller hasn't read yet — same definition as the X-Unread-Total\nheader (excludes the caller's own messages + soft-deleted ones,\ncounts everything after the caller's last_read pointer). Mobile\nrenders the per-row unread badge from this. Best-effort: 0 when\nthe count can't be computed (graceful degradation), so clients\nshould treat it as a hint, not a guarantee.",
+                    "type": "integer",
+                    "example": 3
+                },
                 "updated_at": {
                     "type": "string",
                     "example": "2026-05-02T09:35:11.221Z"
