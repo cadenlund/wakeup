@@ -88,13 +88,12 @@ export function ProfileCard() {
 
   return (
     <View className="gap-5 rounded-2xl border border-border bg-card p-5">
-      <View className="items-center">
-        <AvatarPicker
-          avatarUrl={me?.avatar_url}
-          displayName={me?.display_name}
-          testID="settings-avatar"
-        />
-      </View>
+      <AvatarPicker
+        avatarUrl={me?.avatar_url}
+        displayName={me?.display_name}
+        surface="card"
+        testID="settings-avatar"
+      />
 
       <View className="gap-2">
         <Label nativeID="settings-name-label">Display name</Label>
