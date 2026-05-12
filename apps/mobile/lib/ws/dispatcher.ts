@@ -51,6 +51,7 @@ import type {
 import { getActiveConversation } from '@/lib/banner/active-conversation';
 import { getPresenceIntent } from '@/lib/banner/presence-intent';
 import { enqueueBanner, type BannerEvent } from '@/lib/banner/store';
+import { conversationDisplay } from '@/lib/conversation-display';
 import { clearTyping, markTyping } from '@/lib/typing/store';
 import type { WSEnvelope } from '@/lib/ws/client';
 
@@ -204,21 +205,26 @@ export function applyWSEvent(qc: QueryClient, env: WSEnvelope, ctx: DispatchCont
       if (getActiveConversation() === convId || isMuted(conv)) return;
       const messageId = str(d.message_id);
       const body = str(d.body);
-      const sUser = senderUser(conv, str(d.sender_id) ?? '');
-      const sender = displayName(sUser);
+      const sender = displayName(senderUser(conv, str(d.sender_id) ?? ''));
+      // Use the SAME visual identity the chats list shows: a DM is the
+      // peer (name + avatar); a group is its name + photo, or — if it
+      // has neither — the "Ada, Ben and 2 more" preview + the
+      // overlapping-member cluster. The body keeps the sender prefix in
+      // a group so you still see who said it.
+      const disp = conv ? conversationDisplay(conv, ctx.myUserId, new Map()) : undefined;
       const isGroupConv = conv?.type === 'group';
-      const groupName = conv?.name?.trim() || undefined;
       maybeBanner({
         id: messageId ?? `msg:${convId}:${str(d.created_at) ?? ''}`,
-        // DM: "Ada" / the body. Group: "<group name>" / "Ada: <body>"
-        // — so the sender + the message + (for groups) which group all
-        // show. Falls back to "New message" when the conversation
-        // isn't in cache yet.
-        title: (isGroupConv ? groupName : sender) ?? 'New message',
+        title: disp?.title ?? 'New message',
         body: isGroupConv && sender && body ? `${sender}: ${body}` : body,
         route: `/conversations/${convId}`,
-        avatarUrl: sUser?.avatar_url ?? undefined,
-        senderName: sender,
+        avatar: disp
+          ? {
+              avatarUrl: disp.avatarUrl,
+              fallbackInitial: disp.fallbackInitial,
+              stackedMembers: disp.stackedMembers,
+            }
+          : undefined,
       });
       return;
     }

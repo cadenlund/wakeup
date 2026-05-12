@@ -23,8 +23,9 @@ import { ChevronRight } from 'lucide-react-native';
 import Toast, { type BaseToastProps, type ToastConfigParams } from 'react-native-toast-message';
 import { Pressable, View } from 'react-native';
 
-import { Avatar } from '@/components/ui/avatar';
+import { Avatar, StackedAvatars } from '@/components/ui/avatar';
 import { Text } from '@/components/ui/text';
+import type { ConversationAvatar } from '@/lib/conversation-display';
 import { useThemeColor } from '@/lib/theme/use-theme-color';
 
 const ACCENT: Record<'error' | 'success' | 'info', string> = {
@@ -63,7 +64,14 @@ function PassiveToast({
   );
 }
 
-type EventToastProps = { avatarUrl?: string | null; fallbackName?: string };
+// A DM peer / named group → a single avatar; a group with no photo →
+// the overlapping-member cluster (same as the chats list).
+function ConvAvatar({ a }: { a?: ConversationAvatar }) {
+  if (!a?.avatarUrl && (a?.stackedMembers?.length ?? 0) > 0) {
+    return <StackedAvatars members={a!.stackedMembers!} size={36} />;
+  }
+  return <Avatar source={a?.avatarUrl} fallbackName={a?.fallbackInitial} size={36} />;
+}
 
 function EventToast({
   text1,
@@ -74,12 +82,12 @@ function EventToast({
   text1?: string;
   text2?: string;
   onPress?: () => void;
-  extra?: EventToastProps;
+  extra?: ConversationAvatar;
 }) {
   const mutedFg = useThemeColor('muted-foreground');
   const card = (
     <View className={`${CARD} border border-border`}>
-      <Avatar source={extra?.avatarUrl} fallbackName={extra?.fallbackName} size={36} />
+      <ConvAvatar a={extra} />
       <View className="flex-1 gap-0.5">
         {text1 ? (
           <Text numberOfLines={1} className="text-sm font-semibold text-foreground">
@@ -118,7 +126,7 @@ export const toastConfig = {
   info: (props: BaseToastProps) => (
     <PassiveToast variant="info" text1={props.text1} text2={props.text2} />
   ),
-  event: (props: ToastConfigParams<EventToastProps>) => (
+  event: (props: ToastConfigParams<ConversationAvatar>) => (
     <EventToast
       text1={props.text1}
       text2={props.text2}

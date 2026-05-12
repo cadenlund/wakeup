@@ -259,7 +259,7 @@ describe('applyWSEvent — deliberate no-ops', () => {
 });
 
 describe('applyWSEvent — event banners (§4.13)', () => {
-  test('message.new (DM) banners "<sender>" / "<body>" with the sender avatar', () => {
+  test('message.new (DM) banners the peer name / body + the peer avatar', () => {
     const qc = newClient();
     qc.setQueryData<ConversationList>(conversationsKey, {
       data: [
@@ -277,13 +277,12 @@ describe('applyWSEvent — event banners (§4.13)', () => {
         title: 'Ada',
         body: 'hello there',
         route: `/conversations/${CONV}`,
-        avatarUrl: 'https://a/ada.png',
-        senderName: 'Ada',
+        avatar: { avatarUrl: 'https://a/ada.png', fallbackInitial: 'Ada' },
       },
     ]);
   });
 
-  test('message.new (group) banners "<group>" / "<sender>: <body>"', () => {
+  test('message.new (named group) banners the group name / "<sender>: <body>"', () => {
     const qc = newClient();
     qc.setQueryData<ConversationList>(conversationsKey, {
       data: [
@@ -296,14 +295,39 @@ describe('applyWSEvent — event banners (§4.13)', () => {
       ],
     });
     applyWSEvent(qc, messageEvent('message.new'));
-    expect(bannerQueue()).toEqual([
-      {
-        id: 'm1',
-        title: 'Roommates',
-        body: 'Ada: hello there',
-        route: `/conversations/${CONV}`,
-        senderName: 'Ada',
-      },
+    expect(bannerQueue()[0]).toMatchObject({
+      id: 'm1',
+      title: 'Roommates',
+      body: 'Ada: hello there',
+      route: `/conversations/${CONV}`,
+      avatar: { fallbackInitial: 'Roommates' },
+    });
+    expect(bannerQueue()[0].avatar?.stackedMembers?.map((m) => m.fallbackName)).toEqual(['Ada']);
+  });
+
+  test('message.new (unnamed group) banners the member preview + stacked avatars', () => {
+    const qc = newClient();
+    qc.setQueryData<ConversationList>(conversationsKey, {
+      data: [
+        {
+          id: CONV,
+          type: 'group',
+          members: [
+            { user: { id: 'u9', display_name: 'Ada' } },
+            { user: { id: 'u8', display_name: 'Ben' } },
+          ],
+        },
+      ],
+    });
+    applyWSEvent(qc, messageEvent('message.new'));
+    expect(bannerQueue()[0]).toMatchObject({
+      title: 'Ada, Ben',
+      body: 'Ada: hello there',
+      route: `/conversations/${CONV}`,
+    });
+    expect(bannerQueue()[0].avatar?.stackedMembers?.map((m) => m.fallbackName)).toEqual([
+      'Ada',
+      'Ben',
     ]);
   });
 
