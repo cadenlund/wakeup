@@ -16,6 +16,8 @@
 //     `routeForNotificationData` → `router.push`. Also handles the
 //     cold-start case (`getLastNotificationResponseAsync`) where the
 //     app was launched *from* a notification.
+//   - App-icon badge: mirrors the WS `heartbeat` ack's `unread_total`
+//     onto the launcher icon (§7.5); clears it on logout.
 //
 // Logout deregistration is NOT here — the DELETE needs a live session
 // cookie, so it runs from the logout mutation's onMutate
@@ -26,11 +28,13 @@ import * as React from 'react';
 import { AppState } from 'react-native';
 
 import { useAuthState } from '@/components/auth-gate';
+import { setAppBadgeCount } from '@/lib/push/badge';
 import {
   registerForPushNotificationsAsync,
   setupAndroidNotificationChannelAsync,
 } from '@/lib/push/register';
 import { routeForNotificationData } from '@/lib/push/route';
+import { onWSMessage } from '@/lib/ws/client';
 
 // Set once at module load — independent of auth / mount timing.
 // handleNotification is only invoked for notifications that arrive
@@ -66,12 +70,28 @@ export function usePushNotifications(): void {
 
   // Register the token when authenticated. `registerForPush…` is
   // idempotent (skips the POST when the cached token is unchanged), so
-  // re-running on auth refetch / remount is harmless.
+  // re-running on auth refetch / remount is harmless. On logout, clear
+  // the app-icon badge (no session → no unread count to show).
   const authedRef = React.useRef(isAuthenticated);
   authedRef.current = isAuthenticated;
   React.useEffect(() => {
     if (isAuthenticated) void registerForPushNotificationsAsync();
+    else void setAppBadgeCount(0);
   }, [isAuthenticated]);
+
+  // Mirror the WS heartbeat's `unread_total` onto the app-icon badge.
+  // The client pings on connect / every interval / after a MarkRead,
+  // so this stays reasonably fresh; a 0/absent total clears the badge.
+  React.useEffect(
+    () =>
+      onWSMessage((env) => {
+        if (env.type !== 'heartbeat') return;
+        const data = env.data as { unread_total?: unknown } | null | undefined;
+        const total = typeof data?.unread_total === 'number' ? data.unread_total : 0;
+        void setAppBadgeCount(total);
+      }),
+    []
+  );
 
   // Re-check on foreground (a user may grant permission in Settings
   // while the app is backgrounded, or the OS may rotate the token).
